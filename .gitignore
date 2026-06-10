@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+.pytest_cache/
+.ruff_cache/
+*.egg
+
+# Node / Angular
+node_modules/
+dist/
+.angular/
+*.js.map
+
+# Environment — NEVER commit these
+.env
+.env.*
+**/environments/production*.json
+**/environments/staging*.json
+**/*credentials*
+**/*secrets*
+**/*.key
+**/*.pem
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

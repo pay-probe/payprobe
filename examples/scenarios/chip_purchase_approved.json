@@ -1,0 +1,55 @@
+{
+  "id": "example-001",
+  "name": "chip_purchase_approved",
+  "description": "Standard EMV chip card purchase — happy path",
+  "tags": ["regression", "emv", "happy-path", "example"],
+  "stop_on_failure": true,
+  "timeout_ms": 10000,
+  "steps": [
+    {
+      "id": "step_001",
+      "target": "terminal_sim",
+      "action": "insert_card",
+      "payload": { "card_profile": "visa_credit_standard" },
+      "assertions": [
+        { "field": "status", "operator": "eq", "expected": "inserted" }
+      ]
+    },
+    {
+      "id": "step_002",
+      "target": "terminal_sim",
+      "action": "enter_pin",
+      "payload": { "pin": "1234" },
+      "assertions": [
+        { "field": "status", "operator": "eq", "expected": "accepted" }
+      ]
+    },
+    {
+      "id": "step_003",
+      "target": "xpay",
+      "action": "send_auth_request",
+      "payload": { "amount": 10000, "currency": "GEL", "card_profile": "visa_credit_standard" },
+      "assertions": [
+        { "field": "response_code", "operator": "eq",      "expected": "00" },
+        { "field": "auth_code",     "operator": "present"                    },
+        { "field": "duration_ms",   "operator": "lt",      "expected": 3000  }
+      ]
+    },
+    {
+      "id": "step_004",
+      "target": "db_probe_core",
+      "action": "query_transaction",
+      "payload": { "rrn": "${step_003.response.rrn}" },
+      "assertions": [
+        { "field": "status", "operator": "eq", "expected": "APPROVED" }
+      ]
+    },
+    {
+      "id": "step_005",
+      "target": "terminal_sim",
+      "action": "remove_card",
+      "payload": {},
+      "assertions": []
+    }
+  ]
+}

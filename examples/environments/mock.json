@@ -1,0 +1,20 @@
+{
+  "name": "mock",
+  "description": "Full mock environment — no real systems required. Use for local dev and CI.",
+  "connection_budget": {
+    "total": 1000,
+    "adapters": {
+      "xpay": 400, "terminal_sim": 300,
+      "switch": 150, "core_banking": 100,
+      "hsm": 50
+    }
+  },
+  "adapters": {
+    "xpay":         { "mock": true, "latency_ms": 10 },
+    "terminal_sim": { "mock": true, "latency_ms": 5  },
+    "switch":       { "mock": true, "latency_ms": 8  },
+    "core_banking": { "mock": true, "latency_ms": 15 },
+    "hsm":          { "mock": true, "latency_ms": 3  },
+    "db_probe_core":{ "mock": true, "latency_ms": 5  }
+  }
+}

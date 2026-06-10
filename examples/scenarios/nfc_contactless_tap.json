@@ -1,0 +1,30 @@
+{
+  "id": "example-002",
+  "name": "nfc_contactless_tap",
+  "description": "NFC contactless tap — low value, no PIN required",
+  "tags": ["regression", "nfc", "contactless", "example"],
+  "stop_on_failure": true,
+  "timeout_ms": 5000,
+  "steps": [
+    {
+      "id": "step_001",
+      "target": "terminal_sim",
+      "action": "tap_nfc",
+      "payload": { "card_profile": "mastercard_contactless", "amount": 2000 },
+      "assertions": [
+        { "field": "status", "operator": "eq", "expected": "tapped" }
+      ]
+    },
+    {
+      "id": "step_002",
+      "target": "xpay",
+      "action": "send_auth_request",
+      "payload": { "amount": 2000, "currency": "GEL", "entry_mode": "contactless" },
+      "assertions": [
+        { "field": "response_code", "operator": "eq", "expected": "00" },
+        { "field": "auth_code",     "operator": "present" },
+        { "field": "duration_ms",   "operator": "lt", "expected": 1500 }
+      ]
+    }
+  ]
+}

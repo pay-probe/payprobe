@@ -1,0 +1,58 @@
+version: "3.9"
+
+# PayProbe — Mock / Local Development
+# All adapters use in-memory mocks. No real payment hardware needed.
+# Run: docker compose -f infra/docker/docker-compose.mock.yml up
+
+services:
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ../nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+
+  auth-service:
+    build: ../../packages/auth-service
+    environment:
+      - DATABASE_URL=postgresql://payprobe:payprobe@postgres:5432/payprobe
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev-secret-not-for-production
+
+  scenario-service:
+    build: ../../packages/scenario-service
+    environment:
+      - DATABASE_URL=postgresql://payprobe:payprobe@postgres:5432/payprobe
+
+  orchestrator:
+    build: ../../packages/orchestrator
+    environment:
+      - DATABASE_URL=postgresql://payprobe:payprobe@postgres:5432/payprobe
+      - REDIS_URL=redis://redis:6379
+      - DEFAULT_ENV=mock
+
+  report-service:
+    build: ../../packages/report-service
+    environment:
+      - DATABASE_URL=postgresql://payprobe:payprobe@postgres:5432/payprobe
+
+  worker:
+    build: ../../packages/worker
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - ENV_CONFIG_PATH=/app/config/mock.json
+    volumes:
+      - ../../examples/environments/mock.json:/app/config/mock.json:ro
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=payprobe
+      - POSTGRES_USER=payprobe
+      - POSTGRES_PASSWORD=payprobe
+    volumes:
+      - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  redis:
+    image: redis:7-alpine

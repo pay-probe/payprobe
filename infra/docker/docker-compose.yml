@@ -1,0 +1,94 @@
+version: "3.9"
+
+# PayProbe — Production Docker Compose
+# For mock/dev environment use docker-compose.mock.yml
+
+services:
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./portal-dist:/usr/share/nginx/html:ro
+    depends_on: [orchestrator, scenario-service, report-service, auth-service]
+    restart: unless-stopped
+
+  auth-service:
+    build: ../../packages/auth-service
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - JWT_SECRET=${JWT_SECRET}
+    restart: unless-stopped
+
+  scenario-service:
+    build: ../../packages/scenario-service
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    restart: unless-stopped
+
+  orchestrator:
+    build: ../../packages/orchestrator
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - WORKER_IMAGE=payprobe/worker:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  report-service:
+    build: ../../packages/report-service
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    restart: unless-stopped
+
+  helper-xpay:
+    build: ../../packages/helpers/xpay-probe
+    environment:
+      - XPAY_BASE_URL=${XPAY_BASE_URL}
+      - XPAY_API_KEY=${XPAY_API_KEY}
+    restart: unless-stopped
+
+  helper-hsm:
+    build: ../../packages/helpers/hsm-probe
+    volumes:
+      - ${PKCS11_LIB_PATH}:/usr/lib/pkcs11.so:ro
+    restart: unless-stopped
+
+  helper-log:
+    build: ../../packages/helpers/log-harvester
+    volumes:
+      - ${SYSTEM_LOG_PATH}:/logs:ro
+    restart: unless-stopped
+
+  helper-db-probe:
+    build: ../../packages/helpers/db-probe
+    environment:
+      - DB_CONFIGS=${DB_PROBE_CONFIGS}
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=payprobe
+      - POSTGRES_USER=payprobe
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
