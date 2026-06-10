@@ -1,0 +1,115 @@
+<div class="dashboard">
+  <!-- Live status bar -->
+  <div class="status-bar">
+    <span class="status-bar__dot"></span>
+    <span class="status-bar__log">{{ tickerLine() }}</span>
+    <span class="status-bar__clock">{{ now() | date: "HH:mm:ss" }}</span>
+  </div>
+
+  <header class="dashboard__header">
+    <div>
+      <h1>Dashboard</h1>
+      <p class="subtitle">{{ healthSummary() }}</p>
+    </div>
+    <div class="quick-actions">
+      <a routerLink="/run-monitor" class="btn btn--primary">▶ Start Run</a>
+      <a routerLink="/environments" class="btn">Terminals</a>
+      <a routerLink="/reports" class="btn">Reports</a>
+    </div>
+  </header>
+
+  <!-- Stat cards -->
+  <section class="stats">
+    @for (stat of stats(); track stat.label) {
+      <div class="stat-card" [class.stat-card--accent]="stat.accent">
+        <span class="stat-card__label">{{ stat.label }}</span>
+        <span class="stat-card__value">{{ stat.value }}</span>
+        <span class="stat-card__hint">{{ stat.hint }}</span>
+      </div>
+    }
+  </section>
+
+  <!-- Live run -->
+  @if (liveRun(); as run) {
+    <section class="live-run">
+      <div class="live-run__head">
+        <span class="badge badge--running">RUNNING</span>
+        <span class="live-run__id">{{ run.id }}</span>
+        <span class="live-run__suite">{{ run.suite }}</span>
+        <span class="live-run__terminal">{{ run.terminal }}</span>
+        <span class="live-run__pct">{{ run.progress | number: "1.0-0" }}%</span>
+      </div>
+      <div class="progress">
+        <div class="progress__fill" [style.width.%]="run.progress"></div>
+      </div>
+      <span class="live-run__step">{{ run.step }}</span>
+    </section>
+  }
+
+  <div class="dashboard__grid">
+    <!-- Recent runs -->
+    <section class="panel">
+      <div class="panel__head">
+        <h2>Recent runs</h2>
+        <a routerLink="/reports" class="panel__link">View all →</a>
+      </div>
+      <table class="runs-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Suite</th>
+            <th>Terminal</th>
+            <th>Status</th>
+            <th>Pass rate</th>
+            <th>Duration</th>
+            <th>Started</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (run of recentRuns(); track run.id) {
+            <tr>
+              <td class="mono">{{ run.id }}</td>
+              <td>{{ run.suite }}</td>
+              <td class="mono muted">{{ run.terminal }}</td>
+              <td>
+                <span class="badge" [class.badge--pass]="run.status === 'passed'"
+                      [class.badge--fail]="run.status === 'failed'">
+                  {{ run.status === "passed" ? "PASS" : "FAIL" }}
+                </span>
+              </td>
+              <td>
+                <div class="rate">
+                  <div class="rate__bar">
+                    <div class="rate__fill" [class.rate__fill--low]="passRate(run) < 90"
+                         [style.width.%]="passRate(run)"></div>
+                  </div>
+                  <span class="mono">{{ run.passed }}/{{ run.total }}</span>
+                </div>
+              </td>
+              <td class="mono">{{ duration(run.durationSec) }}</td>
+              <td class="muted">{{ timeAgo(run.startedAt) }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </section>
+
+    <!-- System health -->
+    <section class="panel">
+      <div class="panel__head">
+        <h2>System health</h2>
+      </div>
+      <ul class="health">
+        @for (svc of services(); track svc.name) {
+          <li class="health__row">
+            <span class="health__dot" [class.health__dot--degraded]="svc.status === 'degraded'"
+                  [class.health__dot--offline]="svc.status === 'offline'"></span>
+            <span class="health__name">{{ svc.name }}</span>
+            <span class="health__status">{{ svc.status }}</span>
+            <span class="health__latency mono">{{ svc.latencyMs }}ms</span>
+          </li>
+        }
+      </ul>
+    </section>
+  </div>
+</div>

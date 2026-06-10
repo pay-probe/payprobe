@@ -1,0 +1,425 @@
+$bg: #0d1117;
+$card: #161b22;
+$border: #21262d;
+$accent: #00d4aa;
+$text: #f0f6ff;
+$muted: #8b949e;
+$fail: #f85149;
+$warn: #d29922;
+
+:host {
+  display: block;
+  min-height: 100vh;
+  background: $bg;
+  color: $text;
+  font-family: "Inter", sans-serif;
+}
+
+.mono {
+  font-family: "JetBrains Mono", monospace;
+}
+
+.muted {
+  color: $muted;
+}
+
+.dashboard {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px 48px;
+}
+
+/* ---- Live status bar ---- */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #010409;
+  border: 1px solid $border;
+  border-radius: 0 0 8px 8px;
+  padding: 8px 16px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: $muted;
+
+  &__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: $accent;
+    animation: pulse 1.6s infinite;
+    flex-shrink: 0;
+  }
+
+  &__log {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #c9d1d9;
+  }
+
+  &__clock {
+    color: $accent;
+  }
+}
+
+/* ---- Header ---- */
+.dashboard__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin: 32px 0 24px;
+
+  h1 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 600;
+  }
+
+  .subtitle {
+    margin: 4px 0 0;
+    color: $muted;
+    font-size: 13px;
+  }
+}
+
+.quick-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  display: inline-block;
+  padding: 8px 16px;
+  border: 1px solid $border;
+  border-radius: 6px;
+  background: $card;
+  color: $text;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+
+  &:hover {
+    border-color: $muted;
+  }
+
+  &--primary {
+    background: $accent;
+    border-color: $accent;
+    color: #04211b;
+
+    &:hover {
+      background: #1fe4bd;
+      border-color: #1fe4bd;
+    }
+  }
+}
+
+/* ---- Stat cards ---- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: $card;
+  border: 1px solid $border;
+  border-radius: 8px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  &__label {
+    font-size: 12px;
+    color: $muted;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  &__value {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 28px;
+    font-weight: 700;
+  }
+
+  &__hint {
+    font-size: 12px;
+    color: $muted;
+  }
+
+  &--accent &__value {
+    color: $accent;
+  }
+}
+
+/* ---- Live run ---- */
+.live-run {
+  background: $card;
+  border: 1px solid rgba($accent, 0.35);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  &__id {
+    font-family: "JetBrains Mono", monospace;
+    color: $accent;
+    font-size: 13px;
+  }
+
+  &__suite {
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  &__terminal {
+    font-family: "JetBrains Mono", monospace;
+    color: $muted;
+    font-size: 12px;
+  }
+
+  &__pct {
+    margin-left: auto;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px;
+    color: $accent;
+  }
+
+  &__step {
+    display: block;
+    margin-top: 8px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    color: $muted;
+  }
+}
+
+.progress {
+  height: 6px;
+  background: $border;
+  border-radius: 3px;
+  overflow: hidden;
+
+  &__fill {
+    height: 100%;
+    background: $accent;
+    border-radius: 3px;
+    box-shadow: 0 0 8px rgba($accent, 0.6);
+    transition: width 0.8s ease;
+  }
+}
+
+/* ---- Grid / panels ---- */
+.dashboard__grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.panel {
+  background: $card;
+  border: 1px solid $border;
+  border-radius: 8px;
+  padding: 16px 20px;
+
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+
+    h2 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+    }
+  }
+
+  &__link {
+    font-size: 12px;
+    color: $accent;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+/* ---- Runs table ---- */
+.runs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+
+  th {
+    text-align: left;
+    padding: 8px 10px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: $muted;
+    border-bottom: 1px solid $border;
+    font-weight: 500;
+  }
+
+  td {
+    padding: 10px;
+    border-bottom: 1px solid $border;
+    vertical-align: middle;
+  }
+
+  tbody tr {
+    transition: background 0.1s;
+
+    &:hover {
+      background: rgba($accent, 0.04);
+    }
+
+    &:last-child td {
+      border-bottom: none;
+    }
+  }
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+
+  &--pass {
+    background: rgba($accent, 0.15);
+    color: $accent;
+  }
+
+  &--fail {
+    background: rgba($fail, 0.15);
+    color: $fail;
+  }
+
+  &--running {
+    background: rgba($warn, 0.15);
+    color: $warn;
+    animation: pulse 1.6s infinite;
+  }
+}
+
+.rate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  &__bar {
+    width: 56px;
+    height: 5px;
+    background: $border;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  &__fill {
+    height: 100%;
+    background: $accent;
+    border-radius: 3px;
+
+    &--low {
+      background: $fail;
+    }
+  }
+
+  span {
+    font-size: 12px;
+    color: $muted;
+  }
+}
+
+/* ---- System health ---- */
+.health {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid $border;
+    font-size: 13px;
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  &__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: $accent;
+    flex-shrink: 0;
+
+    &--degraded {
+      background: $warn;
+    }
+
+    &--offline {
+      background: $fail;
+    }
+  }
+
+  &__name {
+    flex: 1;
+    font-weight: 500;
+  }
+
+  &__status {
+    font-size: 11px;
+    color: $muted;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  &__latency {
+    font-size: 12px;
+    color: $muted;
+    width: 52px;
+    text-align: right;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (max-width: 960px) {
+  .stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .dashboard__grid {
+    grid-template-columns: 1fr;
+  }
+}
