@@ -1,0 +1,359 @@
+<div class="sf">
+  <pp-page-header>
+    <div class="sf__heading" subtitle>
+      <span class="muted"
+        >Pre-wired chains offered in the scenario editor palette</span
+      >
+    </div>
+    <input
+      #importInput
+      type="file"
+      accept=".json,application/json"
+      hidden
+      (change)="onImportFile($event)"
+    />
+    <button class="btn" [disabled]="importing()" (click)="importInput.click()">
+      {{ importing() ? "Importing…" : "Import" }}
+    </button>
+    <button class="btn btn--primary" (click)="newFlow()">+ New flow</button>
+  </pp-page-header>
+
+  <div class="sf__body" [class.sf__body--empty]="!draft()">
+    <!-- list -->
+    <aside class="sf__list">
+      @if (loading()) {
+        <p class="muted empty">Loading…</p>
+      } @else {
+        @for (f of flows(); track f.id) {
+          <button class="row" [class.active]="isActive(f)" (click)="edit(f)">
+            <span class="row__ico"><pp-icon name="flow" [size]="16" /></span>
+            <span class="row__main">
+              <span class="row__name">
+                {{ f.label }}
+                @if (f.builtin) {
+                  <span class="tag">built-in</span>
+                }
+              </span>
+              <span class="row__sub"
+                >{{ f.steps.length }} step{{
+                  f.steps.length === 1 ? "" : "s"
+                }}</span
+              >
+            </span>
+          </button>
+        } @empty {
+          <p class="muted empty">No flows yet.</p>
+        }
+      }
+    </aside>
+
+    <!-- editor -->
+    <section class="sf__editor">
+      @if (draft(); as d) {
+        <div class="form">
+          @if (d.builtin) {
+            <p class="note">
+              Editing a built-in flow — your changes override the default; you
+              can reset it later.
+            </p>
+          }
+          <div class="grid2">
+            <label class="fld">
+              <span>Label</span>
+              <input
+                type="text"
+                [(ngModel)]="d.label"
+                (ngModelChange)="markDirty()"
+                placeholder="e.g. ISO 8583 purchase (0200 → parse)"
+              />
+            </label>
+            <label class="fld">
+              <span>Description</span>
+              <input
+                type="text"
+                [(ngModel)]="d.description"
+                (ngModelChange)="markDirty()"
+              />
+            </label>
+          </div>
+
+          <div class="chain">
+            @for (s of d.steps; track $index; let si = $index) {
+              <div
+                class="node"
+                [class.node--bad]="issuesFor(si).length"
+                draggable="true"
+                (dragstart)="onDragStart($index)"
+                (dragover)="$event.preventDefault()"
+                (drop)="onDrop($index)"
+              >
+                @if (si > 0) {
+                  <span class="node__link"></span>
+                }
+
+                <div class="node__head">
+                  <span class="node__grip" title="Drag to reorder">⋮⋮</span>
+                  <span class="node__n">{{ si + 1 }}</span>
+
+                  <label class="pick">
+                    <span>target</span>
+                    <select
+                      [(ngModel)]="s.target"
+                      (ngModelChange)="onTargetChange(s)"
+                    >
+                      <option value="" disabled>— target —</option>
+                      @for (t of catalog(); track t.target) {
+                        <option [value]="t.target">{{ t.label }}</option>
+                      }
+                    </select>
+                  </label>
+
+                  <label class="pick">
+                    <span>action</span>
+                    <select
+                      [(ngModel)]="s.action"
+                      (ngModelChange)="onActionChange(s)"
+                      [disabled]="!s.target"
+                    >
+                      <option value="" disabled>— action —</option>
+                      @for (a of actionsFor(s.target); track a.name) {
+                        <option [value]="a.name">{{ a.label }}</option>
+                      }
+                    </select>
+                  </label>
+
+                  <label class="pick pick--ref">
+                    <span>ref</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="s.ref"
+                      (ngModelChange)="markDirty()"
+                      placeholder="ref"
+                    />
+                  </label>
+
+                  <span class="node__sp"></span>
+                  <button
+                    class="iconbtn iconbtn--sm"
+                    title="Move up"
+                    (click)="moveStep(si, -1)"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    class="iconbtn iconbtn--sm"
+                    title="Move down"
+                    (click)="moveStep(si, 1)"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    class="iconbtn iconbtn--sm"
+                    title="Remove"
+                    (click)="removeStep(si)"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                @if (issuesFor(si).length) {
+                  <ul class="node__issues">
+                    @for (iss of issuesFor(si); track iss.text) {
+                      <li
+                        [class.err]="iss.level === 'error'"
+                        [class.warn]="iss.level === 'warn'"
+                      >
+                        {{ iss.text }}
+                      </li>
+                    }
+                  </ul>
+                }
+
+                <datalist [id]="'refs-' + si">
+                  @for (r of refSuggestions(si); track r) {
+                    <option [value]="r"></option>
+                  }
+                </datalist>
+
+                <div class="kvs">
+                  <div class="kv">
+                    <div class="kv__head">
+                      <span>Config overrides</span>
+                      <button class="btn btn--xs" (click)="addRow(s.config)">
+                        + row
+                      </button>
+                    </div>
+                    @for (row of s.config; track $index) {
+                      <div class="kv__row">
+                        <input
+                          type="text"
+                          class="kv__k"
+                          [(ngModel)]="row.key"
+                          (ngModelChange)="markDirty()"
+                          placeholder="key"
+                        />
+                        <input
+                          type="text"
+                          class="kv__v"
+                          [(ngModel)]="row.value"
+                          (ngModelChange)="markDirty()"
+                          [attr.list]="'refs-' + si"
+                          placeholder="value or ${ref.response.x}"
+                        />
+                        <button
+                          class="iconbtn iconbtn--sm"
+                          title="Remove"
+                          (click)="removeRow(s.config, $index)"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    } @empty {
+                      <p class="kv__none muted">
+                        No overrides — uses the step's defaults.
+                      </p>
+                    }
+                  </div>
+
+                  <div class="kv">
+                    <div class="kv__head">
+                      <span>Input overrides</span>
+                      <button class="btn btn--xs" (click)="addRow(s.inputs)">
+                        + row
+                      </button>
+                    </div>
+                    @for (row of s.inputs; track $index) {
+                      <div class="kv__row">
+                        <input
+                          type="text"
+                          class="kv__k"
+                          [(ngModel)]="row.key"
+                          (ngModelChange)="markDirty()"
+                          placeholder="input name"
+                        />
+                        <input
+                          type="text"
+                          class="kv__v"
+                          [(ngModel)]="row.value"
+                          (ngModelChange)="markDirty()"
+                          [attr.list]="'refs-' + si"
+                          placeholder="value or ${ref.response.x}"
+                        />
+                        <button
+                          class="iconbtn iconbtn--sm"
+                          title="Remove"
+                          (click)="removeRow(s.inputs, $index)"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    } @empty {
+                      <p class="kv__none muted">No input overrides.</p>
+                    }
+                  </div>
+                </div>
+              </div>
+            } @empty {
+              <div class="chain__empty">
+                <pp-icon name="flow" [size]="22" />
+                <p class="muted">
+                  No steps yet — add the first step of the chain.
+                </p>
+              </div>
+            }
+
+            <button class="btn add-step" (click)="addStep()">+ Add step</button>
+          </div>
+
+          <div class="actions">
+            <button
+              class="btn btn--primary"
+              (click)="save()"
+              [disabled]="!dirty() || hasErrors()"
+            >
+              Save
+            </button>
+            <button class="btn" (click)="cancel()">Cancel</button>
+            @if (originalId()) {
+              <button class="btn btn--danger" (click)="removeCurrent()">
+                {{ d.builtin ? "Reset to default" : "Delete" }}
+              </button>
+            }
+          </div>
+        </div>
+      } @else {
+        <div class="placeholder">
+          <pp-icon name="flow" [size]="28" />
+          <p>Select a flow to edit, or create a new one.</p>
+        </div>
+      }
+    </section>
+
+    <!-- live preview -->
+    @if (draft(); as d) {
+      <aside class="sf__preview">
+        <div class="pv__head">Preview</div>
+        <div class="pv__body">
+          <div class="pv__title">{{ d.label || "(untitled flow)" }}</div>
+          @if (d.description) {
+            <div class="pv__desc">{{ d.description }}</div>
+          }
+
+          @if (d.steps.length) {
+            <ol class="pv__chain">
+              @for (s of d.steps; track $index) {
+                <li class="pv__step">
+                  <span class="pv__ref">{{ s.ref || "?" }}</span>
+                  <span class="pv__call">
+                    {{ s.target ? targetLabel(s.target) : "?" }}
+                    <span class="pv__arrow">→</span>
+                    {{ s.action ? actionLabel(s.target, s.action) : "?" }}
+                  </span>
+                  @if (s.config.length || s.inputs.length) {
+                    <span class="pv__keys">
+                      @for (row of s.config; track $index) {
+                        @if (row.key) {
+                          <code>{{ row.key }}</code>
+                        }
+                      }
+                      @for (row of s.inputs; track $index) {
+                        @if (row.key) {
+                          <code class="in">{{ row.key }}</code>
+                        }
+                      }
+                    </span>
+                  }
+                </li>
+              }
+            </ol>
+            <p class="pv__note muted">
+              Inserted top-to-bottom and auto-wired into a chain on the canvas.
+            </p>
+          } @else {
+            <p class="muted">Add steps to see the chain.</p>
+          }
+
+          @if (issues().length) {
+            <div class="pv__issues">
+              <div class="pv__issues-h">
+                {{ hasErrors() ? "Fix before saving" : "Heads up" }}
+              </div>
+              <ul>
+                @for (iss of issues(); track iss.index + iss.text) {
+                  <li
+                    [class.err]="iss.level === 'error'"
+                    [class.warn]="iss.level === 'warn'"
+                  >
+                    <b>Step {{ iss.index + 1 }}:</b> {{ iss.text }}
+                  </li>
+                }
+              </ul>
+            </div>
+          } @else {
+            <div class="pv__ok">✓ Ready to save</div>
+          }
+        </div>
+      </aside>
+    }
+  </div>
+</div>

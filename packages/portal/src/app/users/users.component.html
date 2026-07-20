@@ -1,0 +1,129 @@
+<div class="usr">
+  <pp-page-header>
+    <div class="usr__heading" subtitle>
+      <span class="muted"
+        >Manage accounts, role assignments and project scope.</span
+      >
+    </div>
+    <button class="btn btn--primary" (click)="newUser()">+ New user</button>
+  </pp-page-header>
+
+  <div class="usr__body">
+    <div class="usr__list">
+      @if (loading()) {
+        <p class="muted">Loading…</p>
+      } @else if (users().length === 0) {
+        <p class="muted empty">No users.</p>
+      } @else {
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Roles</th>
+              <th>Projects</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (u of users(); track u.username) {
+              <tr
+                [class.sel]="
+                  draft()?.username === u.username && !draft()?.isNew
+                "
+              >
+                <td>
+                  {{ u.username }}
+                  @if (isSelf(u.username)) {
+                    <span class="pill">you</span>
+                  }
+                </td>
+                <td>
+                  @for (r of u.roles; track r) {
+                    <span class="tag" [class.admin]="r === 'admin'">{{
+                      r
+                    }}</span>
+                  }
+                </td>
+                <td class="mono muted">
+                  {{ u.project_ids.join(", ") || "—" }}
+                </td>
+                <td class="right">
+                  <button class="btn btn--sm" (click)="edit(u)">Edit</button>
+                  <button
+                    class="iconbtn danger"
+                    (click)="remove(u)"
+                    title="Delete"
+                  >
+                    🗑
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </div>
+
+    @if (draft(); as d) {
+      <div class="usr__editor">
+        <h2>{{ d.isNew ? "New user" : "Edit “" + d.username + "”" }}</h2>
+
+        <label class="field">
+          <span>Username</span>
+          <input
+            [(ngModel)]="d.username"
+            [disabled]="!d.isNew"
+            placeholder="alice"
+          />
+        </label>
+
+        <div class="field">
+          <span>Roles</span>
+          <div class="roles">
+            @for (r of knownRoles; track r) {
+              <label class="chk">
+                <input
+                  type="checkbox"
+                  [checked]="d.roles.includes(r)"
+                  (change)="toggleRole(r)"
+                />
+                <span>{{ r }}</span>
+              </label>
+            }
+          </div>
+        </div>
+
+        <label class="field">
+          <span
+            >Project IDs
+            <span class="muted">(comma-separated; * = all)</span></span
+          >
+          <input
+            [(ngModel)]="d.project_idsText"
+            class="mono"
+            placeholder="proj-1, proj-2"
+          />
+        </label>
+
+        <label class="field">
+          <span>
+            Password
+            @if (!d.isNew) {
+              <span class="muted">— leave blank to keep current</span>
+            }
+          </span>
+          <input
+            type="password"
+            [(ngModel)]="d.password"
+            autocomplete="new-password"
+          />
+        </label>
+
+        <div class="actions">
+          <button class="btn btn--primary" (click)="save()">Save</button>
+          <button class="btn" (click)="draft.set(null)">Cancel</button>
+        </div>
+      </div>
+    }
+  </div>
+</div>

@@ -1,0 +1,494 @@
+<div class="page">
+  <pp-page-header>
+    <div subtitle>
+      <!-- breadcrumb: projects > project > set -->
+      <nav class="crumbs">
+        <button
+          class="crumb"
+          [class.crumb--active]="stage() === 'projects'"
+          (click)="backToProjects()"
+        >
+          Projects
+        </button>
+        @if (stage() !== "projects") {
+          <span class="crumb__sep">›</span>
+          <button
+            class="crumb"
+            [class.crumb--active]="stage() === 'sets'"
+            (click)="backToSets()"
+          >
+            {{ selectedProject()?.name ?? "Project" }}
+          </button>
+        }
+        @if (stage() === "scenarios") {
+          <span class="crumb__sep">›</span>
+          <span class="crumb crumb--active">{{ currentSetName() }}</span>
+        }
+      </nav>
+    </div>
+
+    <!-- Global search -->
+    <div class="search">
+      <input
+        class="search__input"
+        type="search"
+        placeholder="Search projects, sets, test cases…"
+        [ngModel]="searchText"
+        (ngModelChange)="onSearchInput($event)"
+        (focus)="searchText && searchOpen.set(true)"
+        (blur)="onSearchBlur()"
+      />
+      @if (searchOpen() && searchResults(); as res) {
+        <div class="search__panel">
+          @if (!hasResults(res)) {
+            <p class="search__empty muted">No matches for "{{ res.query }}"</p>
+          }
+          @if (res.projects.length > 0) {
+            <div class="search__group">Projects</div>
+            @for (p of res.projects; track p.id) {
+              <button class="search__item" (mousedown)="goToProject(p)">
+                <span class="search__kind">prj</span>
+                {{ p.name }}
+              </button>
+            }
+          }
+          @if (res.sets.length > 0) {
+            <div class="search__group">Sets</div>
+            @for (s of res.sets; track s.id) {
+              <button class="search__item" (mousedown)="goToSet(s)">
+                <span class="search__kind search__kind--set">set</span>
+                {{ s.name }}
+                <span class="muted">{{ projectName(s.project_id) }}</span>
+              </button>
+            }
+          }
+          @if (res.scenarios.length > 0) {
+            <div class="search__group">Test cases</div>
+            @for (s of res.scenarios; track s.id) {
+              <button class="search__item" (mousedown)="goToScenario(s)">
+                <span class="search__kind search__kind--case">case</span>
+                {{ s.name }}
+                <span class="muted">{{ s.test_class }}</span>
+              </button>
+            }
+          }
+        </div>
+      }
+    </div>
+  </pp-page-header>
+
+  @if (error(); as err) {
+    <div class="banner banner--error">
+      <span>{{ err }}</span>
+      <button class="btn" (click)="reloadProjects(true)">Retry</button>
+    </div>
+  }
+
+  <!-- ============================ STAGE: PROJECTS ======================== -->
+  @if (stage() === "projects") {
+    <section class="stage">
+      <div class="stage__bar">
+        <div>
+          <h2>Projects</h2>
+          <p class="stage__sub">
+            Pick a project to see its sets and test cases.
+          </p>
+        </div>
+        <button class="btn btn--primary" (click)="openNewProject()">
+          + New project
+        </button>
+      </div>
+
+      @if (newProjectOpen()) {
+        <div class="inline-form inline-form--project">
+          <div class="inline-form__row">
+            <input
+              class="inline-form__name"
+              placeholder="Project name"
+              [(ngModel)]="pfName"
+              (keydown.enter)="saveProjectForm()"
+            />
+            <span class="catpick">
+              <span
+                class="catpick__logo"
+                [class.catpick__logo--empty]="!pfPreset()"
+                [style.color]="pfPreset()?.color"
+              >
+                @if (pfPreset(); as pr) {
+                  <pp-icon [name]="pr.icon" [size]="16"></pp-icon>
+                }
+              </span>
+              <select [(ngModel)]="pfCategory">
+                <option value="">— category —</option>
+                @for (c of categoryPresets; track c.label) {
+                  <option [value]="c.label">{{ c.label }}</option>
+                }
+              </select>
+            </span>
+          </div>
+          <input
+            class="inline-form__desc"
+            placeholder="Short description (optional)"
+            [(ngModel)]="pfDescription"
+            (keydown.enter)="saveProjectForm()"
+          />
+          <div class="inline-form__actions">
+            <button class="btn btn--primary" (click)="saveProjectForm()">
+              {{ projectFormId() ? "Save" : "Create" }}
+            </button>
+            <button class="btn" (click)="cancelProjectForm()">Cancel</button>
+          </div>
+        </div>
+      }
+
+      <div class="tbl">
+        <div class="tbl__head tbl__row tbl__row--proj">
+          <span>Project</span><span class="num">Cases</span
+          ><span class="num">Sets</span> <span>Updated</span
+          ><span class="act">Actions</span>
+        </div>
+        @for (p of projects() ?? []; track p.id) {
+          <div class="tbl__row tbl__row--proj" (click)="openProject(p)">
+            <span class="cell-name cell-name--rich">
+              @if (projectBadge(p); as b) {
+                <span class="rowlogo" [style.color]="b.color">
+                  <pp-icon [name]="b.icon" [size]="16"></pp-icon>
+                </span>
+              }
+              <span class="cell-name__text">
+                <span class="cell-name__title">
+                  {{ p.name }}
+                  @if (p.category) {
+                    <span
+                      class="cattag"
+                      [style.--cat-color]="projectBadge(p)?.color"
+                      >{{ p.category }}</span
+                    >
+                  }
+                </span>
+                @if (p.description) {
+                  <span class="cell-name__sub">{{ p.description }}</span>
+                }
+              </span>
+            </span>
+            <span class="num mono">{{ p.scenario_count }}</span>
+            <span class="num mono">{{ p.set_count }}</span>
+            <span class="muted">{{ p.updated_at | date: "MMM d, HH:mm" }}</span>
+            <span class="act">
+              <button
+                class="ic"
+                title="Edit project"
+                (click)="openEditProject(p, $event)"
+              >
+                ✎
+              </button>
+              <button
+                class="ic"
+                title="Open"
+                (click)="openProject(p); $event.stopPropagation()"
+              >
+                →
+              </button>
+              @if (p.id !== defaultProjectId) {
+                <button
+                  class="ic ic--danger"
+                  title="Delete"
+                  (click)="removeProject(p, $event)"
+                >
+                  ✕
+                </button>
+              }
+            </span>
+          </div>
+        } @empty {
+          <div class="tbl__empty">
+            {{ projects() === null ? "Loading…" : "No projects yet." }}
+          </div>
+        }
+      </div>
+    </section>
+  }
+
+  <!-- ============================ STAGE: SETS ============================ -->
+  @if (stage() === "sets") {
+    <section class="stage">
+      <div class="stage__bar">
+        <div>
+          <h2>{{ selectedProject()?.name }} · Sets</h2>
+          <p class="stage__sub">
+            Open a set, or “All cases” for everything in the project.
+          </p>
+        </div>
+        <div class="stage__actions">
+          <button
+            class="btn btn--run"
+            (click)="runProject()"
+            title="Run every case in this project"
+          >
+            ▶ Run project
+          </button>
+          <button
+            class="btn btn--primary"
+            (click)="newSetOpen.set(!newSetOpen())"
+          >
+            + New set
+          </button>
+        </div>
+      </div>
+
+      @if (newSetOpen()) {
+        <div class="inline-form">
+          <input
+            placeholder="Set name"
+            [(ngModel)]="newSetName"
+            (keydown.enter)="createSet()"
+          />
+          <button class="btn btn--primary" (click)="createSet()">Create</button>
+          <button class="btn" (click)="newSetOpen.set(false)">Cancel</button>
+        </div>
+      }
+
+      <div class="tbl">
+        <div class="tbl__head tbl__row tbl__row--set">
+          <span>Set</span><span class="num">Cases</span><span>Updated</span
+          ><span class="act">Actions</span>
+        </div>
+        <div class="tbl__row tbl__row--set" (click)="openSet(null)">
+          <span class="cell-name">All cases</span>
+          <span class="num mono">{{
+            selectedProject()?.scenario_count ?? 0
+          }}</span>
+          <span class="muted">—</span>
+          <span class="act">
+            <button
+              class="ic"
+              title="Open"
+              (click)="openSet(null); $event.stopPropagation()"
+            >
+              →
+            </button>
+          </span>
+        </div>
+        @for (s of sets(); track s.id) {
+          <div class="tbl__row tbl__row--set" (click)="openSet(s.id)">
+            <span class="cell-name">{{ s.name }}</span>
+            <span class="num mono">{{ s.scenario_ids.length }}</span>
+            <span class="muted">{{ s.updated_at | date: "MMM d, HH:mm" }}</span>
+            <span class="act">
+              <button
+                class="ic"
+                title="Open"
+                (click)="openSet(s.id); $event.stopPropagation()"
+              >
+                →
+              </button>
+              <button
+                class="ic ic--danger"
+                title="Delete set"
+                (click)="removeSet(s, $event)"
+              >
+                ✕
+              </button>
+            </span>
+          </div>
+        } @empty {
+          <div class="tbl__empty">No sets yet — create one to group cases.</div>
+        }
+      </div>
+    </section>
+  }
+
+  <!-- ========================== STAGE: SCENARIOS ========================= -->
+  @if (stage() === "scenarios") {
+    <section class="stage">
+      <div class="stage__bar">
+        <div>
+          <h2>{{ currentSetName() }}</h2>
+          <p class="stage__sub">{{ selectedProject()?.name }}</p>
+        </div>
+        <div class="stage__actions">
+          <button class="btn btn--run" (click)="runProject()">
+            ▶ Run {{ selectedSetId() ? "set" : "project" }}
+          </button>
+          <button
+            class="btn"
+            (click)="pickImportFile()"
+            [disabled]="importing()"
+          >
+            {{ importing() ? "Importing…" : "Import" }}
+          </button>
+          <input
+            #importInput
+            type="file"
+            accept=".json,.yaml,.yml,application/json,application/yaml"
+            hidden
+            (change)="onImportFile($event)"
+          />
+          <a
+            [routerLink]="['/constructor/new']"
+            [queryParams]="{
+              project: selectedProjectId(),
+              set: selectedSetId(),
+            }"
+            class="btn btn--primary"
+            >+ New scenario</a
+          >
+        </div>
+      </div>
+
+      <div class="chips">
+        <button
+          class="chip"
+          [class.chip--active]="classFilter() === null"
+          (click)="setClass(null)"
+        >
+          all
+        </button>
+        @for (c of testClasses; track c) {
+          <button
+            class="chip"
+            [class.chip--active]="classFilter() === c"
+            (click)="setClass(c)"
+          >
+            {{ c }}
+          </button>
+        }
+      </div>
+
+      @if (scenarios(); as list) {
+        @if (list.length === 0) {
+          <div class="tbl">
+            <div class="tbl__empty">
+              No test cases here.
+              <a
+                [routerLink]="['/constructor/new']"
+                [queryParams]="{
+                  project: selectedProjectId(),
+                  set: selectedSetId(),
+                }"
+                >Create one →</a
+              >
+            </div>
+          </div>
+        } @else {
+          <div class="tbl">
+            <div class="tbl__head tbl__row tbl__row--case">
+              <span>Name</span><span>Class</span><span class="num">Steps</span>
+              <span>Ver</span><span>Updated</span><span>Tags</span
+              ><span class="act">Actions</span>
+            </div>
+            @for (s of list; track s.id) {
+              <div class="tbl__row tbl__row--case" (click)="goToScenario(s)">
+                <span class="cell-name cell-name--rich">
+                  @if (scenarioBadge(s); as b) {
+                    <span class="rowlogo" [style.color]="b.color">
+                      <pp-icon [name]="b.icon" [size]="15"></pp-icon>
+                    </span>
+                  }
+                  <span class="cell-name__text">
+                    <span class="cell-name__title mono">
+                      {{ s.name }}
+                      @if (s.category) {
+                        <span
+                          class="cattag"
+                          [style.--cat-color]="scenarioBadge(s)?.color"
+                          >{{ s.category }}</span
+                        >
+                      }
+                    </span>
+                    @if (s.description) {
+                      <span class="cell-name__sub">{{ s.description }}</span>
+                    }
+                  </span>
+                </span>
+                <span>
+                  <span
+                    class="cbadge"
+                    [class.cbadge--component]="s.test_class === 'component'"
+                    [class.cbadge--integration]="s.test_class === 'integration'"
+                    [class.cbadge--e2e]="s.test_class === 'e2e'"
+                    >{{ s.test_class }}</span
+                  >
+                </span>
+                <span class="num mono">{{ s.step_count }}</span>
+                <span class="mono muted">v{{ s.version }}</span>
+                <span class="muted">{{
+                  s.updated_at | date: "MMM d, HH:mm"
+                }}</span>
+                <span class="tags">
+                  @for (t of s.tags.slice(0, 3); track t) {
+                    <span class="tag">{{ t }}</span>
+                  }
+                </span>
+                <span class="act">
+                  <button
+                    class="ic ic--run"
+                    title="Run case"
+                    (click)="runOne(s, $event)"
+                  >
+                    ▶
+                  </button>
+                  <button
+                    class="ic"
+                    title="Open in editor"
+                    (click)="goToScenario(s)"
+                  >
+                    ✎
+                  </button>
+                  <div class="setmenu">
+                    <button
+                      class="ic"
+                      [class.ic--active]="membershipCount(s.id) > 0"
+                      title="Manage set membership"
+                      (click)="toggleSetMenu(s.id, $event)"
+                    >
+                      ⊞
+                    </button>
+                    @if (setMenuFor() === s.id) {
+                      <div
+                        class="setmenu__panel"
+                        (click)="
+                          $event.preventDefault(); $event.stopPropagation()
+                        "
+                      >
+                        @if (sets().length === 0) {
+                          <p class="muted">No sets in this project.</p>
+                        }
+                        @for (set of sets(); track set.id) {
+                          <label class="setmenu__row">
+                            <input
+                              type="checkbox"
+                              [checked]="isInSet(set, s.id)"
+                              (change)="toggleMembership(set, s.id, $event)"
+                            />
+                            {{ set.name }}
+                          </label>
+                        }
+                      </div>
+                    }
+                  </div>
+                  <button
+                    class="ic"
+                    title="Duplicate"
+                    (click)="duplicate(s, $event)"
+                  >
+                    ⧉
+                  </button>
+                  <button
+                    class="ic ic--danger"
+                    title="Delete"
+                    (click)="remove(s, $event)"
+                  >
+                    ✕
+                  </button>
+                </span>
+              </div>
+            }
+          </div>
+        }
+      } @else if (!error()) {
+        <div class="tbl"><div class="tbl__empty">Loading test cases…</div></div>
+      }
+    </section>
+  }
+</div>

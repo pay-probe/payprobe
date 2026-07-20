@@ -1,0 +1,77 @@
+{
+  "_comment": "Bundled example connections — the modern shape of the old per-environment named adapter instances. A connection IS an adapter instance; environments are pure selectors. None is marked `default` (that is a per-deployment choice; run POST /admin/migrate/seed-default-connections or set it in the editor).",
+  "connections": {
+    "switch_visa": {
+      "adapter": "tcp", "protocol": "iso8583", "host": "10.0.1.50", "port": 7001,
+      "framing": { "length_prefix_bytes": 2, "length_byte_order": "big", "encoding": "ascii" },
+      "response_timeout_sec": 20, "connect_timeout_sec": 10,
+      "keepalive": { "enabled": true, "interval_sec": 30 },
+      "correlation": { "field": "11", "match_mti": true },
+      "sign_on": { "enabled": true },
+      "description": "Visa switch (ISO 8583). Was multi-instance/switch_visa."
+    },
+    "switch_mc": {
+      "adapter": "tcp", "protocol": "iso8583", "host": "10.0.1.50", "port": 7002,
+      "framing": { "length_prefix_bytes": 2, "length_byte_order": "big", "encoding": "ascii" },
+      "response_timeout_sec": 20, "connect_timeout_sec": 10,
+      "keepalive": { "enabled": true, "interval_sec": 30 },
+      "correlation": { "field": "11", "match_mti": true },
+      "sign_on": { "enabled": true },
+      "description": "Mastercard switch (ISO 8583). Was multi-instance/switch_mc."
+    },
+    "hsm_primary": {
+      "adapter": "tcp", "protocol": "header_echo", "host": "10.0.2.10", "port": 1500,
+      "framing": { "length_prefix_bytes": 2, "length_byte_order": "big", "encoding": "ascii" },
+      "response_timeout_sec": 20, "connect_timeout_sec": 10,
+      "keepalive": { "enabled": true, "interval_sec": 30 },
+      "header_echo": { "header_bytes": 4, "diagnostic_command": "NC" },
+      "sign_on": { "enabled": true },
+      "description": "Primary HSM (header-echo host command). Was multi-instance/hsm_primary."
+    },
+    "hsm_backup": {
+      "extends": "hsm_primary", "host": "10.0.2.11",
+      "description": "Backup HSM — inherits hsm_primary, different host. Was multi-instance/hsm_backup."
+    },
+    "payments_grpc": {
+      "adapter": "grpc", "target": "localhost:50051", "descriptor_set_path": "bundle.pb",
+      "timeout_sec": 30, "tls": { "enabled": false },
+      "metadata": { "authorization": "Bearer <token>" },
+      "actions": { "authorize": { "method": "payments.PaymentService/Authorize" } },
+      "description": "gRPC payments service via a compiled descriptor set. Was grpc/payments_grpc."
+    },
+    "discovered_grpc": {
+      "adapter": "grpc", "target": "localhost:50051", "reflection": true,
+      "description": "gRPC service discovered via server reflection. Was grpc/discovered_grpc."
+    },
+    "inline_proto_grpc": {
+      "adapter": "grpc", "target": "localhost:50051",
+      "proto_inline": "syntax = \"proto3\"; package demo; service Echo { rpc Say (Msg) returns (Msg); } message Msg { string text = 1; }",
+      "actions": { "say": { "method": "demo.Echo/Say" } },
+      "description": "gRPC service from inline .proto source. Was grpc/inline_proto_grpc."
+    },
+    "http_live": {
+      "adapter": "http", "base_url": "${vars.http_base_url}", "api_key": "${vars.http_api_key}",
+      "timeout_ms": "${vars.http_timeout_ms}",
+      "description": "Live HTTP/REST endpoint, parameterised from global variables (http_*). Was http-live/http."
+    },
+    "payshield_hsm": {
+      "adapter": "payshield", "host": "127.0.0.1", "port": 1500, "header": "HDR1",
+      "response_timeout_sec": 5,
+      "description": "payShield 10K simulator on the classic host port. Was payshield-sim/hsm."
+    },
+    "prod_http": {
+      "adapter": "http", "base_url": "https://YOUR_HTTP_HOST/api", "api_key": "YOUR_API_KEY",
+      "timeout_ms": 5000,
+      "description": "Production HTTP/REST payment server (template). Was production-template/http."
+    },
+    "prod_switch": {
+      "adapter": "tcp", "protocol": "iso8583", "host": "YOUR_SWITCH_HOST", "port": 7000,
+      "description": "Production ISO 8583 switch (template). Was production-template/switch."
+    },
+    "prod_db_probe": {
+      "adapter": "db_probe_core", "engine": "postgresql", "host": "YOUR_DB_HOST",
+      "dbname": "YOUR_DB_NAME", "user": "payprobe_readonly", "password": "YOUR_DB_PASSWORD",
+      "description": "Production core DB read-only probe (template). Was production-template/db_probe_core."
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "uid": "payprobe-simulators",
+  "title": "PayProbe — Host/Responder Simulators",
+  "tags": ["payprobe", "simulators"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Simulator throughput (requests/sec)",
+      "description": "Instantaneous requests/sec handled by each running simulator.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "payprobe_simulator_rps", "legendFormat": "{{label}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Messages received (cumulative)",
+      "description": "Total messages each running simulator has answered since its last stats reset.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "payprobe_simulator_messages_received", "legendFormat": "{{label}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Simulators running",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(payprobe_simulator_up)", "legendFormat": "running" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Faults injected (chaos, cumulative)",
+      "description": "Replies in which a chaos fault (drop / latency / malformed / partial) was injected.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "payprobe_simulator_faults", "legendFormat": "{{label}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Fault rate (faults/sec)",
+      "description": "Rate of chaos faults per simulator over 5m — a resilience-test pulse.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "rate(payprobe_simulator_faults[5m])", "legendFormat": "{{label}}" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "description": "VISA Base I-style scheme simulator — stands in for VisaNet for loopback testing. Handles authorization (0100/0200), reversal & advice (0400/0420), network management (0800) and clearing advice (0220/0520) over ISO 8583. Functional fidelity from public ISO 8583; NOT a byte-exact copy of VISA's confidential field specs. Stand-in (STIP) approves auths unless a limit/BIN/expiry rule declines.",
+  "protocol": "visa",
+  "host": "0.0.0.0",
+  "port": 7010,
+  "framing": { "length_prefix_bytes": 2, "length_byte_order": "big", "encoding": "ascii" },
+  "visa": {
+    "stand_in": true,
+    "approve_code": "00",
+    "decline_over": "000000100000",
+    "block_bins": ["400000"],
+    "block_response": "05",
+    "expiry_check": true
+  },
+  "rules": [
+    { "when": { "de": { "2": { "prefix": "411111" } } },
+      "respond": { "echo": ["7", "11", "37"], "set": { "39": "01" } } }
+  ]
+}

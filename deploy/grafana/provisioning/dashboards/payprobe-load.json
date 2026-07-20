@@ -1,0 +1,125 @@
+{
+  "uid": "payprobe-load",
+  "title": "PayProbe — Load & Service Health",
+  "tags": ["payprobe"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Load run — achieved TPS",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "payprobe_load_run_tps", "legendFormat": "{{run_id}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Load run — errors (cumulative)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "payprobe_load_run_errors", "legendFormat": "{{run_id}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Load run — workers reporting (fleet liveness)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "payprobe_load_run_workers_reporting", "legendFormat": "{{run_id}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Runs in flight",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(payprobe_runs_inflight)", "legendFormat": "runs" },
+        { "refId": "B", "expr": "sum(payprobe_load_runs_inflight)", "legendFormat": "load runs" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Runs completed /s by status",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (status) (rate(payprobe_runs_total[5m]))", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "HTTP request rate by service",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (service) (rate(payprobe_http_requests_total[1m]))", "legendFormat": "{{service}}" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "HTTP p95 latency by service",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (service, le) (rate(payprobe_http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{service}}" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Soak — worker RSS (leak watch)",
+      "description": "Resident memory per load worker, trended across soak cycles. A healthy soak holds flat / saw-tooths back down after GC; a monotonic climb is a leak. Companion alert: WorkerMemoryLeak.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "payprobe_load_worker_rss_bytes", "legendFormat": "{{run_id}} · {{worker_id}}" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Soak — worker RSS growth rate (leak indicator)",
+      "description": "Per-worker RSS slope over 10m (deriv). Sustained > 0 across soak cycles means memory the workload isn't reclaiming — the signal the WorkerMemoryLeak alert fires on. Hovers around 0 for a clean soak.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": { "thresholdsStyle": { "mode": "line" } },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 0 }
+          ] }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "refId": "A", "expr": "deriv(payprobe_load_worker_rss_bytes[10m])", "legendFormat": "{{run_id}} · {{worker_id}}" }
+      ]
+    }
+  ]
+}

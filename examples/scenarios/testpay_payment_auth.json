@@ -1,0 +1,21 @@
+{
+  "name": "TestPay · Card payment (auth)",
+  "description": "Single card authorization: send an auth request to RestPay. The unit transaction driven under the Load Test steady / ramp / spike profiles — mirrors the TestPay console SimpleTestStrategy / payment flow.",
+  "tags": ["testpay", "payment", "load", "regression"],
+  "stop_on_failure": true,
+  "timeout_ms": 10000,
+  "test_class": "e2e",
+  "steps": [
+    {
+      "id": "step_001",
+      "target": "http",
+      "action": "send_auth_request",
+      "payload": { "amount": 10000, "currency": "GEL", "card_profile": "visa_credit_standard" },
+      "assertions": [
+        { "field": "response_code", "operator": "eq", "expected": "00" },
+        { "field": "auth_code", "operator": "present" },
+        { "field": "duration_ms", "operator": "lt", "expected": 3000 }
+      ]
+    }
+  ]
+}

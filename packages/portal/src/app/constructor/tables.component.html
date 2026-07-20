@@ -1,0 +1,207 @@
+<div class="tbls">
+  <pp-page-header>
+    <div class="tbls__heading" subtitle>
+      <span class="muted"
+        >Global named data — used in steps via the lookup step or ${{
+          "{"
+        }}tables.NAME{{ "}" }}</span
+      >
+    </div>
+    <button class="btn btn--primary" (click)="newTable()">+ New table</button>
+  </pp-page-header>
+
+  <div class="tbls__guidewrap">
+    <details class="guide" open>
+      <summary>How to use tables</summary>
+      <div class="guide__body">
+        <p>
+          Create a table with columns + rows, then read from it in a flow.
+          Tables are global and injected into every run.
+        </p>
+        <ul>
+          <li>
+            <strong>Lookup step (easiest):</strong> drag
+            <strong>Data Tables → Table row lookup</strong> and set its Inputs —
+            <code class="mono">table</code>,
+            <code class="mono">where_column</code>,
+            <code class="mono">where_value</code>,
+            <code class="mono">select_column</code>. It returns
+            <code class="mono">${{ "{" }}lookup.response.value{{ "}" }}</code>
+            (the selected cell), <code class="mono">.row</code> (whole row) and
+            <code class="mono">.found</code>.
+          </li>
+          <li>
+            <strong>Whole table:</strong> reference
+            <code class="mono">${{ "{" }}tables.NAME{{ "}" }}</code> anywhere to
+            get the list of rows.
+          </li>
+          <li>
+            <strong>Code node:</strong>
+            <code class="mono">context["tables"]["NAME"]</code> gives the rows
+            to iterate.
+          </li>
+        </ul>
+        <p class="muted">
+          Example flow: lookup <code class="mono">card_profiles</code> by
+          <code class="mono">profile</code> → feed
+          <code class="mono">${{ "{" }}lookup.response.value{{ "}" }}</code>
+          into an auth step's <code class="mono">pan</code>.
+        </p>
+      </div>
+    </details>
+  </div>
+
+  <div class="tbls__body">
+    <aside class="rail">
+      @if (loading()) {
+        <p class="muted rail__msg">Loading…</p>
+      }
+      @if (!loading() && tables().length === 0) {
+        <p class="muted rail__msg">No tables yet.</p>
+      }
+      @for (t of tables(); track t.name) {
+        <button
+          class="tcard"
+          [class.tcard--active]="isActive(t)"
+          (click)="edit(t)"
+        >
+          <span class="tcard__main">
+            <span class="tcard__name mono">{{ t.name }}</span>
+            <span class="tcard__meta muted"
+              >{{ t.rows.length }} rows · {{ t.columns.length }} cols</span
+            >
+          </span>
+        </button>
+      }
+    </aside>
+
+    <main class="editor">
+      @if (draft(); as d) {
+        <div class="editor__head">
+          <h2>{{ d.isNew ? "New table" : d.name }}</h2>
+          @if (dirty()) {
+            <span class="editor__dirty">● unsaved</span>
+          }
+          @if (!d.isNew) {
+            <button class="btn btn--danger" (click)="remove(d)">Delete</button>
+          }
+          <button class="btn" (click)="cancel()">Close</button>
+          <button
+            class="btn btn--primary"
+            (click)="save()"
+            [disabled]="saving()"
+          >
+            {{ saving() ? "Saving…" : "Save" }}
+          </button>
+        </div>
+
+        <div class="editor__scroll" (input)="markDirty()">
+          <div class="grid2">
+            <label class="field"
+              ><span>Name</span>
+              <input
+                class="mono"
+                [(ngModel)]="d.name"
+                [readonly]="!d.isNew"
+                placeholder="card_profiles"
+            /></label>
+            <label class="field"
+              ><span>Description</span>
+              <input
+                [(ngModel)]="d.description"
+                placeholder="What this table holds"
+            /></label>
+          </div>
+
+          <div class="section-head">
+            <h3>Columns &amp; rows</h3>
+            <span>
+              <button class="btn btn--ghost" (click)="addColumn()">
+                + column
+              </button>
+              <button class="btn btn--ghost" (click)="addRow()">+ row</button>
+            </span>
+          </div>
+
+          <div class="grid-table">
+            <table>
+              <thead>
+                <tr>
+                  @for (c of d.columns; track $index) {
+                    <th>
+                      <div class="th-cell">
+                        <input
+                          class="mono col-input"
+                          [ngModel]="c"
+                          (ngModelChange)="setColumn($index, $event)"
+                          placeholder="column"
+                        />
+                        <button
+                          class="iconbtn iconbtn--sm"
+                          (click)="removeColumn($index)"
+                          [disabled]="d.columns.length <= 1"
+                          title="Remove column"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </th>
+                  }
+                  <th class="grid-table__rowx"></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of d.rows; track $index; let ri = $index) {
+                  <tr>
+                    @for (c of d.columns; track $index; let ci = $index) {
+                      <td>
+                        <input
+                          class="mono cell"
+                          [ngModel]="row[ci]"
+                          (ngModelChange)="setCell(row, ci, $event)"
+                        />
+                      </td>
+                    }
+                    <td class="grid-table__rowx">
+                      <button
+                        class="iconbtn iconbtn--sm"
+                        (click)="removeRow(ri)"
+                        title="Remove row"
+                      >
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+            @if (d.rows.length === 0) {
+              <p class="muted" style="padding: 10px">
+                No rows. Add one with “+ row”.
+              </p>
+            }
+          </div>
+
+          <p class="note">
+            Use it in a flow: drop
+            <strong>Data Tables → Table row lookup</strong> and set its inputs
+            (table = <span class="mono">{{ d.name || "name" }}</span
+            >, where_column, where_value). Or read the whole table in a code
+            node via
+            <span class="mono">context["tables"]["{{ d.name || "name" }}"]</span
+            >.
+          </p>
+        </div>
+      } @else {
+        <div class="placeholder">
+          <div class="placeholder__icon">🗄</div>
+          <h2>Global data tables</h2>
+          <p class="muted">
+            Pick a table to edit, or create one. Tables are shared across all
+            scenarios.
+          </p>
+        </div>
+      }
+    </main>
+  </div>
+</div>

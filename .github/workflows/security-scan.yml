@@ -1,0 +1,89 @@
+name: Security Scan
+
+# Supply-chain visibility: generate an SBOM and scan the source tree + built
+# images for known-vulnerable dependencies. Runs on PRs, pushes to main, and
+# weekly (new CVEs land against unchanged code).
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+permissions:
+  contents: read
+  security-events: write # upload SARIF to the Security tab
+
+jobs:
+  sbom:
+    name: SBOM (Syft)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cyclonedx.json
+
+  filesystem-scan:
+    name: Dependency scan (Trivy fs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scanners: vuln,secret,config
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-fs.sarif
+      - name: Upload results to Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-fs.sarif
+
+  image-scan:
+    name: Image scan (Trivy)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: orchestrator
+            context: .
+            dockerfile: packages/orchestrator/Dockerfile
+          - service: scenario-service
+            context: packages
+            dockerfile: packages/scenario-service/Dockerfile
+          - service: auth-service
+            context: packages/auth-service
+            dockerfile: packages/auth-service/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t payprobe/${{ matrix.service }}:scan -f ${{ matrix.dockerfile }} ${{ matrix.context }}
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: payprobe/${{ matrix.service }}:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-${{ matrix.service }}.sarif
+      - name: Upload results to Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-${{ matrix.service }}.sarif
+          category: image-${{ matrix.service }}

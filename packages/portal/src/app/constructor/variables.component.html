@@ -1,0 +1,157 @@
+<div class="vars">
+  <pp-page-header>
+    <div class="vars__heading" subtitle>
+      <span class="muted"
+        >Global · Project · Set — used in steps as ${{ "{" }}vars.NAME{{
+          "}"
+        }}</span
+      >
+    </div>
+  </pp-page-header>
+
+  <div class="vars__body">
+    <details class="guide" open>
+      <summary>How to use variables</summary>
+      <div class="guide__body">
+        <p>
+          Define a variable here (or per-scenario in the Constructor's
+          <strong>Scenario Settings</strong>), then reference it in any step's
+          value field as <code>${{ "{" }}vars.NAME{{ "}" }}</code
+          >.
+        </p>
+        <ul>
+          <li>
+            <strong>Action payload / HTTP url, headers, body:</strong>
+            <code class="mono">amount: ${{ "{" }}vars.amount{{ "}" }}</code>
+          </li>
+          <li>
+            <strong>If / Switch / While condition:</strong> left =
+            <code class="mono">${{ "{" }}vars.currency{{ "}" }}</code
+            >, operator eq, right = USD
+          </li>
+          <li>
+            <strong>Code node:</strong> add an Input row (value
+            <code class="mono">${{ "{" }}vars.amount{{ "}" }}</code
+            >) and read <code class="mono">inputs["amount"]</code>, or read
+            <code class="mono">context["vars"]["amount"]</code> directly.
+          </li>
+        </ul>
+        <p class="muted">
+          Precedence when a name exists at several scopes (most specific wins):
+          <strong>global &lt; project &lt; set &lt; scenario</strong>.
+        </p>
+      </div>
+    </details>
+
+    <div class="seg">
+      @for (s of scopes; track s.value) {
+        <button
+          class="seg__opt"
+          [class.seg__opt--on]="scope() === s.value"
+          (click)="setScope(s.value)"
+        >
+          {{ s.label }}
+        </button>
+      }
+    </div>
+
+    @if (scope() === "project" || scope() === "set") {
+      <label class="field">
+        <span>Project</span>
+        <select
+          [ngModel]="projectId()"
+          (ngModelChange)="onProjectChange($event)"
+        >
+          <option value="">— select a project —</option>
+          @for (p of projects(); track p.id) {
+            <option [value]="p.id">{{ p.name }}</option>
+          }
+        </select>
+      </label>
+    }
+    @if (scope() === "set") {
+      <label class="field">
+        <span>Set</span>
+        <select
+          [ngModel]="setId()"
+          (ngModelChange)="onSetChange($event)"
+          [disabled]="!projectId()"
+        >
+          <option value="">— select a set —</option>
+          @for (s of sets(); track s.id) {
+            <option [value]="s.id">{{ s.name }}</option>
+          }
+        </select>
+      </label>
+    }
+
+    @if (canEdit()) {
+      <div class="card">
+        <div class="card__head">
+          <h3>
+            {{
+              scope() === "global"
+                ? "Global variables"
+                : scope() === "project"
+                  ? "Project variables"
+                  : "Set variables"
+            }}
+          </h3>
+          <button class="btn btn--ghost" (click)="addRow()">+ add</button>
+        </div>
+        @if (loading()) {
+          <p class="muted">Loading…</p>
+        }
+        @for (r of rows(); track $index) {
+          <div class="row2">
+            <input
+              class="mono"
+              placeholder="NAME"
+              [ngModel]="r.key"
+              (ngModelChange)="updateRow($index, { key: $event })"
+            />
+            <input
+              class="mono"
+              placeholder="value (text or JSON)"
+              [type]="r.secret ? 'password' : 'text'"
+              [ngModel]="r.value"
+              (ngModelChange)="updateRow($index, { value: $event })"
+            />
+            <button
+              class="iconbtn"
+              (click)="toggleSecret($index)"
+              [title]="
+                r.secret
+                  ? 'Secret (masked + redacted in logs)'
+                  : 'Mark as secret'
+              "
+            >
+              {{ r.secret ? "🔒" : "🔓" }}
+            </button>
+            <button class="iconbtn" (click)="removeRow($index)">✕</button>
+          </div>
+        }
+        @if (rows().length === 0 && !loading()) {
+          <p class="muted">No variables at this scope yet.</p>
+        }
+        <div class="card__foot">
+          <button
+            class="btn btn--primary"
+            (click)="save()"
+            [disabled]="saving()"
+          >
+            {{ saving() ? "Saving…" : "Save" }}
+          </button>
+        </div>
+      </div>
+      <p class="note">
+        Precedence (most specific wins):
+        <strong>global &lt; project &lt; set &lt; scenario</strong>.
+        Scenario-level variables are edited in the constructor's Scenario
+        Settings.
+      </p>
+    } @else {
+      <p class="muted">Select a {{ scope() }} to edit its variables.</p>
+    }
+  </div>
+</div>

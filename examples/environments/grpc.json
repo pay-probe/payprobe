@@ -1,0 +1,10 @@
+{
+  "name": "grpc",
+  "description": "Selector environment for the gRPC examples. The service instances are now connections (payments_grpc, discovered_grpc, inline_proto_grpc) — pick one per step.",
+  "mode": "real",
+  "connection_budget": {
+    "total": 100,
+    "adapters": { "payments_grpc": 50 }
+  },
+  "adapters": {}
+}

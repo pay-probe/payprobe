@@ -1,0 +1,5 @@
+{
+  "name": "mock",
+  "description": "Full mock environment — every target is mocked via `mode: mock`, so no real systems are needed. It deliberately lists no adapters: adding a new adapter requires no change here (any target the registry knows routes to the mock). Use for local dev and CI.",
+  "mode": "mock"
+}

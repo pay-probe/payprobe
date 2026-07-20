@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# The package code lives at the project root (this directory) but is imported
+# as `orchestrator` (the repo puts `packages/` on PYTHONPATH). The project name
+# normalizes to `payprobe_orchestrator`, which doesn't match any directory, so
+# hatchling can't auto-detect the files to ship. We tell it explicitly:
+#  - `only-include` selects the package modules (not tests/README/Dockerfile);
+#  - `sources` relocates them under a top-level `orchestrator/` package;
+#  - `dev-mode-dirs` makes editable installs (`pip install -e .`) add the parent
+#    `packages/` dir to sys.path via a .pth file, so `import orchestrator`
+#    resolves to this directory. (A .pth is required for editable installs
+#    because hatch's import-redirect can't synthesize a `sources` prefix.)
+[tool.hatch.build.targets.wheel]
+only-include = ["api", "models", "services", "__init__.py"]
+dev-mode-dirs = [".."]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = "orchestrator"
+
+[project]
+name = "payprobe-orchestrator"
+version = "0.1.0"
+description = "PayProbe run lifecycle + live WebSocket event transport"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "redis[hiredis]>=5.0",
+    "pydantic>=2.0",
+    "httpx>=0.27",
+    "PyJWT>=2.8",
+    "payprobe-worker",
+    "payprobe-report-service",
+    "payprobe-common",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "httpx", "ruff"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

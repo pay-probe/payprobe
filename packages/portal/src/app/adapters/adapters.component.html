@@ -1,0 +1,61 @@
+<div class="adp">
+  <pp-page-header>
+    <div class="adp__heading" subtitle>
+      <span class="muted"
+        >Connectors the worker uses to reach payment targets</span
+      >
+    </div>
+    <label class="adp__search">
+      <pp-icon name="search" [size]="16" />
+      <input
+        type="text"
+        placeholder="Search adapters…"
+        [value]="query()"
+        (input)="onSearch($any($event.target).value)"
+      />
+    </label>
+  </pp-page-header>
+
+  <div class="adp__body">
+    <p class="adp__note">
+      Read-only reference. Availability on a given worker depends on its
+      installed optional dependencies and the active environment config. Use a
+      target key (e.g. <code>mock</code>, <code>switch</code>) in your
+      environment's <code>adapters</code> section to enable it. Select an
+      adapter for its full specification.
+    </p>
+
+    <div class="adp__grid">
+      @for (a of adapters(); track a.slug) {
+        <a class="card card--link" [routerLink]="['/adapters', a.slug]">
+          <div class="card__head">
+            <span class="card__ico"><pp-icon name="cpu" [size]="18" /></span>
+            <h2 class="card__title">{{ a.label }}</h2>
+            <span
+              class="badge"
+              [class.badge--builtin]="a.availability === 'builtin'"
+              [class.badge--optional]="a.availability === 'optional'"
+              [class.badge--planned]="a.availability === 'planned'"
+            >
+              {{ availabilityLabel(a.availability) }}
+            </span>
+          </div>
+          <p class="card__desc">{{ a.description }}</p>
+          <div class="card__foot">
+            <span class="chip chip--cat">{{ a.category }}</span>
+            <div class="card__keys">
+              @for (t of a.targets; track t) {
+                <code class="key">{{ t }}</code>
+              }
+            </div>
+            <span class="card__go"
+              ><pp-icon name="chevron-right" [size]="16"
+            /></span>
+          </div>
+        </a>
+      } @empty {
+        <p class="muted">No adapters match “{{ query() }}”.</p>
+      }
+    </div>
+  </div>
+</div>

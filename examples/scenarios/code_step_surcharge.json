@@ -1,0 +1,56 @@
+{
+  "id": "example-003",
+  "name": "code_step_surcharge",
+  "description": "How-to: a Code step reads an auth response from the run context, derives a surcharge, and feeds the result into the rest of the flow.",
+  "tags": ["example", "code", "how-to"],
+  "stop_on_failure": true,
+  "timeout_ms": 10000,
+  "test_class": "e2e",
+  "steps": [
+    {
+      "id": "auth",
+      "kind": "action",
+      "target": "http",
+      "action": "send_auth_request",
+      "payload": { "amount": 10000, "currency": "GEL", "card_profile": "visa_credit_standard" },
+      "assertions": [
+        { "field": "response_code", "operator": "eq", "expected": "00" }
+      ]
+    },
+    {
+      "id": "surcharge",
+      "kind": "code",
+      "config": {
+        "language": "python",
+        "timeout_ms": 3000,
+        "code": "# `context` holds every earlier node's result, keyed by node id.\n# Each entry looks like {\"request\": {...}, \"response\": {...}}.\nauth = context[\"auth\"][\"response\"]\n\nbase_amount = 10000          # minor units (e.g. 100.00 GEL)\nfee = round(base_amount * 0.015)   # 1.5% surcharge\n\n# Whatever you return becomes ${surcharge.response.*} downstream.\nreturn {\n    \"rrn\": auth.get(\"rrn\"),\n    \"approved\": auth.get(\"response_code\") == \"00\",\n    \"fee\": fee,\n    \"total\": base_amount + fee,\n}"
+      }
+    },
+    {
+      "id": "approved",
+      "kind": "if",
+      "config": { "left": "${surcharge.response.approved}", "operator": "eq", "right": true }
+    },
+    {
+      "id": "settle_check",
+      "kind": "action",
+      "target": "db_probe_core",
+      "action": "query_transaction",
+      "payload": { "rrn": "${surcharge.response.rrn}" },
+      "assertions": [
+        { "field": "status", "operator": "eq", "expected": "APPROVED" }
+      ]
+    }
+  ],
+  "edges": [
+    { "source": "auth", "source_port": "out", "target": "surcharge" },
+    { "source": "surcharge", "source_port": "out", "target": "approved" },
+    { "source": "approved", "source_port": "true", "target": "settle_check" }
+  ],
+  "layout": {
+    "auth": { "x": 80, "y": 240 },
+    "surcharge": { "x": 380, "y": 240 },
+    "approved": { "x": 680, "y": 240 },
+    "settle_check": { "x": 980, "y": 160 }
+  }
+}

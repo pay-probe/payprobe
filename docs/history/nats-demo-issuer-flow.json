@@ -1,0 +1,33 @@
+{
+  "id": "nats-demo-issuer-flow",
+  "name": "NATS demo issuer (flow)",
+  "description": "Branching NATS receiver as a participant flow (ADR-0006). The trigger fires on each inbound request on subject demo.auth (via the nats_demo_in connection); the `if` node branches on the amount; the reply node answers the request inbox. This is the flow-graph alternative to the rules-based 'NATS demo issuer' simulator — reach for it when the reply needs logic (branch on the body, call a downstream switch/issuer/HSM via an `action` node, then reply). Import via Simulated Network -> Participant Flows -> Import.",
+  "trigger": { "connection": "nats_demo_in" },
+  "nodes": [
+    { "id": "t", "kind": "trigger" },
+    {
+      "id": "chk",
+      "kind": "if",
+      "config": {
+        "left": "${request.body.amount}",
+        "operator": "lt",
+        "right": 100000
+      }
+    },
+    {
+      "id": "ok",
+      "kind": "reply",
+      "payload": { "json": { "decision": "APPROVE", "auth_code": "123456" } }
+    },
+    {
+      "id": "no",
+      "kind": "reply",
+      "payload": { "json": { "decision": "DECLINE", "reason": "over-limit" } }
+    }
+  ],
+  "edges": [
+    { "source": "t", "source_port": "out", "target": "chk" },
+    { "source": "chk", "source_port": "true", "target": "ok" },
+    { "source": "chk", "source_port": "false", "target": "no" }
+  ]
+}

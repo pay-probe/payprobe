@@ -1,0 +1,20 @@
+{
+  "name": "TestPay · Heartbeat / echo",
+  "description": "Connection keepalive / liveness probe against RestPay. The unit the Soak (heartbeat) load profile holds open across many long-lived connections — mirrors the TestPay HeartbeatTestStrategy.",
+  "tags": ["testpay", "heartbeat", "soak"],
+  "stop_on_failure": true,
+  "timeout_ms": 5000,
+  "test_class": "component",
+  "steps": [
+    {
+      "id": "step_001",
+      "target": "http",
+      "action": "echo_test",
+      "payload": {},
+      "assertions": [
+        { "field": "response_code", "operator": "eq", "expected": "00" },
+        { "field": "duration_ms", "operator": "lt", "expected": 1000 }
+      ]
+    }
+  ]
+}

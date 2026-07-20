@@ -1,0 +1,26 @@
+{
+  "description": "Simulated ISO 8583 switch — approves by default, with a few scripted decline paths for testing terminal/host behaviour.",
+  "host": "0.0.0.0",
+  "port": 7000,
+  "protocol": "iso8583",
+  "framing": { "length_prefix_bytes": 2, "length_byte_order": "big", "encoding": "ascii" },
+  "rules": [
+    {
+      "when": { "mti": "0200", "de": { "4": { "gte": "000000100000" } } },
+      "respond": { "echo": ["11", "37"], "set": { "39": "61" } }
+    },
+    {
+      "when": { "mti": "0200", "de": { "2": { "prefix": "400000" } } },
+      "respond": { "echo": ["11", "37"], "set": { "39": "05" } }
+    },
+    {
+      "when": { "mti": "0200", "de": { "2": { "prefix": "499999" } } },
+      "respond": { "drop": true }
+    },
+    {
+      "when": { "mti": "0800" },
+      "respond": { "echo": ["11"], "set": { "39": "00", "70": "301" } }
+    }
+  ],
+  "default": { "echo": ["11", "37"], "set": { "39": "00", "38": "AUTH99" } }
+}

@@ -1,0 +1,1207 @@
+<div class="inst">
+  <pp-page-header>
+    <div class="inst__heading" subtitle>
+      <span class="muted"
+        >Named adapter connections — define once, reference by name in
+        scenarios</span
+      >
+    </div>
+    <button class="btn btn--primary" (click)="newConnection()">
+      + New connection
+    </button>
+  </pp-page-header>
+
+  <div class="inst__body">
+    <!-- list -->
+    <aside class="inst__list">
+      @for (i of connections(); track i.name) {
+        <button class="row" [class.active]="isActive(i)" (click)="edit(i)">
+          <span class="row__ico"><pp-icon name="cpu" [size]="16" /></span>
+          <span class="row__main">
+            <span class="row__name">{{ i.name }}</span>
+            <span class="row__sub">
+              {{ connLabel(i) }}
+              @if (i.adapter === "grpc") {
+                @if (i.grpc.target) {
+                  · {{ i.grpc.target }}
+                }
+              } @else if (i.adapter === "http") {
+                @if (i.rest.baseUrl) {
+                  · {{ i.rest.baseUrl }}
+                }
+              } @else if (i.host) {
+                · {{ i.host }}:{{ i.port }}
+              }
+              @if (i.extends) {
+                · extends {{ i.extends }}
+              }
+            </span>
+          </span>
+        </button>
+      } @empty {
+        <p class="muted empty">
+          No connections yet. Create one to get started.
+        </p>
+      }
+    </aside>
+
+    <!-- editor -->
+    <section class="inst__editor">
+      @if (draft(); as d) {
+        <div class="form">
+          <div class="grid2">
+            <label class="fld">
+              <span>Name</span>
+              <input
+                type="text"
+                [(ngModel)]="d.name"
+                (ngModelChange)="markDirty()"
+                placeholder="e.g. switch_visa"
+              />
+            </label>
+            <label class="fld">
+              <span>Adapter</span>
+              <select
+                [(ngModel)]="d.adapter"
+                (ngModelChange)="markDirty()"
+                [disabled]="!!d.extends"
+              >
+                <option value="tcp">TCP (ISO 8583 / header echo)</option>
+                <option value="grpc">gRPC</option>
+                <option value="http">REST / HTTP</option>
+                <option value="nats">NATS (messaging)</option>
+                <option value="payshield">payShield (HSM client)</option>
+                <option value="db_probe_core">Database probe — core</option>
+                <option value="db_probe_switch">Database probe — switch</option>
+              </select>
+            </label>
+            <label class="fld">
+              <span
+                >Extends
+                <small class="muted">(inherit another connection)</small></span
+              >
+              <select [(ngModel)]="d.extends" (ngModelChange)="markDirty()">
+                <option [ngValue]="undefined">— none —</option>
+                @for (n of extendsOptions(); track n) {
+                  <option [ngValue]="n">{{ n }}</option>
+                }
+              </select>
+            </label>
+            <label class="fld">
+              <span>Pool size <small class="muted">(optional)</small></span>
+              <input
+                type="number"
+                [(ngModel)]="d.poolSize"
+                (ngModelChange)="markDirty()"
+                placeholder="100"
+              />
+            </label>
+            <label class="fld">
+              <span>Direction</span>
+              <select [(ngModel)]="d.mode" (ngModelChange)="markDirty()">
+                <option value="outbound">
+                  Outbound — connect to a host (client)
+                </option>
+                <option value="inbound">
+                  Inbound — listen for messages (server)
+                </option>
+              </select>
+            </label>
+            <label class="fld chk">
+              <input
+                type="checkbox"
+                [(ngModel)]="d.default"
+                (ngModelChange)="markDirty()"
+              />
+              <span
+                >Default for this adapter type
+                <small class="muted"
+                  >(steps with no connection use it; one per type)</small
+                ></span
+              >
+            </label>
+          </div>
+
+          <details class="sect">
+            <summary>Environment overrides</summary>
+            <p class="muted">
+              Override this connection's parameters per environment (e.g.
+              <code>host</code>, <code>port</code>). Blank = inherit the base
+              config above. The run applies the active environment's overrides.
+            </p>
+            @if (overrideEnvList().length) {
+              @for (e of overrideEnvList(); track e.name) {
+                <div class="ovr">
+                  <div class="ovr__head">
+                    <strong>{{ e.label }}</strong>
+                    <button
+                      type="button"
+                      class="linkbtn"
+                      (click)="addOverrideRow(e.name)"
+                    >
+                      + parameter
+                    </button>
+                  </div>
+                  @for (row of rowsFor(e.name); track $index) {
+                    <div class="ovr__row ovr__row--typed">
+                      <input
+                        type="text"
+                        placeholder="parameter (e.g. host)"
+                        [(ngModel)]="row.key"
+                        (ngModelChange)="markDirty()"
+                      />
+                      <select
+                        [(ngModel)]="row.type"
+                        (ngModelChange)="onParamTypeChange(row)"
+                        title="Parameter type"
+                      >
+                        @for (t of paramTypes; track t) {
+                          <option [value]="t">{{ paramTypeLabels[t] }}</option>
+                        }
+                      </select>
+                      @switch (row.type) {
+                        @case ("boolean") {
+                          <select
+                            [(ngModel)]="row.value"
+                            (ngModelChange)="markDirty()"
+                          >
+                            <option value="true">true</option>
+                            <option value="false">false</option>
+                          </select>
+                        }
+                        @case ("number") {
+                          <input
+                            type="number"
+                            placeholder="value"
+                            [(ngModel)]="row.value"
+                            (ngModelChange)="markDirty()"
+                          />
+                        }
+                        @case ("adapter") {
+                          <select
+                            [(ngModel)]="row.value"
+                            (ngModelChange)="markDirty()"
+                          >
+                            <option value="">— pick adapter —</option>
+                            @for (a of adapterKinds; track a) {
+                              <option [value]="a">{{ a }}</option>
+                            }
+                          </select>
+                        }
+                        @case ("connection") {
+                          <select
+                            [(ngModel)]="row.value"
+                            (ngModelChange)="markDirty()"
+                          >
+                            <option value="">— pick connection —</option>
+                            @for (n of connectionNames(); track n) {
+                              <option [value]="n">{{ n }}</option>
+                            }
+                          </select>
+                        }
+                        @default {
+                          <input
+                            type="text"
+                            placeholder="value"
+                            [(ngModel)]="row.value"
+                            (ngModelChange)="markDirty()"
+                          />
+                        }
+                      }
+                      <button
+                        type="button"
+                        class="iconbtn iconbtn--sm"
+                        title="Remove"
+                        (click)="removeOverrideRow(e.name, $index)"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  } @empty {
+                    <small class="muted"
+                      >No overrides for this environment.</small
+                    >
+                  }
+                  <div class="eff">
+                    <small class="muted">
+                      Effective under <strong>{{ e.label }}</strong> — base
+                      <span class="eff__op">⊕</span> override:
+                    </small>
+                    <table class="eff__tbl">
+                      <tbody>
+                        @for (r of effectiveRows(e.name); track r.key) {
+                          <tr [class.eff__ovr]="r.overridden">
+                            <td class="eff__k">{{ r.key }}</td>
+                            <td class="eff__base">{{ r.base }}</td>
+                            <td class="eff__arrow">→</td>
+                            <td class="eff__val">
+                              {{ r.effective }}
+                              @if (r.overridden) {
+                                <span class="eff__tag">override</span>
+                              }
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              }
+            } @else {
+              <small class="muted">
+                No environments yet — create one in Manage → Environments.
+              </small>
+            }
+          </details>
+
+          @if (d.adapter === "tcp") {
+            <div class="grid2">
+              <label class="fld">
+                <span>Protocol</span>
+                <select
+                  [(ngModel)]="d.protocol"
+                  (ngModelChange)="markDirty()"
+                  [disabled]="!!d.extends"
+                >
+                  <option value="iso8583">ISO 8583</option>
+                  <option value="header_echo">
+                    Header echo (HSM / host command)
+                  </option>
+                </select>
+              </label>
+              <label class="fld">
+                <span
+                  >{{ d.mode === "inbound" ? "Bind host" : "Host" }}
+                  <small class="muted">{{
+                    d.mode === "inbound"
+                      ? "(interface to listen on)"
+                      : "(host to connect to)"
+                  }}</small></span
+                >
+                <input
+                  type="text"
+                  [(ngModel)]="d.host"
+                  (ngModelChange)="markDirty()"
+                  [placeholder]="d.mode === 'inbound' ? '0.0.0.0' : '10.0.1.50'"
+                />
+              </label>
+              <label class="fld">
+                <span
+                  >{{ d.mode === "inbound" ? "Listen port" : "Port" }}
+                  <small class="muted">{{
+                    d.mode === "inbound"
+                      ? "(0 = pick a free port)"
+                      : "(remote port to connect to)"
+                  }}</small></span
+                >
+                <input
+                  type="number"
+                  [(ngModel)]="d.port"
+                  (ngModelChange)="markDirty()"
+                  [placeholder]="d.mode === 'inbound' ? '0' : ''"
+                />
+              </label>
+            </div>
+
+            <details class="sect">
+              <summary>Framing</summary>
+              <div class="grid2">
+                <label class="fld">
+                  <span>Length prefix bytes</span>
+                  <input
+                    type="number"
+                    min="1"
+                    [(ngModel)]="d.framing.lengthPrefixBytes"
+                    (ngModelChange)="markDirty()"
+                  />
+                </label>
+                <label class="fld">
+                  <span>Byte order</span>
+                  <select
+                    [(ngModel)]="d.framing.byteOrder"
+                    (ngModelChange)="markDirty()"
+                  >
+                    <option value="big">big-endian</option>
+                    <option value="little">little-endian</option>
+                  </select>
+                </label>
+                <label class="fld chk">
+                  <input
+                    type="checkbox"
+                    [(ngModel)]="d.framing.lengthIncludesPrefix"
+                    (ngModelChange)="markDirty()"
+                  />
+                  <span>Length counts the prefix bytes</span>
+                </label>
+                <label class="fld chk">
+                  <input
+                    type="checkbox"
+                    [(ngModel)]="d.framing.lengthIncludesHeader"
+                    (ngModelChange)="markDirty()"
+                  />
+                  <span>Length counts the TPDU header</span>
+                </label>
+                <label class="fld">
+                  <span>TPDU bytes (inbound)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    [(ngModel)]="d.framing.tpduBytes"
+                    (ngModelChange)="markDirty()"
+                  />
+                </label>
+                <label class="fld">
+                  <span>TPDU outbound (hex)</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="d.framing.tpduOutboundHex"
+                    (ngModelChange)="markDirty()"
+                    placeholder="6000000000"
+                  />
+                </label>
+                <label class="fld">
+                  <span>Encoding</span>
+                  <input
+                    type="text"
+                    [(ngModel)]="d.framing.encoding"
+                    (ngModelChange)="markDirty()"
+                  />
+                </label>
+              </div>
+            </details>
+
+            @if (!d.extends && d.protocol === "iso8583") {
+              <details class="sect" open>
+                <summary>Correlation (ISO 8583)</summary>
+                <div class="grid2">
+                  <label class="fld">
+                    <span>Correlation DE</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="d.correlation.field"
+                      (ngModelChange)="markDirty()"
+                      placeholder="11 (STAN)"
+                    />
+                  </label>
+                  <label class="fld chk">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="d.correlation.autoGenerate"
+                      (ngModelChange)="markDirty()"
+                    />
+                    <span>Auto-generate the field (STAN)</span>
+                  </label>
+                  <label class="fld chk">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="d.correlation.matchMti"
+                      (ngModelChange)="markDirty()"
+                    />
+                    <span>Also match on response MTI</span>
+                  </label>
+                </div>
+              </details>
+            }
+
+            @if (!d.extends && d.protocol === "header_echo") {
+              <details class="sect" open>
+                <summary>Header echo (HSM)</summary>
+                <div class="grid2">
+                  <label class="fld">
+                    <span>Header bytes</span>
+                    <input
+                      type="number"
+                      min="1"
+                      [(ngModel)]="d.headerEcho.headerBytes"
+                      (ngModelChange)="markDirty()"
+                    />
+                  </label>
+                  <label class="fld">
+                    <span>Response command bytes</span>
+                    <input
+                      type="number"
+                      min="0"
+                      [(ngModel)]="d.headerEcho.responseCommandBytes"
+                      (ngModelChange)="markDirty()"
+                    />
+                  </label>
+                  <label class="fld">
+                    <span>Error/return code bytes</span>
+                    <input
+                      type="number"
+                      min="0"
+                      [(ngModel)]="d.headerEcho.errorFieldBytes"
+                      (ngModelChange)="markDirty()"
+                    />
+                  </label>
+                  <label class="fld">
+                    <span>Diagnostic command</span>
+                    <input
+                      type="text"
+                      [(ngModel)]="d.headerEcho.diagnosticCommand"
+                      (ngModelChange)="markDirty()"
+                      placeholder="NC"
+                    />
+                  </label>
+                </div>
+              </details>
+            }
+
+            <details class="sect">
+              <summary>Session</summary>
+              <div class="grid2">
+                <label class="fld chk">
+                  <input
+                    type="checkbox"
+                    [(ngModel)]="d.signOn"
+                    (ngModelChange)="markDirty()"
+                  />
+                  <span>Sign on at connect</span>
+                </label>
+                <label class="fld chk">
+                  <input
+                    type="checkbox"
+                    [(ngModel)]="d.keepalive.enabled"
+                    (ngModelChange)="markDirty()"
+                  />
+                  <span>Keep-alive echo</span>
+                </label>
+                <label class="fld">
+                  <span>Keep-alive interval (s)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    [(ngModel)]="d.keepalive.intervalSec"
+                    (ngModelChange)="markDirty()"
+                    [disabled]="!d.keepalive.enabled"
+                  />
+                </label>
+                <label class="fld">
+                  <span>Response timeout (s)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    [(ngModel)]="d.responseTimeoutSec"
+                    (ngModelChange)="markDirty()"
+                  />
+                </label>
+                <label class="fld">
+                  <span>Connect timeout (s)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    [(ngModel)]="d.connectTimeoutSec"
+                    (ngModelChange)="markDirty()"
+                  />
+                </label>
+              </div>
+            </details>
+          }
+
+          @if (d.adapter === "grpc") {
+            <div class="grid2">
+              <label class="fld">
+                <span>Target <small class="muted">(host:port)</small></span>
+                <input
+                  type="text"
+                  [(ngModel)]="d.grpc.target"
+                  (ngModelChange)="markDirty()"
+                  placeholder="localhost:50051"
+                />
+              </label>
+              <label class="fld">
+                <span>Timeout (s)</span>
+                <input
+                  type="number"
+                  min="1"
+                  [(ngModel)]="d.grpc.timeoutSec"
+                  (ngModelChange)="markDirty()"
+                />
+              </label>
+              <label class="fld">
+                <span
+                  >Schema source
+                  <small class="muted"
+                    >(how the service is described)</small
+                  ></span
+                >
+                <select
+                  [(ngModel)]="d.grpc.schemaSource"
+                  (ngModelChange)="markDirty()"
+                >
+                  <option value="descriptor">Descriptor set (.pb)</option>
+                  <option value="proto">Declare .proto</option>
+                  <option value="reflection">
+                    Discover via server reflection
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            @if (d.grpc.schemaSource === "descriptor") {
+              <div class="grid2">
+                <label class="fld">
+                  <span
+                    >Descriptor set path
+                    <small class="muted">(.pb on the worker host)</small></span
+                  >
+                  <input
+                    type="text"
+                    [(ngModel)]="d.grpc.descriptorSetPath"
+                    (ngModelChange)="markDirty()"
+                    placeholder="/etc/payprobe/bundle.pb"
+                  />
+                </label>
+                <label class="fld">
+                  <span
+                    >Descriptor set (base64)
+                    <small class="muted">(wins over path)</small></span
+                  >
+                  <input
+                    type="text"
+                    [(ngModel)]="d.grpc.descriptorSetB64"
+                    (ngModelChange)="markDirty()"
+                    placeholder="CgxncmVldC5wcm90bxIF…"
+                  />
+                </label>
+              </div>
+            }
+
+            @if (d.grpc.schemaSource === "proto") {
+              <div class="proto">
+                <p class="muted">
+                  Add every <code>.proto</code> in the set — drop or pick the
+                  files, or paste source into a new file. Keep each file’s name
+                  so cross-file <code>import "other.proto";</code> statements
+                  resolve. Compiled together on the worker (needs
+                  <code>grpcio-tools</code>).
+                </p>
+
+                <div
+                  class="dropzone"
+                  [class.dropzone--over]="protoDragOver()"
+                  (dragover)="onProtoDragOver($event)"
+                  (dragleave)="onProtoDragLeave()"
+                  (drop)="onProtoDrop($event)"
+                >
+                  <span>Drag &amp; drop <code>.proto</code> files here</span>
+                  <span class="dropzone__or">or</span>
+                  <label class="btn btn--sm">
+                    Choose files
+                    <input
+                      type="file"
+                      accept=".proto"
+                      multiple
+                      hidden
+                      (change)="onProtoFilesPicked($event)"
+                    />
+                  </label>
+                </div>
+
+                @for (f of d.grpc.protoFiles; track $index) {
+                  <div class="proto__file">
+                    <div class="proto__file-head">
+                      <input
+                        type="text"
+                        class="mono"
+                        [(ngModel)]="f.name"
+                        (ngModelChange)="markDirty()"
+                        placeholder="payments.proto"
+                      />
+                      <button
+                        type="button"
+                        class="iconbtn iconbtn--sm"
+                        (click)="removeProtoFile($index)"
+                        title="Remove file"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <textarea
+                      rows="8"
+                      class="mono"
+                      [(ngModel)]="f.text"
+                      (ngModelChange)="markDirty()"
+                      placeholder='syntax = "proto3";
+package demo;
+import "common.proto";
+service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
+                    ></textarea>
+                  </div>
+                } @empty {
+                  <p class="muted">No .proto files yet.</p>
+                }
+                <button
+                  type="button"
+                  class="btn btn--sm"
+                  (click)="addProtoFile()"
+                >
+                  + Add file (paste)
+                </button>
+              </div>
+
+              <details class="sect">
+                <summary>
+                  Advanced <small class="muted">(worker-host paths)</small>
+                </summary>
+                <div class="grid2">
+                  <label class="fld">
+                    <span
+                      >.proto file paths
+                      <small class="muted"
+                        >(one per line, on the worker host)</small
+                      ></span
+                    >
+                    <textarea
+                      rows="3"
+                      class="mono"
+                      [(ngModel)]="d.grpc.protoPaths"
+                      (ngModelChange)="markDirty()"
+                      placeholder="proto/payments.proto"
+                    ></textarea>
+                  </label>
+                  <label class="fld">
+                    <span
+                      >Import roots
+                      <small class="muted"
+                        >(extra -I dirs, one per line)</small
+                      ></span
+                    >
+                    <textarea
+                      rows="3"
+                      class="mono"
+                      [(ngModel)]="d.grpc.protoIncludeDirs"
+                      (ngModelChange)="markDirty()"
+                      placeholder="proto"
+                    ></textarea>
+                  </label>
+                </div>
+              </details>
+            }
+
+            @if (d.grpc.schemaSource === "reflection") {
+              <p class="muted note">
+                The schema is discovered from the server’s
+                <code>ServerReflection</code> service at connect — no descriptor
+                set or .proto needed. The server must expose reflection (needs
+                <code>grpcio-reflection</code> on the worker). Run a step with
+                action <code>$discover</code> to list the methods found.
+              </p>
+            }
+
+            <details class="sect">
+              <summary>TLS</summary>
+              <div class="grid2">
+                <label class="fld chk">
+                  <input
+                    type="checkbox"
+                    [(ngModel)]="d.grpc.tlsEnabled"
+                    (ngModelChange)="markDirty()"
+                  />
+                  <span>Use a secure channel (TLS)</span>
+                </label>
+                <label class="fld">
+                  <span
+                    >Root certs path
+                    <small class="muted">(optional)</small></span
+                  >
+                  <input
+                    type="text"
+                    [(ngModel)]="d.grpc.tlsRootCertsPath"
+                    (ngModelChange)="markDirty()"
+                    [disabled]="!d.grpc.tlsEnabled"
+                    placeholder="/etc/ssl/ca.pem"
+                  />
+                </label>
+              </div>
+            </details>
+
+            <details class="sect">
+              <summary>
+                Call metadata
+                <small class="muted">(headers sent on every call)</small>
+              </summary>
+              <div class="rows">
+                @for (m of d.grpc.metadata; track $index) {
+                  <div class="rows__row">
+                    <input
+                      type="text"
+                      [(ngModel)]="m.key"
+                      (ngModelChange)="markDirty()"
+                      placeholder="authorization"
+                    />
+                    <input
+                      type="text"
+                      [(ngModel)]="m.value"
+                      (ngModelChange)="markDirty()"
+                      placeholder="Bearer …"
+                    />
+                    <button
+                      type="button"
+                      class="iconbtn iconbtn--sm"
+                      (click)="removeMeta($index)"
+                      title="Remove"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                } @empty {
+                  <p class="muted">No metadata headers.</p>
+                }
+                <button type="button" class="btn btn--sm" (click)="addMeta()">
+                  + Add header
+                </button>
+              </div>
+            </details>
+
+            <details class="sect" open>
+              <summary>
+                Actions
+                <small class="muted"
+                  >(friendly name → package.Service/Method)</small
+                >
+              </summary>
+              <div class="rows">
+                @for (a of d.grpc.actions; track $index) {
+                  <div class="rows__row">
+                    <input
+                      type="text"
+                      [(ngModel)]="a.name"
+                      (ngModelChange)="markDirty()"
+                      placeholder="authorize"
+                    />
+                    <input
+                      type="text"
+                      [(ngModel)]="a.method"
+                      (ngModelChange)="markDirty()"
+                      placeholder="payments.PaymentService/Authorize"
+                    />
+                    <button
+                      type="button"
+                      class="iconbtn iconbtn--sm"
+                      (click)="removeAction($index)"
+                      title="Remove"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                } @empty {
+                  <p class="muted">
+                    No actions — steps can still call the raw method name.
+                  </p>
+                }
+                <button type="button" class="btn btn--sm" (click)="addAction()">
+                  + Add action
+                </button>
+              </div>
+            </details>
+          }
+
+          @if (d.adapter === "http") {
+            <div class="grid2">
+              <label class="fld">
+                <span
+                  >Base URL <small class="muted">(REST endpoint)</small></span
+                >
+                <input
+                  type="text"
+                  [(ngModel)]="d.rest.baseUrl"
+                  (ngModelChange)="markDirty()"
+                  placeholder="https://api.example.com"
+                />
+              </label>
+              <label class="fld">
+                <span>Auth type</span>
+                <select
+                  [(ngModel)]="d.rest.authType"
+                  (ngModelChange)="markDirty()"
+                >
+                  <option value="">— none —</option>
+                  <option value="bearer">Bearer token</option>
+                  <option value="basic">Basic auth</option>
+                </select>
+              </label>
+              <label class="fld">
+                <span
+                  >API key <small class="muted">(bearer / api key)</small></span
+                >
+                <input
+                  type="password"
+                  [(ngModel)]="d.rest.apiKey"
+                  (ngModelChange)="markDirty()"
+                  placeholder="••••••"
+                />
+              </label>
+              <label class="fld">
+                <span>Username <small class="muted">(basic auth)</small></span>
+                <input
+                  type="text"
+                  [(ngModel)]="d.rest.username"
+                  (ngModelChange)="markDirty()"
+                />
+              </label>
+              <label class="fld">
+                <span>Password <small class="muted">(basic auth)</small></span>
+                <input
+                  type="password"
+                  [(ngModel)]="d.rest.password"
+                  (ngModelChange)="markDirty()"
+                />
+              </label>
+              <label class="fld">
+                <span>Timeout (ms)</span>
+                <input
+                  type="number"
+                  [(ngModel)]="d.rest.timeoutMs"
+                  (ngModelChange)="markDirty()"
+                  placeholder="5000"
+                />
+              </label>
+            </div>
+          }
+
+          @if (d.adapter === "nats") {
+            <p class="muted" style="margin: 0 0 8px">
+              NATS is broker-mediated (ADR-0006): Host/Port (or Servers) address
+              the broker, not a bind target. A responder participant subscribes
+              to Subjects; an outbound client publishes/requests on Subject.
+            </p>
+            <div class="grid2">
+              <label class="fld">
+                <span>Host <small class="muted">(broker)</small></span>
+                <input
+                  type="text"
+                  [(ngModel)]="d.host"
+                  (ngModelChange)="markDirty()"
+                  placeholder="nats-1"
+                />
+              </label>
+              <label class="fld">
+                <span
+                  >Port <small class="muted">(broker client port)</small></span
+                >
+                <input
+                  type="number"
+                  [(ngModel)]="d.port"
+                  (ngModelChange)="markDirty()"
+                  placeholder="4222"
+                />
+              </label>
+              <label class="fld grid2__full">
+                <span
+                  >Servers
+                  <small class="muted"
+                    >(multi-URL cluster, one per line — wins over
+                    host/port)</small
+                  ></span
+                >
+                <textarea
+                  rows="2"
+                  [(ngModel)]="d.nats.servers"
+                  (ngModelChange)="markDirty()"
+                  placeholder="nats://nats-1:4222&#10;nats://nats-2:4223"
+                ></textarea>
+              </label>
+              <label class="fld">
+                <span
+                  >Subject
+                  <small class="muted">(publish / request)</small></span
+                >
+                <input
+                  type="text"
+                  [(ngModel)]="d.nats.subject"
+                  (ngModelChange)="markDirty()"
+                  placeholder="pay.auth"
+                />
+              </label>
+              <label class="fld">
+                <span>Codec</span>
+                <select
+                  [(ngModel)]="d.nats.codec"
+                  (ngModelChange)="markDirty()"
+                >
+                  <option value="json">JSON</option>
+                  <option value="bytes">Bytes (hex / base64)</option>
+                  <option value="iso8583">ISO 8583</option>
+                </select>
+              </label>
+              <label class="fld">
+                <span
+                  >Subjects
+                  <small class="muted"
+                    >(inbound responder, one per line)</small
+                  ></span
+                >
+                <textarea
+                  rows="2"
+                  [(ngModel)]="d.nats.subjects"
+                  (ngModelChange)="markDirty()"
+                  placeholder="pay.auth&#10;pay.reversal"
+                ></textarea>
+              </label>
+              <label class="fld">
+                <span>Queue group <small class="muted">(fan-out)</small></span>
+                <input
+                  type="text"
+                  [(ngModel)]="d.nats.queueGroup"
+                  (ngModelChange)="markDirty()"
+                  placeholder="issuers"
+                />
+              </label>
+              <label class="fld">
+                <span>Request timeout (s)</span>
+                <input
+                  type="number"
+                  [(ngModel)]="d.nats.requestTimeoutSec"
+                  (ngModelChange)="markDirty()"
+                  placeholder="2"
+                />
+              </label>
+              <label class="fld">
+                <span>Auth token <small class="muted">(secret)</small></span>
+                <input
+                  type="password"
+                  [(ngModel)]="d.nats.authToken"
+                  (ngModelChange)="markDirty()"
+                  placeholder="••••••"
+                />
+              </label>
+              <label class="fld">
+                <span>NKey seed <small class="muted">(secret)</small></span>
+                <input
+                  type="password"
+                  [(ngModel)]="d.nats.authNkeySeed"
+                  (ngModelChange)="markDirty()"
+                />
+              </label>
+              <label class="fld">
+                <span
+                  >Creds file
+                  <small class="muted">(.creds path, secret)</small></span
+                >
+                <input
+                  type="text"
+                  [(ngModel)]="d.nats.authCreds"
+                  (ngModelChange)="markDirty()"
+                  placeholder="/etc/nats/app.creds"
+                />
+              </label>
+              <label class="fld">
+                <span
+                  >JetStream stream
+                  <small class="muted">(created if missing)</small></span
+                >
+                <input
+                  type="text"
+                  [(ngModel)]="d.nats.jetstreamStream"
+                  (ngModelChange)="markDirty()"
+                  placeholder="PAY"
+                />
+              </label>
+              <label class="fld">
+                <span
+                  >JetStream durable
+                  <small class="muted">(consumer name)</small></span
+                >
+                <input
+                  type="text"
+                  [(ngModel)]="d.nats.jetstreamDurable"
+                  (ngModelChange)="markDirty()"
+                  placeholder="pp"
+                />
+              </label>
+              <label class="fld grid2__full">
+                <span
+                  >JetStream subjects
+                  <small class="muted"
+                    >(stream binds, one per line)</small
+                  ></span
+                >
+                <textarea
+                  rows="2"
+                  [(ngModel)]="d.nats.jetstreamSubjects"
+                  (ngModelChange)="markDirty()"
+                  placeholder="pay.>"
+                ></textarea>
+              </label>
+            </div>
+          }
+
+          @if (d.adapter === "payshield") {
+            <div class="grid2">
+              <label class="fld">
+                <span
+                  >Host <small class="muted">(payShield appliance)</small></span
+                >
+                <input
+                  type="text"
+                  [(ngModel)]="d.host"
+                  (ngModelChange)="markDirty()"
+                  placeholder="10.0.2.10"
+                />
+              </label>
+              <label class="fld">
+                <span>Port</span>
+                <input
+                  type="number"
+                  [(ngModel)]="d.port"
+                  (ngModelChange)="markDirty()"
+                  placeholder="1500"
+                />
+              </label>
+              <label class="fld">
+                <span
+                  >Header
+                  <small class="muted">(host-command header)</small></span
+                >
+                <input
+                  type="text"
+                  [(ngModel)]="d.payshield.header"
+                  (ngModelChange)="markDirty()"
+                  placeholder="HDR1"
+                />
+              </label>
+              <label class="fld">
+                <span>Response timeout (s)</span>
+                <input
+                  type="number"
+                  [(ngModel)]="d.payshield.responseTimeoutSec"
+                  (ngModelChange)="markDirty()"
+                  placeholder="5"
+                />
+              </label>
+            </div>
+          }
+
+          @if (
+            d.adapter === "db_probe_core" || d.adapter === "db_probe_switch"
+          ) {
+            <div class="grid2">
+              <label class="fld">
+                <span>Engine</span>
+                <select [(ngModel)]="d.db.engine" (ngModelChange)="markDirty()">
+                  <option value="postgresql">PostgreSQL</option>
+                  <option value="mysql">MySQL</option>
+                  <option value="sqlite">SQLite</option>
+                </select>
+              </label>
+              <label class="fld">
+                <span>Host</span>
+                <input
+                  type="text"
+                  [(ngModel)]="d.host"
+                  (ngModelChange)="markDirty()"
+                  placeholder="db.internal"
+                />
+              </label>
+              <label class="fld">
+                <span>Port</span>
+                <input
+                  type="number"
+                  [(ngModel)]="d.port"
+                  (ngModelChange)="markDirty()"
+                  placeholder="5432"
+                />
+              </label>
+              <label class="fld">
+                <span>Database</span>
+                <input
+                  type="text"
+                  [(ngModel)]="d.db.dbname"
+                  (ngModelChange)="markDirty()"
+                  placeholder="core"
+                />
+              </label>
+              <label class="fld">
+                <span>User <small class="muted">(read-only)</small></span>
+                <input
+                  type="text"
+                  [(ngModel)]="d.db.user"
+                  (ngModelChange)="markDirty()"
+                  placeholder="payprobe_readonly"
+                />
+              </label>
+              <label class="fld">
+                <span>Password</span>
+                <input
+                  type="password"
+                  [(ngModel)]="d.db.password"
+                  (ngModelChange)="markDirty()"
+                />
+              </label>
+            </div>
+            <p class="muted note">
+              Read-only probe — used for verification queries only.
+            </p>
+          }
+
+          <div class="actions">
+            <button
+              class="btn btn--primary"
+              (click)="save()"
+              [disabled]="!dirty()"
+            >
+              Save
+            </button>
+            <button class="btn" (click)="cancel()">Cancel</button>
+            <button
+              class="btn"
+              (click)="testConnection()"
+              [disabled]="testing()"
+            >
+              {{ testing() ? "Testing…" : "Test" }}
+            </button>
+            <button class="btn" (click)="clone()">Clone</button>
+            @if (testResult(); as t) {
+              <span class="test-result" [class.ok]="t.ok" [class.bad]="!t.ok">
+                {{ t.ok ? "✓ " + t.latency_ms + " ms" : "✗ " + t.error }}
+              </span>
+            }
+            @if (originalName()) {
+              <button class="btn btn--danger" (click)="remove(d)">
+                Delete
+              </button>
+            }
+          </div>
+        </div>
+      } @else {
+        <div class="placeholder">
+          <pp-icon name="cpu" [size]="28" />
+          <p>Select a connection to edit, or create a new one.</p>
+        </div>
+      }
+    </section>
+
+    <!-- export -->
+    <aside class="inst__export" [class.collapsed]="!showExport()">
+      <div class="exp__bar">
+        <button class="exp__toggle" (click)="showExport.set(!showExport())">
+          {{ showExport() ? "Export ▸" : "◂ Export" }}
+        </button>
+        @if (showExport()) {
+          <button
+            class="iconbtn iconbtn--sm"
+            title="Copy"
+            (click)="copyExport()"
+          >
+            ⧉
+          </button>
+          <button
+            class="iconbtn iconbtn--sm"
+            title="Download"
+            (click)="downloadExport()"
+          >
+            ⭳
+          </button>
+        }
+      </div>
+      @if (showExport()) {
+        <p class="muted exp__hint">
+          Paste this into an environment file's <code>adapters</code> map, or
+          send it as the <code>environment</code> when starting a run.
+        </p>
+        <pre class="exp__json">{{ store.adaptersJson() }}</pre>
+      }
+    </aside>
+  </div>
+</div>

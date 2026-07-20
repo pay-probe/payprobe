@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "payprobe-scenario-service"
+version = "0.1.0"
+description = "PayProbe scenario CRUD API with validation and versioning"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.0",
+    "asyncpg>=0.29",
+    "structlog>=23.0",
+    "pyyaml>=6.0",
+    "PyJWT>=2.8",
+    "cryptography>=42.0",
+    # shared agent toolkit + crypto (SecretBox); local editable package, not PyPI
+    "payprobe-common",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx", "ruff", "black", "pytest-cov"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["api", "models"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

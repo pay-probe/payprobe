@@ -1,0 +1,40 @@
+# Soak / leak-detection alert rules for the PayProbe load fleet.
+#
+# These fire on the per-worker RSS series the orchestrator exports while a load
+# run is active (payprobe_load_worker_rss_bytes{run_id,worker_id}). The signal
+# we care about during a cyclic soak is *monotonic* growth: a healthy worker
+# saw-tooths (allocate, GC, release) and its RSS slope averages out near zero;
+# a leaking worker climbs every cycle and never gives the memory back.
+groups:
+  - name: payprobe-soak
+    rules:
+      - alert: WorkerMemoryLeak
+        # deriv() is the least-squares slope (bytes/sec) over the window. A worker
+        # whose RSS has been climbing > ~512 KiB/min for 15m straight is not just
+        # warming up — it's leaking. 8738 B/s ≈ 512 KiB/min ≈ 30 MiB over the hold.
+        expr: deriv(payprobe_load_worker_rss_bytes[10m]) > 8738
+        for: 15m
+        labels:
+          severity: warning
+          component: load-worker
+        annotations:
+          summary: "Load worker {{ $labels.worker_id }} memory is climbing monotonically"
+          description: >-
+            RSS for worker {{ $labels.worker_id }} (run {{ $labels.run_id }}) has
+            grown at {{ $value | humanize }}B/s for 15m+ — a likely leak. Check the
+            "Soak — worker RSS" panel on the PayProbe Load dashboard.
+
+      - alert: WorkerMemoryHigh
+        # Absolute backstop: a worker over 1.5 GiB RSS is approaching typical
+        # container limits regardless of slope.
+        expr: payprobe_load_worker_rss_bytes > 1.5 * 1024 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+          component: load-worker
+        annotations:
+          summary: "Load worker {{ $labels.worker_id }} RSS is high"
+          description: >-
+            Worker {{ $labels.worker_id }} (run {{ $labels.run_id }}) is using
+            {{ $value | humanize1024 }}B resident — close to typical container
+            limits. Consider more workers or a lower per-worker target.

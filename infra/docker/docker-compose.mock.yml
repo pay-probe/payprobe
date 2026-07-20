@@ -1,0 +1,10 @@
+# PayProbe — mock stack.
+#
+# Superseded: docker-compose.yml now runs the full stack in MOCK mode by
+# default (no secrets or hardware required). Use it directly:
+#
+#     docker compose -f infra/docker/docker-compose.yml up --build
+#
+# This file is kept only so older references/scripts don't break; it defines no
+# services of its own.
+name: payprobe

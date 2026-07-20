@@ -1,0 +1,393 @@
+<div class="insp">
+  <pp-page-header>
+    <div class="insp__heading" subtitle>
+      <span class="muted"
+        >Decode a wire message or build &amp; validate one, field by field</span
+      >
+    </div>
+    <label class="fmt">
+      <span>Format</span>
+      <select [(ngModel)]="formatModel">
+        <option value="">Default (ISO 8583:1987)</option>
+        @for (f of formats(); track f.id) {
+          <option [value]="f.id">{{ f.name }} · v{{ f.version }}</option>
+        }
+      </select>
+    </label>
+    <div class="tabs">
+      <button
+        class="tab"
+        [class.on]="mode() === 'analyze'"
+        (click)="setMode('analyze')"
+      >
+        Analyze
+      </button>
+      <button
+        class="tab"
+        [class.on]="mode() === 'build'"
+        (click)="setMode('build')"
+      >
+        Build
+      </button>
+      <button
+        class="tab"
+        [class.on]="mode() === 'diff'"
+        (click)="setMode('diff')"
+      >
+        Diff
+      </button>
+    </div>
+  </pp-page-header>
+
+  <div class="insp__body">
+    @if (mode() === "analyze") {
+      <section class="pane">
+        <label class="fld">
+          <span>Wire message (ASCII, hex for binary fields)</span>
+          <textarea
+            rows="3"
+            [(ngModel)]="messageModel"
+            placeholder="0200F23C…"
+          ></textarea>
+        </label>
+        <div class="row-actions">
+          <button
+            class="btn btn--primary"
+            (click)="analyze()"
+            [disabled]="analyzing()"
+          >
+            {{ analyzing() ? "Analyzing…" : "Analyze" }}
+          </button>
+        </div>
+
+        @if (analysis(); as a) {
+          <div class="result">
+            <div class="meta">
+              <span class="chip"
+                >MTI <b>{{ a.mti }}</b></span
+              >
+              @if (a.mti_info; as mi) {
+                <span class="chip" [title]="mi.version">
+                  {{ mi.message_class }} · {{ mi.function }} · from
+                  {{ mi.origin }}
+                </span>
+              }
+              @if (a.bitmap) {
+                <span class="chip mono" title="Primary bitmap"
+                  >BMP {{ a.bitmap.primary }}</span
+                >
+                @if (a.bitmap.secondary) {
+                  <span class="chip mono" title="Secondary bitmap"
+                    >SEC {{ a.bitmap.secondary }}</span
+                  >
+                }
+                <span class="chip">{{ a.bitmap.present.length }} fields</span>
+              }
+            </div>
+
+            @if (a.bitmap) {
+              <div class="bits">
+                @for (de of a.bitmap.present; track de) {
+                  <span class="bit">{{ de }}</span>
+                }
+              </div>
+            }
+
+            @if (a.errors.length) {
+              <ul class="errs">
+                @for (e of a.errors; track e) {
+                  <li>{{ e }}</li>
+                }
+              </ul>
+            }
+
+            <table class="de">
+              <thead>
+                <tr>
+                  <th>DE</th>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Len</th>
+                  <th>Value</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (f of a.fields; track f.de) {
+                  <tr [class.bad]="f.error">
+                    <td class="mono">{{ f.de }}</td>
+                    <td>{{ f.name }}</td>
+                    <td class="muted">{{ f.type }} · {{ f.len_type }}</td>
+                    <td class="mono">{{ f.length_actual }}</td>
+                    <td class="mono val">
+                      {{ f.value }}
+                      @if (f.interpretation) {
+                        <div class="interp">→ {{ f.interpretation }}</div>
+                      }
+                    </td>
+                    <td>
+                      @if (f.error) {
+                        <span class="x" [title]="f.error">✗</span>
+                      } @else {
+                        <span class="ok">✓</span>
+                      }
+                    </td>
+                  </tr>
+                  @if (f.tlv) {
+                    @for (t of flatTlv(f.tlv); track $index) {
+                      <tr class="tlv">
+                        <td></td>
+                        <td
+                          [style.paddingLeft.px]="12 + t.depth * 16"
+                          class="mono"
+                        >
+                          {{ t.node.tag }}
+                        </td>
+                        <td colspan="2">{{ t.node.name || "—" }}</td>
+                        <td class="mono val" colspan="2">
+                          {{ t.node.value || "(constructed)" }}
+                        </td>
+                      </tr>
+                    }
+                  }
+                }
+              </tbody>
+            </table>
+
+            @if (a.trailing) {
+              <p class="muted">
+                Trailing bytes not consumed:
+                <code class="mono">{{ a.trailing }}</code>
+              </p>
+            }
+          </div>
+        }
+      </section>
+    } @else if (mode() === "build") {
+      <section class="pane">
+        <div class="build-head">
+          <label class="fld fld--mti">
+            <span>MTI</span>
+            <input type="text" [(ngModel)]="mtiModel" placeholder="0200" />
+          </label>
+          @if (availableFields().length) {
+            <label class="fmt">
+              <span>Add field</span>
+              <select [(ngModel)]="pickDe" (ngModelChange)="addField($event)">
+                <option value="">— pick DE —</option>
+                @for (f of availableFields(); track f.de) {
+                  <option [value]="f.de">{{ f.de }} · {{ f.name }}</option>
+                }
+              </select>
+            </label>
+          }
+          <button class="btn btn--sm" (click)="addRow()">+ Field</button>
+        </div>
+
+        <table class="kv">
+          <thead>
+            <tr>
+              <th>DE</th>
+              <th>Field</th>
+              <th>Value</th>
+              <th></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of rows(); track $index) {
+              <tr>
+                <td class="kv__de">
+                  <input type="text" [(ngModel)]="row.key" placeholder="4" />
+                </td>
+                <td class="muted kv__name">{{ fieldName(row.key) || "—" }}</td>
+                <td>
+                  <input
+                    type="text"
+                    [(ngModel)]="row.value"
+                    placeholder="000000010000"
+                  />
+                </td>
+                <td class="kv__chk">
+                  @if (rowError(row); as e) {
+                    <span class="x" [title]="e">✗</span>
+                  } @else if (row.key && row.value) {
+                    <span class="ok">✓</span>
+                  }
+                </td>
+                <td>
+                  <button
+                    class="iconbtn iconbtn--sm"
+                    (click)="removeRow($index)"
+                  >
+                    ✕
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+
+        <div class="row-actions">
+          <button class="btn btn--primary" (click)="build()">
+            Build &amp; validate
+          </button>
+        </div>
+
+        @if (buildResult(); as r) {
+          @if (r.errors.length) {
+            <ul class="errs">
+              @for (e of r.errors; track e) {
+                <li>{{ e }}</li>
+              }
+            </ul>
+          } @else {
+            <div class="ok-banner">✓ Valid — {{ r.message?.length }} chars</div>
+          }
+          @if (r.message) {
+            <div class="built">
+              <code class="mono built__msg">{{ r.message }}</code>
+              <div class="row-actions">
+                <button class="btn btn--sm" (click)="copy(r.message)">
+                  Copy
+                </button>
+                <button class="btn btn--sm" (click)="analyzeBuilt()">
+                  Analyze this →
+                </button>
+              </div>
+            </div>
+          }
+        }
+
+        <details class="tlv-builder">
+          <summary>DE 55 — EMV TLV builder</summary>
+          <table class="kv">
+            <thead>
+              <tr>
+                <th>Tag</th>
+                <th>Value (hex)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of tlvRows(); track $index) {
+                <tr>
+                  <td class="kv__de">
+                    <input
+                      type="text"
+                      [(ngModel)]="row.key"
+                      placeholder="9F26"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="text"
+                      [(ngModel)]="row.value"
+                      placeholder="1122334455667788"
+                    />
+                  </td>
+                  <td>
+                    <button
+                      class="iconbtn iconbtn--sm"
+                      (click)="removeTlvRow($index)"
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          <div class="row-actions">
+            <button class="btn btn--sm" (click)="addTlvRow()">+ Tag</button>
+            <button class="btn btn--primary btn--sm" (click)="buildTlv()">
+              Build TLV
+            </button>
+          </div>
+          @if (tlvHex()) {
+            <div class="built">
+              <code class="mono built__msg">{{ tlvHex() }}</code>
+              <div class="row-actions">
+                <button class="btn btn--sm" (click)="copy(tlvHex())">
+                  Copy
+                </button>
+                <button class="btn btn--sm" (click)="useTlvInDe55()">
+                  Set DE 55 →
+                </button>
+              </div>
+            </div>
+          }
+        </details>
+      </section>
+    } @else {
+      <section class="pane">
+        <div class="grid2">
+          <label class="fld">
+            <span>Message A</span>
+            <textarea
+              rows="3"
+              [(ngModel)]="msgAModel"
+              placeholder="0210…"
+            ></textarea>
+          </label>
+          <label class="fld">
+            <span>Message B</span>
+            <textarea
+              rows="3"
+              [(ngModel)]="msgBModel"
+              placeholder="0210…"
+            ></textarea>
+          </label>
+        </div>
+        <div class="row-actions">
+          <button
+            class="btn btn--primary"
+            (click)="diffMessages()"
+            [disabled]="diffing()"
+          >
+            {{ diffing() ? "Diffing…" : "Diff" }}
+          </button>
+        </div>
+
+        @if (diff(); as d) {
+          <div class="result">
+            <div class="meta">
+              <span class="chip"
+                >MTI <b>{{ d.mti_a }}</b> → <b>{{ d.mti_b }}</b></span
+              >
+              <span class="chip">+{{ d.summary.added }} added</span>
+              <span class="chip">-{{ d.summary.removed }} removed</span>
+              <span class="chip">~{{ d.summary.changed }} changed</span>
+            </div>
+            <table class="de">
+              <thead>
+                <tr>
+                  <th>DE</th>
+                  <th>Name</th>
+                  <th>A</th>
+                  <th>B</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (f of d.fields; track f.de) {
+                  <tr [class.bad]="f.change !== 'same'">
+                    <td class="mono">{{ f.de }}</td>
+                    <td>{{ f.name }}</td>
+                    <td class="mono val">{{ f.a ?? "—" }}</td>
+                    <td class="mono val">{{ f.b ?? "—" }}</td>
+                    <td>
+                      <span class="dchg" [attr.data-c]="f.change">{{
+                        f.change
+                      }}</span>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </section>
+    }
+  </div>
+</div>

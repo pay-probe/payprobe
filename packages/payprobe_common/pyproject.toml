@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Same layout as `packages/report_service`: code lives at this directory's root
+# but is imported as `payprobe_common` (the repo puts `packages/` on PYTHONPATH).
+#  - `only-include` selects the package modules (not tests/README);
+#  - `sources` relocates them under a top-level `payprobe_common/` in the wheel;
+#  - `dev-mode-dirs` makes `pip install -e .` add the parent `packages/` dir to
+#    sys.path via a .pth so `import payprobe_common` resolves to this directory.
+[tool.hatch.build.targets.wheel]
+only-include = ["crypto.py", "agent_toolkit.py", "__init__.py"]
+dev-mode-dirs = [".."]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = "payprobe_common"
+
+[project]
+name = "payprobe-common"
+version = "0.1.0"
+description = "Shared PayProbe utilities (encryption-at-rest, the assistant agent toolkit, …)."
+requires-python = ">=3.11"
+# `cryptography` is an optional runtime need: only required when
+# PAYPROBE_SECRET_KEY is set (SecretBox is a no-op passthrough otherwise).
+dependencies = []
+
+[project.optional-dependencies]
+crypto = ["cryptography>=42.0"]
+dev = ["pytest", "cryptography>=42.0"]

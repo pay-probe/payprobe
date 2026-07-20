@@ -1,0 +1,16 @@
+# Keep build contexts small. Applies to builds whose context is the repo root
+# (orchestrator, worker). Their Dockerfiles only need packages/worker,
+# packages/orchestrator and examples/.
+.git/
+.github/
+**/node_modules/
+**/.angular/
+**/dist/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/*.db
+**/*.log
+# the portal is built from its own context, not needed by the python images
+packages/portal/
+docs/

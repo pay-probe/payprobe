@@ -1,0 +1,11 @@
+{
+  "description": "Thales payShield 10K HSM simulator — answers host commands (NC, A0, BU, CW/CY, CA, EC, M6/M8) with real payment crypto under a test LMK. Stand in for an HSM with no physical appliance. Listens on the classic payShield host port 1500.",
+  "protocol": "payshield",
+  "host": "0.0.0.0",
+  "port": 1500,
+  "header_bytes": 4,
+  "framing": { "length_prefix_bytes": 2, "length_byte_order": "big", "encoding": "ascii" },
+  "lmk": "0123456789ABCDEFFEDCBA9876543210",
+  "firmware": "0007-E000",
+  "commands": {}
+}

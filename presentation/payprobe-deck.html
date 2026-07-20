@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PayProbe — Platform Presentation</title>
+<style>
+  :root{
+    --brand:#5333ed; --brand-2:#6a54ea; --brand-hover:#8a7bff;
+    --bg:#0b0d12; --surface:#14171f; --subtle:#1b1f29;
+    --border:#272c38; --border-strong:#3a4150;
+    --text:#eef1f7; --text-2:#aeb6c4; --muted:#7c8493;
+    --ok:#2dd4a7; --warn:#e0a82e; --danger:#fb6a62; --info:#6ea0ff;
+    --ink:#05070b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--text); overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* ---------- deck framework ---------- */
+  .deck{position:fixed;inset:0}
+  .slide{
+    position:absolute;inset:0;display:none;
+    padding:6vh 8vw; flex-direction:column;
+    opacity:0; transform:translateY(18px) scale(.99);
+    transition:opacity .55s ease, transform .55s ease;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(83,51,237,.20), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(45,212,167,.10), transparent 60%),
+      var(--bg);
+  }
+  .slide.active{display:flex; opacity:1; transform:translateY(0) scale(1)}
+  .slide.active .anim{animation:rise .7s cubic-bezier(.2,.7,.2,1) both}
+  .slide.active .anim:nth-child(1){animation-delay:.05s}
+  .slide.active .anim:nth-child(2){animation-delay:.16s}
+  .slide.active .anim:nth-child(3){animation-delay:.27s}
+  .slide.active .anim:nth-child(4){animation-delay:.38s}
+  .slide.active .anim:nth-child(5){animation-delay:.49s}
+  .slide.active .anim:nth-child(6){animation-delay:.60s}
+  @keyframes rise{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+
+  .kicker{display:inline-flex;align-items:center;gap:.5rem;font-size:.8rem;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--brand-hover);font-weight:700;margin-bottom:1rem}
+  .kicker .dot{width:8px;height:8px;border-radius:50%;background:var(--brand);box-shadow:0 0 14px var(--brand)}
+  h1{font-size:clamp(2.4rem,6vw,5rem);line-height:1.02;letter-spacing:-.02em;font-weight:800}
+  h2{font-size:clamp(1.8rem,3.6vw,3rem);line-height:1.06;letter-spacing:-.02em;font-weight:800;margin-bottom:.4rem}
+  .lead{font-size:clamp(1.05rem,1.6vw,1.5rem);color:var(--text-2);max-width:60ch;line-height:1.5;margin-top:1rem}
+  .muted{color:var(--muted)}
+  .grad{background:linear-gradient(100deg,#a89bff,#5333ed 40%,#2dd4a7);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+  /* cards & grids */
+  .grid{display:grid;gap:1.1rem;margin-top:2rem}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .card{background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,0));
+    border:1px solid var(--border);border-radius:16px;padding:1.3rem 1.4rem;transition:.3s}
+  .card:hover{border-color:var(--brand);transform:translateY(-4px);box-shadow:0 16px 40px -20px rgba(83,51,237,.7)}
+  .card h3{font-size:1.1rem;margin-bottom:.4rem;display:flex;align-items:center;gap:.55rem}
+  .card p{color:var(--text-2);font-size:.95rem;line-height:1.45}
+  .ic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;flex:0 0 auto;
+    background:rgba(83,51,237,.16);border:1px solid rgba(83,51,237,.4)}
+
+  /* stat band */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1.2rem;margin-top:2.4rem}
+  .stat .n{font-size:clamp(2rem,4.4vw,3.6rem);font-weight:800;letter-spacing:-.02em;
+    background:linear-gradient(180deg,#fff,#9a9bf6);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat .l{color:var(--text-2);font-size:.92rem;margin-top:.2rem}
+
+  /* pills */
+  .pills{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:1.6rem}
+  .pill{border:1px solid var(--border-strong);background:var(--subtle);border-radius:999px;
+    padding:.45rem .95rem;font-size:.86rem;color:var(--text-2)}
+  .pill b{color:var(--text)}
+
+  /* footer / progress */
+  .chrome{position:fixed;left:0;right:0;bottom:0;height:54px;display:flex;align-items:center;
+    justify-content:space-between;padding:0 1.4rem;z-index:30;pointer-events:none}
+  .brandmark{display:flex;align-items:center;gap:.6rem;font-weight:700;font-size:.95rem;pointer-events:auto}
+  .logo{width:26px;height:26px}
+  .nav{display:flex;gap:.5rem;pointer-events:auto}
+  .nav button{width:38px;height:34px;border-radius:9px;border:1px solid var(--border-strong);
+    background:var(--surface);color:var(--text);cursor:pointer;font-size:1rem;transition:.2s}
+  .nav button:hover{background:var(--brand);border-color:var(--brand)}
+  .progress{position:fixed;top:0;left:0;height:3px;background:linear-gradient(90deg,var(--brand),var(--ok));
+    z-index:40;transition:width .4s ease;box-shadow:0 0 12px var(--brand)}
+  .count{position:fixed;top:14px;right:18px;font-size:.8rem;color:var(--muted);z-index:30;
+    background:var(--surface);border:1px solid var(--border);padding:.25rem .6rem;border-radius:999px}
+
+  /* video placeholder */
+  .video{position:relative;border-radius:16px;overflow:hidden;border:1px solid var(--border-strong);
+    background:
+      repeating-linear-gradient(45deg,rgba(83,51,237,.06) 0 14px,rgba(83,51,237,.12) 14px 28px),
+      var(--ink);
+    aspect-ratio:16/9;display:grid;place-items:center;text-align:center}
+  .video::after{content:"VIDEO PLACEHOLDER";position:absolute;top:12px;left:12px;font-size:.66rem;
+    letter-spacing:.16em;color:var(--warn);border:1px solid var(--warn);border-radius:6px;padding:.2rem .5rem;opacity:.85}
+  .play{width:78px;height:78px;border-radius:50%;background:rgba(83,51,237,.9);display:grid;place-items:center;
+    box-shadow:0 0 0 0 rgba(83,51,237,.6);animation:pulse 2.2s infinite}
+  .play svg{margin-left:5px}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(83,51,237,.55)}70%{box-shadow:0 0 0 26px rgba(83,51,237,0)}100%{box-shadow:0 0 0 0 rgba(83,51,237,0)}}
+  .video.has-media{background:var(--ink)}
+  .video.has-media::after{content:"● LIVE CLIP";top:auto;bottom:12px;left:auto;right:12px;color:var(--ok);border-color:var(--ok)}
+  .video video,.video img.media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:16px}
+  .diagram{width:100%;border-radius:16px;border:1px solid var(--border-strong);display:block}
+  .vcap{margin-top:1rem;color:var(--text-2);font-size:.95rem}
+  .vcap b{color:var(--text)}
+
+  .two{display:grid;grid-template-columns:1.05fr .95fr;gap:2.4rem;align-items:center;flex:1;min-height:0}
+  .full-center{flex:1;display:flex;flex-direction:column;justify-content:center}
+
+  /* architecture diagram */
+  .arch{display:flex;flex-direction:column;gap:.7rem;align-items:stretch;width:100%}
+  .tier{border:1px solid var(--border-strong);border-radius:14px;padding:1rem 1.2rem;background:var(--surface);
+    position:relative;overflow:hidden}
+  .tier .t{font-weight:700;font-size:1rem}
+  .tier .s{color:var(--text-2);font-size:.85rem;margin-top:.15rem}
+  .tier.brand{border-color:var(--brand);background:linear-gradient(180deg,rgba(83,51,237,.18),var(--surface))}
+  .flow{height:18px;position:relative}
+  .flow .pkt{position:absolute;top:50%;width:9px;height:9px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 12px var(--ok);transform:translateY(-50%);left:50%;animation:drop 1.8s linear infinite}
+  @keyframes drop{0%{top:-2px;opacity:0}15%{opacity:1}85%{opacity:1}100%{top:20px;opacity:0}}
+
+  /* three-phase pipeline */
+  .phases{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-top:2.2rem;align-items:stretch}
+  .phase{border:1px solid var(--border);border-radius:14px;padding:1.4rem;position:relative;background:var(--surface)}
+  .phase .step{font-size:.72rem;letter-spacing:.14em;color:var(--muted);text-transform:uppercase}
+  .phase h3{margin:.5rem 0 .4rem;font-size:1.15rem}
+  .phase p{color:var(--text-2);font-size:.9rem;line-height:1.45}
+  .gate{align-self:center;color:var(--ok);font-size:1.6rem;animation:slidearrow 1.6s ease-in-out infinite}
+  @keyframes slidearrow{0%,100%{transform:translateX(0);opacity:.6}50%{transform:translateX(6px);opacity:1}}
+  .phase .bar{height:5px;border-radius:4px;margin-top:1rem;background:var(--subtle);overflow:hidden}
+  .phase .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--ok))}
+  .slide.active .phase .bar i{animation:fill 1.4s ease forwards}
+  .phase:nth-child(3) .bar i{animation-delay:.3s}
+  .phase:nth-child(5) .bar i{animation-delay:.6s}
+  @keyframes fill{to{width:100%}}
+
+  /* adapter chips */
+  .chips{display:flex;flex-wrap:wrap;gap:.7rem;margin-top:1.8rem}
+  .chip{border:1px solid var(--border-strong);background:var(--subtle);border-radius:10px;padding:.6rem .85rem;
+    font-size:.88rem;display:flex;align-items:center;gap:.5rem;transition:.25s}
+  .chip:hover{border-color:var(--ok);color:#fff;transform:translateY(-3px)}
+  .chip .d{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok)}
+
+  .hint{position:fixed;bottom:66px;left:50%;transform:translateX(-50%);font-size:.78rem;color:var(--muted);
+    z-index:30;background:var(--surface);border:1px solid var(--border);padding:.3rem .8rem;border-radius:999px;
+    transition:opacity .6s}
+  ul.clean{list-style:none;margin-top:1.4rem;display:flex;flex-direction:column;gap:.85rem}
+  ul.clean li{display:flex;gap:.8rem;color:var(--text-2);font-size:1.05rem;line-height:1.4}
+  ul.clean li b{color:var(--text)}
+  .tick{color:var(--ok);flex:0 0 auto;margin-top:.15rem}
+
+  @media (max-width:880px){
+    .two{grid-template-columns:1fr;gap:1.2rem}.g3,.g4{grid-template-columns:1fr 1fr}
+    .stats{grid-template-columns:1fr 1fr}.phases{grid-template-columns:1fr}
+    .slide{padding:5vh 6vw}
+  }
+</style>
+</head>
+<body>
+<div class="progress" id="prog"></div>
+<div class="count" id="count">1 / 16</div>
+<div class="deck" id="deck">
+
+  <!-- 1 — TITLE -->
+  <section class="slide">
+    <div class="full-center">
+      <div class="kicker anim"><span class="dot"></span>Open-source · Apache 2.0</div>
+      <h1 class="anim">Pay<span class="grad">Probe</span></h1>
+      <p class="lead anim">The regression testing platform for <b style="color:var(--text)">payment terminal ecosystems</b> — from POS terminal, through the payment server, all the way to HSM, core banking, switch and acquirer.</p>
+      <div class="pills anim">
+        <span class="pill"><b>50K</b> concurrent connections</span>
+        <span class="pill"><b>10K</b> ops/sec</span>
+        <span class="pill">Three-phase execution</span>
+        <span class="pill">No-code test constructor</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 — THE PROBLEM -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>The problem</div>
+    <h2 class="anim">Payment stacks are deeply interconnected</h2>
+    <p class="lead anim">A change in one component can silently break another. Teams find out in production — not in a test report.</p>
+    <div class="grid g3">
+      <div class="card anim"><h3><span class="ic">⚠️</span>Silent regressions</h3><p>One config change to the switch breaks settlement two systems away. Nothing fails loudly.</p></div>
+      <div class="card anim"><h3><span class="ic">🧩</span>Many moving parts</h3><p>Terminal, payment server, HSM, core banking, switch, acquirer — each with its own protocol.</p></div>
+      <div class="card anim"><h3><span class="ic">🔎</span>"Something failed"</h3><p>Existing tools tell you a flow broke, not <i>which component or integration pair</i> regressed.</p></div>
+    </div>
+  </section>
+
+  <!-- 3 — THE ANSWER -->
+  <section class="slide">
+    <div class="two">
+      <div>
+        <div class="kicker anim"><span class="dot"></span>The answer</div>
+        <h2 class="anim">Know exactly what regressed</h2>
+        <p class="lead anim">PayProbe runs structured three-phase suites after every deployment and pinpoints the failing component or integration pair — with a baseline diff against a known-good snapshot.</p>
+        <ul class="clean">
+          <li class="anim"><span class="tick">✔</span><span><b>Component → integration → end-to-end</b> gating</span></li>
+          <li class="anim"><span class="tick">✔</span><span><b>Baseline diffing</b> against a pinned snapshot</span></li>
+          <li class="anim"><span class="tick">✔</span><span><b>Mock mode</b> — run the whole platform with zero hardware</span></li>
+        </ul>
+      </div>
+      <div class="anim">
+        <div class="arch">
+          <div class="tier"><div class="t">POS Terminal</div><div class="s">EMV sim · physical serial / TCP</div></div>
+          <div class="flow"><span class="pkt" style="animation-delay:0s"></span></div>
+          <div class="tier brand"><div class="t">Payment Server</div><div class="s">RestPay · REST / ISO 8583</div></div>
+          <div class="flow"><span class="pkt" style="animation-delay:.4s"></span><span class="pkt" style="left:30%;animation-delay:.9s"></span><span class="pkt" style="left:70%;animation-delay:1.3s"></span></div>
+          <div class="tier"><div class="t">HSM · Core Banking · Switch · Acquirer</div><div class="s">PKCS#11 · SOAP · ISO 8583</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 — VIDEO: product tour -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>See it in action</div>
+    <h2 class="anim">60-second product tour</h2>
+    <div class="two" style="margin-top:1.4rem">
+      <div class="video has-media anim">
+        <video src="assets/video-dataflow.mp4" autoplay muted loop playsinline></video>
+      </div>
+      <div class="anim">
+        <ul class="clean" style="margin-top:.4rem">
+          <li><span class="tick">▸</span><span><b>Orchestrated hops</b> — terminal → payment server → HSM, core, switch, acquirer.</span></li>
+          <li><span class="tick">▸</span><span><b>Live message flow</b> — every leg streamed and timed as the transaction runs.</span></li>
+          <li><span class="tick">▸</span><span><b>Pinpoint regressions</b> — PayProbe names the exact pair that broke.</span></li>
+        </ul>
+        <p class="muted" style="margin-top:1rem;font-size:.85rem">Generated clip embedded. Swap in your own screen recording any time.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 — KEY FEATURES -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>Platform</div>
+    <h2 class="anim">Everything in one platform</h2>
+    <div class="grid g3">
+      <div class="card anim"><h3><span class="ic">🧱</span>Three-phase execution</h3><p>Component health → integration pairs → full end-to-end flows, each gating the next.</p></div>
+      <div class="card anim"><h3><span class="ic">🖱️</span>Visual constructor</h3><p>Angular drag-and-drop workflow editor. Build scenarios with no code.</p></div>
+      <div class="card anim"><h3><span class="ic">📌</span>Baseline diffing</h3><p>Every run compared against a pinned known-good snapshot.</p></div>
+      <div class="card anim"><h3><span class="ic">🔌</span>Adapter framework</h3><p>Plug in any payment system via a clean interface — ~2 hours per adapter.</p></div>
+      <div class="card anim"><h3><span class="ic">⚙️</span>CI/CD ready</h3><p>JUnit XML output, REST trigger, Docker-native deployment.</p></div>
+      <div class="card anim"><h3><span class="ic">🧪</span>Mock mode</h3><p>Run the full platform locally with no payment hardware or secrets.</p></div>
+    </div>
+  </section>
+
+  <!-- 6 — THREE PHASES -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>How a run works</div>
+    <h2 class="anim">Three phases, gated end to end</h2>
+    <p class="lead anim">If a component is unhealthy, PayProbe stops before wasting time on integration or full flows — and tells you precisely where it stopped.</p>
+    <div class="phases">
+      <div class="phase anim"><div class="step">Phase 1</div><h3>Component health</h3><p>Probe each system in isolation — is the HSM up? Does the switch answer?</p><div class="bar"><i></i></div></div>
+      <div class="gate anim">➜</div>
+      <div class="phase anim"><div class="step">Phase 2</div><h3>Integration pairs</h3><p>Terminal↔server, server↔HSM, server↔core — every link verified.</p><div class="bar"><i></i></div></div>
+      <div class="gate anim">➜</div>
+      <div class="phase anim"><div class="step">Phase 3</div><h3>End-to-end flows</h3><p>Full transaction journeys: auth, reversal, settlement, clearing.</p><div class="bar"><i></i></div></div>
+    </div>
+  </section>
+
+  <!-- 7 — VISUAL CONSTRUCTOR (video) -->
+  <section class="slide">
+    <div class="two">
+      <div>
+        <div class="kicker anim"><span class="dot"></span>No-code authoring</div>
+        <h2 class="anim">Visual test constructor</h2>
+        <p class="lead anim">A custom drag-and-drop canvas for assembling flows — steps, edges, assertions — with an AI assistant that turns plain English into a runnable scenario.</p>
+        <div class="pills anim">
+          <span class="pill">✨ Ask AI</span><span class="pill">Import / export JSON &amp; YAML</span>
+          <span class="pill">Starter flows</span><span class="pill">ISO 8583 inspector</span>
+        </div>
+      </div>
+      <div class="video anim">
+        <div class="play"><svg width="26" height="30" viewBox="0 0 24 28"><path d="M0 0l24 14L0 28z" fill="#fff"/></svg></div>
+      </div>
+    </div>
+    <p class="vcap anim" style="margin-top:1.2rem"><b>Video placeholder:</b> record building a scenario on the canvas + "✨ Ask AI" generating a flow.</p>
+  </section>
+
+  <!-- 8 — ADAPTERS -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>Adapters</div>
+    <h2 class="anim">Speaks every protocol in the stack</h2>
+    <p class="lead anim">Ships with stable adapters for common payment components. Adding a new one takes about two hours.</p>
+    <div class="chips">
+      <span class="chip anim"><span class="d"></span>http · REST / HTTPS</span>
+      <span class="chip anim"><span class="d"></span>hsm · PKCS#11</span>
+      <span class="chip anim"><span class="d"></span>terminal_sim · EMV</span>
+      <span class="chip anim"><span class="d"></span>terminal_physical · Serial / TCP</span>
+      <span class="chip anim"><span class="d"></span>core_banking · REST / SOAP</span>
+      <span class="chip anim"><span class="d"></span>switch · ISO 8583</span>
+      <span class="chip anim"><span class="d"></span>acquirer · ISO 8583 / REST</span>
+      <span class="chip anim"><span class="d"></span>db_probe · Postgres / Oracle / MSSQL</span>
+      <span class="chip anim"><span class="d"></span>mock_* · in-memory, all systems</span>
+    </div>
+  </section>
+
+  <!-- 9 — SIMULATORS -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>Simulators</div>
+    <h2 class="anim">Realistic host &amp; scheme simulators</h2>
+    <p class="lead anim">Stand up the other side of the wire — no third-party sandbox required.</p>
+    <div class="grid g4">
+      <div class="card anim"><h3>VISA</h3><p>Base I auth, reversal, network-mgmt, clearing — opt-in CVV2 / PVV / ARQC.</p></div>
+      <div class="card anim"><h3>CyberSource</h3><p>REST gateway sim — auth, capture, refund, reversal, void with a decision ladder.</p></div>
+      <div class="card anim"><h3>payShield 10K</h3><p>HSM host-command sim with hybrid real crypto under a test LMK.</p></div>
+      <div class="card anim"><h3>Dialect-aware</h3><p>Bind a message format; the responder validates inbound ISO 8583 (warn / reject).</p></div>
+    </div>
+  </section>
+
+  <!-- 10 — LOAD & PERFORMANCE -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>Scale</div>
+    <h2 class="anim">Built for production-grade load</h2>
+    <div class="two" style="margin-top:1.2rem">
+      <div>
+        <p class="lead anim" style="margin-top:0">An async worker engine on Python asyncio + uvloop, coordinated across Redis-backed workers for distributed load and stress testing.</p>
+        <div class="stats" style="grid-template-columns:1fr 1fr">
+          <div class="stat anim"><div class="n">50K</div><div class="l">concurrent connections</div></div>
+          <div class="stat anim"><div class="n">10K</div><div class="l">operations / second</div></div>
+          <div class="stat anim"><div class="n">4</div><div class="l">ramp · spike · soak · steady</div></div>
+          <div class="stat anim"><div class="n">∞</div><div class="l">horizontal workers</div></div>
+        </div>
+      </div>
+      <div class="video has-media anim">
+        <video src="assets/video-throughput.mp4" autoplay muted loop playsinline></video>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 — ARCHITECTURE -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>Architecture</div>
+    <h2 class="anim">Clean, service-oriented design</h2>
+    <div class="two" style="margin-top:1rem">
+      <div class="arch anim">
+        <div class="tier"><div class="t">Angular Portal</div><div class="s">management UI · ~30 users</div></div>
+        <div class="flow"><span class="pkt"></span></div>
+        <div class="tier brand"><div class="t">Backend Services · FastAPI</div><div class="s">Scenario · Orchestrator · Report · Auth</div></div>
+        <div class="flow"><span class="pkt" style="animation-delay:.5s"></span></div>
+        <div class="tier"><div class="t">Worker Engine</div><div class="s">asyncio + uvloop · 50K conns · 10K ops/sec</div></div>
+        <div class="flow"><span class="pkt" style="animation-delay:1s"></span></div>
+        <div class="tier"><div class="t">Target Systems</div><div class="s">Payment server · HSM · core bank · switch</div></div>
+      </div>
+      <div class="anim">
+        <ul class="clean">
+          <li><span class="tick">✔</span><span><b>REST + WebSocket</b> — live, durable event stream resumes on reconnect</span></li>
+          <li><span class="tick">✔</span><span><b>Redis-backed</b> run control for cross-replica cancel / stop</span></li>
+          <li><span class="tick">✔</span><span><b>Encrypted secrets at rest</b> — connections hold no credentials</span></li>
+          <li><span class="tick">✔</span><span><b>RBAC</b> with admin-only users &amp; roles, fail-closed JWT gate</span></li>
+          <li><span class="tick">✔</span><span><b>MCP server</b> — drive PayProbe from AI agents and tools</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 — GOVERNANCE / DATA -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>Trust &amp; control</div>
+    <h2 class="anim">Test data &amp; secrets, handled right</h2>
+    <div class="grid g3">
+      <div class="card anim"><h3><span class="ic">💳</span>Test Data Manager</h3><p>Card pools, BIN ranges, terminal pools, key registry. Generate Luhn-valid PANs from a BIN.</p></div>
+      <div class="card anim"><h3><span class="ic">🔐</span>Secrets vault</h3><p>Masked inventory across connections, variables and keys — encrypted at rest, never revealed in plaintext.</p></div>
+      <div class="card anim"><h3><span class="ic">🌐</span>Environments</h3><p>First-class environment registry with per-environment connection overrides.</p></div>
+      <div class="card anim"><h3><span class="ic">📊</span>Trends &amp; flakiness</h3><p>Per-scenario flaky detection and run-trend history to spot intermittent failures.</p></div>
+      <div class="card anim"><h3><span class="ic">🏅</span>Packs &amp; certification</h3><p>Curated test-case packs and a compliance certification report with an HTML badge.</p></div>
+      <div class="card anim"><h3><span class="ic">🔬</span>Trace viewer</h3><p>Wire-level raw logs + structured engine trace with a per-step timing waterfall.</p></div>
+    </div>
+  </section>
+
+  <!-- 13 — CI/CD WORKFLOW -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>In your pipeline</div>
+    <h2 class="anim">Drops into CI/CD on day one</h2>
+    <p class="lead anim">Trigger a run on every deploy; gate the pipeline on the result.</p>
+    <div class="grid g4" style="margin-top:2rem">
+      <div class="card anim"><h3>1 · Deploy</h3><p>Your CI ships a build to a test environment.</p></div>
+      <div class="card anim"><h3>2 · Trigger</h3><p>REST API call kicks off the three-phase suite.</p></div>
+      <div class="card anim"><h3>3 · Diff</h3><p>Results compared against the pinned baseline.</p></div>
+      <div class="card anim"><h3>4 · Gate</h3><p>JUnit XML feeds your dashboard; pipeline passes or fails.</p></div>
+    </div>
+    <div class="pills anim" style="margin-top:2rem">
+      <span class="pill">Docker-native</span><span class="pill">JUnit XML</span><span class="pill">REST trigger</span><span class="pill">Self-contained HTML report</span>
+    </div>
+  </section>
+
+  <!-- 14 — WHO IT'S FOR -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>Who it's for</div>
+    <h2 class="anim">Built for the people who ship payments</h2>
+    <div class="grid g3">
+      <div class="card anim"><h3><span class="ic">🏦</span>Issuers &amp; acquirers</h3><p>Validate the full stack before every release without a lab full of hardware.</p></div>
+      <div class="card anim"><h3><span class="ic">🛠️</span>Payment platform teams</h3><p>Catch cross-component regressions the moment they're introduced.</p></div>
+      <div class="card anim"><h3><span class="ic">✅</span>QA &amp; certification</h3><p>Reusable packs and certification reports for repeatable, auditable testing.</p></div>
+    </div>
+  </section>
+
+  <!-- 15 — VIDEO: full demo -->
+  <section class="slide">
+    <div class="kicker anim"><span class="dot"></span>Full walkthrough</div>
+    <h2 class="anim">End-to-end demo</h2>
+    <div class="video anim" style="max-width:62vw;margin-top:1.2rem">
+      <div class="play"><svg width="26" height="30" viewBox="0 0 24 28"><path d="M0 0l24 14L0 28z" fill="#fff"/></svg></div>
+    </div>
+    <p class="vcap anim" style="margin-top:1.1rem"><b>Placeholder for your longer demo video</b> — author a scenario, run it across simulators, read the report. Swap in your <code>&lt;video src="..."&gt;</code> here.</p>
+  </section>
+
+  <!-- 16 — CLOSE -->
+  <section class="slide">
+    <div class="full-center">
+      <div class="kicker anim"><span class="dot"></span>Get started</div>
+      <h1 class="anim">Run the whole platform<br><span class="grad">in one command.</span></h1>
+      <p class="lead anim">Mock mode by default — no hardware, no secrets, no toolchain. Clone, <code>docker compose up</code>, open the portal, start a run.</p>
+      <div class="pills anim" style="margin-top:1.8rem">
+        <span class="pill"><b>Apache 2.0</b> open source</span>
+        <span class="pill">github.com/pay-probe/payprobe</span>
+        <span class="pill">Adapters · Docs · Roadmap</span>
+      </div>
+      <p class="muted anim" style="margin-top:2rem">PayProbe — created by David Sakhelashvili</p>
+    </div>
+  </section>
+
+</div>
+
+<div class="hint" id="hint">Use ← → arrows · Space · or click the edges to navigate</div>
+
+<div class="chrome">
+  <div class="brandmark">
+    <svg class="logo" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#5333ed"/><path d="M9 22V10h6a4 4 0 010 8H9" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="22" cy="11" r="2.4" fill="#2dd4a7"/></svg>
+    PayProbe
+  </div>
+  <div class="nav">
+    <button id="prev" aria-label="Previous">‹</button>
+    <button id="next" aria-label="Next">›</button>
+  </div>
+</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  let i=0; const n=slides.length;
+  const prog=document.getElementById('prog'),count=document.getElementById('count'),hint=document.getElementById('hint');
+  function show(k){
+    i=Math.max(0,Math.min(n-1,k));
+    slides.forEach((s,idx)=>s.classList.toggle('active',idx===i));
+    prog.style.width=((i+1)/n*100)+'%';
+    count.textContent=(i+1)+' / '+n;
+  }
+  function next(){show(i+1)} function prev(){show(i-1)}
+  document.getElementById('next').onclick=next;
+  document.getElementById('prev').onclick=prev;
+  document.addEventListener('keydown',e=>{
+    if(['ArrowRight',' ','PageDown'].includes(e.key)){e.preventDefault();next()}
+    if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();prev()}
+    if(e.key==='Home')show(0); if(e.key==='End')show(n-1);
+  });
+  // click left/right third to navigate (ignore buttons/links)
+  document.addEventListener('click',e=>{
+    if(e.target.closest('.nav,.brandmark,a,button,.play'))return;
+    (e.clientX < window.innerWidth*0.35)?prev():(e.clientX>window.innerWidth*0.65?next():null);
+  });
+  let sx=null;
+  addEventListener('touchstart',e=>sx=e.touches[0].clientX,{passive:true});
+  addEventListener('touchend',e=>{if(sx===null)return;const d=e.changedTouches[0].clientX-sx;if(Math.abs(d)>50)(d<0?next():prev());sx=null});
+  setTimeout(()=>hint.style.opacity='0',4500);
+  show(0);
+</script>
+</body>
+</html>

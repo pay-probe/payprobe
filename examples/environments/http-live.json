@@ -1,0 +1,10 @@
+{
+  "_comment": "Connection params come from global Variables (http_*), now carried by the `http_live` connection. Fill http_base_url / http_api_key / http_timeout_ms on the Variables page.",
+  "name": "http-live",
+  "description": "Selector environment for the live HTTP/REST endpoint, now the `http_live` connection (parameterised from http_* variables). Credential-free.",
+  "connection_budget": {
+    "total": 1000,
+    "adapters": { "http_live": 1000 }
+  },
+  "adapters": {}
+}

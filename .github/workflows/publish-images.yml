@@ -1,0 +1,108 @@
+name: Publish images
+
+# Build every PayProbe service image for BOTH linux/amd64 and linux/arm64 and
+# push them to Docker Hub. Multi-arch means the same tag runs natively on Apple
+# Silicon laptops and on x86 servers — no emulation.
+#
+# Triggers:
+#   - push to main            -> pushes :latest + :<short-sha>
+#   - push a tag v*           -> pushes :<version> (+ :latest) as a release
+#   - manual (workflow_dispatch)
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   DOCKERHUB_USERNAME   your Docker Hub user/org (e.g. datikos)
+#   DOCKERHUB_TOKEN      a Docker Hub access token with Read/Write scope
+#
+# Optional repository variable:
+#   DOCKERHUB_NAMESPACE  namespace to publish under (defaults to datikos)
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    # Only rebuild when something that affects an image changes.
+    paths:
+      - "packages/**"
+      - ".github/workflows/publish-images.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: publish-images-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || 'datikos' }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: auth-service
+            context: packages/auth-service
+            dockerfile: packages/auth-service/Dockerfile
+          - name: scenario-service
+            context: packages
+            dockerfile: packages/scenario-service/Dockerfile
+          - name: orchestrator
+            context: .
+            dockerfile: packages/orchestrator/Dockerfile
+          - name: mcp-server
+            context: packages/mcp-server
+            dockerfile: packages/mcp-server/Dockerfile
+          - name: assistant
+            context: packages
+            dockerfile: packages/payprobe-assistant/Dockerfile
+          - name: insight-service
+            context: packages
+            dockerfile: packages/insight-service/Dockerfile
+          - name: portal
+            context: packages/portal
+            dockerfile: packages/portal/Dockerfile
+          - name: worker
+            context: .
+            dockerfile: packages/worker/Dockerfile
+
+    name: ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (cross-arch emulation for the build)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute tags & labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.NAMESPACE }}/payprobe-${{ matrix.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max

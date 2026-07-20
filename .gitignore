@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+.pytest_cache/
+.ruff_cache/
+*.egg
+
+# Node / Angular
+node_modules/
+dist/
+.angular/
+*.js.map
+
+# Environment — NEVER commit these
+.env
+.env.*
+# ...but DO commit the placeholder templates (no real secrets in them)
+!.env.example
+!**/.env.example
+**/environments/production*.json
+**/environments/staging*.json
+**/*credentials*
+**/*secrets*
+# ...but the secrets-vault feature source is code, not credentials — keep it tracked
+!packages/portal/src/app/secrets/
+!packages/portal/src/app/secrets/**
+!packages/scenario-service/tests/test_secrets*.py
+!docs/history/SECRETS-VAULT-SPEC.md
+**/*.key
+**/*.pem
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+.fuse_hidden*
+
+# Logs
+*.log
+logs/
+
+# python build artifacts
+build/

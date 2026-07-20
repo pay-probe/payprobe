@@ -1,0 +1,29 @@
+{
+  "name": "TestPay · ISO 8583 purchase + reversal",
+  "description": "0200 financial request then 0420 reversal advice over the TCP / ISO 8583 switch link, the reversal correlated by RRN. ISO variant of the reversal test for switch-facing load.",
+  "tags": ["testpay", "iso8583", "reversal", "switch"],
+  "stop_on_failure": true,
+  "timeout_ms": 10000,
+  "test_class": "integration",
+  "steps": [
+    {
+      "id": "step_001",
+      "target": "tcp_iso8583",
+      "action": "send_0200",
+      "payload": { "amount": 10000, "pan": "4111111111111111", "currency": "GEL" },
+      "assertions": [
+        { "field": "response_code", "operator": "eq", "expected": "00" },
+        { "field": "rrn", "operator": "present" }
+      ]
+    },
+    {
+      "id": "step_002",
+      "target": "tcp_iso8583",
+      "action": "send_0420",
+      "payload": { "rrn": "${step_001.response.rrn}" },
+      "assertions": [
+        { "field": "response_code", "operator": "present" }
+      ]
+    }
+  ]
+}

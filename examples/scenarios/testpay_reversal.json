@@ -1,0 +1,29 @@
+{
+  "name": "TestPay · Reversal pair",
+  "description": "Payment followed by a reversal of that same transaction; the reversal references the original RRN — mirrors the TestPay ReversalTestStrategy, which sends payment + reversal pairs.",
+  "tags": ["testpay", "reversal", "regression"],
+  "stop_on_failure": true,
+  "timeout_ms": 10000,
+  "test_class": "e2e",
+  "steps": [
+    {
+      "id": "step_001",
+      "target": "http",
+      "action": "send_auth_request",
+      "payload": { "amount": 10000, "currency": "GEL", "card_profile": "visa_credit_standard" },
+      "assertions": [
+        { "field": "response_code", "operator": "eq", "expected": "00" },
+        { "field": "rrn", "operator": "present" }
+      ]
+    },
+    {
+      "id": "step_002",
+      "target": "http",
+      "action": "send_reversal",
+      "payload": { "rrn": "${step_001.response.rrn}" },
+      "assertions": [
+        { "field": "response_code", "operator": "eq", "expected": "00" }
+      ]
+    }
+  ]
+}

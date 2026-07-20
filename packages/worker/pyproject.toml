@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# The package code lives at the project root (this directory) but is imported
+# as `worker` (the repo puts `packages/` on PYTHONPATH). The project name
+# normalizes to `payprobe_worker`, which doesn't match any directory, so
+# hatchling can't auto-detect the files to ship. We tell it explicitly:
+#  - `only-include` selects the package modules (not tests/README/Dockerfile);
+#  - `sources` relocates them under a top-level `worker/` package in the wheel;
+#  - `dev-mode-dirs` makes editable installs (`pip install -e .`) add the parent
+#    `packages/` dir to sys.path via a .pth file, so `import worker` resolves to
+#    this directory. (A .pth is required for editable installs because hatch's
+#    import-redirect strategy can't synthesize a prefix that `sources` adds.)
+[tool.hatch.build.targets.wheel]
+only-include = ["adapters", "engine", "responder.py", "load_worker.py", "__init__.py", "__main__.py"]
+dev-mode-dirs = [".."]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = "worker"
+
+[project]
+name = "payprobe-worker"
+version = "0.1.0"
+description = "PayProbe async test execution engine"
+requires-python = ">=3.11"
+dependencies = [
+    "uvloop>=0.19",
+    "aiohttp>=3.9",
+    "asyncpg>=0.29",
+    "python-pkcs11>=0.7",
+    # NOTE: no external ISO 8583 library — the TCP adapter ships its own
+    # self-contained ASCII codec at adapters/tcp/iso8583.py. (The PyPI `iso8583`
+    # name resolves to the unrelated `ISO8583` project, whose sdist fails to
+    # build because its setup.py imports `ebcdic` at build time.)
+    "pycryptodome>=3.19",
+    "pydantic>=2.0",
+    "redis[hiredis]>=5.0",
+    "structlog>=23.0",
+]
+
+[project.optional-dependencies]
+# `protobuf` is here (not just in `grpc`) so the descriptor-driven gRPC adapter
+# tests can run under a plain `.[dev]` install — they exercise the protobuf-only
+# core without grpcio. Tests that need the protoc compiler (grpcio-tools) are
+# guarded with skipif and stay skipped until the full `grpc` extra is installed.
+dev = ["pytest", "pytest-asyncio", "pytest-cov", "ruff", "black", "httpx", "protobuf>=4.22"]
+# General gRPC adapter (descriptor-driven). Optional: the adapter imports grpc
+# lazily, so the worker runs without it until you use a grpc target.
+grpc = [
+    "grpcio>=1.60",
+    "grpcio-tools>=1.60",       # compile custom-declared .proto sources on the fly
+    "grpcio-reflection>=1.60",  # discover a server's schema via server reflection
+    "protobuf>=4.22",
+]
+# NATS adapter family (ADR-0006). Optional: the adapter imports nats lazily, so
+# the worker runs without it until you use a nats target — a missing nats-py is
+# environmental (skips), not a regression, exactly like grpcio/aiohttp.
+nats = [
+    "nats-py>=2.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.black]
+# Match ruff's line length so the two formatters don't fight.
+line-length = 100
+target-version = ["py311"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "flaky: known-flaky test, quarantined with a reason (see README).",
+]

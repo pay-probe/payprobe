@@ -1,0 +1,2598 @@
+<div class="editor">
+  <!-- Toolbar -->
+  <header class="toolbar">
+    <a
+      [routerLink]="flowMode ? '/participants' : '/constructor'"
+      class="btn btn--ghost"
+      [title]="flowMode ? 'Back to flows' : 'Back to scenarios'"
+      >←</a
+    >
+    <input
+      class="toolbar__name mono"
+      [ngModel]="meta().name"
+      (ngModelChange)="updateMeta('name', $event)"
+      [placeholder]="flowMode ? 'flow_name' : 'scenario_name'"
+    />
+    @if (flowMode) {
+      <label
+        class="toolbar__comment"
+        style="display: inline-flex; align-items: center; gap: 6px"
+      >
+        ⚡ listens on
+        <select
+          [(ngModel)]="flowTrigger"
+          title="Inbound (listening) connection"
+        >
+          <option value="">— inbound connection —</option>
+          @for (c of inboundConnections; track c.name) {
+            <option [value]="c.name">
+              {{ c.name }}{{ c.port ? " :" + c.port : "" }}
+            </option>
+          }
+        </select>
+      </label>
+    }
+    @if (version(); as v) {
+      <span class="toolbar__version mono">v{{ v }}</span>
+    }
+    @if (dirty()) {
+      <span class="toolbar__dirty">● unsaved</span>
+    }
+    @if (invalidWireCount(); as n) {
+      <span
+        class="toolbar__invalid"
+        title="Wires with inconsistent direction (e.g. into a trigger or out of a reply)"
+        >⚠ {{ n }} invalid wire{{ n === 1 ? "" : "s" }}</span
+      >
+    }
+    <span class="toolbar__spacer"></span>
+    <input
+      class="toolbar__comment"
+      [ngModel]="saveComment()"
+      (ngModelChange)="saveComment.set($event)"
+      placeholder="version comment…"
+    />
+    @if (runResultStatus(); as rs) {
+      <span class="toolbar__run-status" [attr.data-status]="rs">{{ rs }}</span>
+    }
+    @if (runLog().length && !showResults()) {
+      <button class="btn" (click)="toggleResults()" title="Show run results">
+        Results
+      </button>
+    }
+    @if (!flowMode) {
+      <select
+        class="toolbar__env"
+        [ngModel]="selectedEnv()"
+        (ngModelChange)="selectedEnv.set($event)"
+        title="Environment to run against"
+        [disabled]="running()"
+      >
+        @for (e of environments(); track e.name) {
+          <option [value]="e.name">{{ e.label }}</option>
+        }
+      </select>
+      @if (tableNames().length) {
+        <select
+          class="toolbar__env"
+          [ngModel]="dataTable()"
+          (ngModelChange)="dataTable.set($event)"
+          title="Data-driven: run once per row of this table"
+          [disabled]="running()"
+        >
+          <option value="">No data table</option>
+          @for (t of tableNames(); track t) {
+            <option [value]="t">
+              📊 {{ t }} ({{ (tablesRuntime()[t] ?? []).length }})
+            </option>
+          }
+        </select>
+      }
+    }
+    @if (!running()) {
+      @if (!flowMode) {
+        <button
+          class="btn btn--run"
+          (click)="execute()"
+          title="Run this scenario"
+        >
+          ▶ Execute{{ dataTable() ? " × " + dataRowCount() : "" }}
+        </button>
+        <button
+          class="btn"
+          (click)="execute(true)"
+          title="Step-through debug run"
+        >
+          🐞 Debug
+        </button>
+      } @else {
+        <button
+          class="btn"
+          [class.btn--active]="showFlowRequest()"
+          (click)="toggleFlowRequest()"
+          title="Edit the sample trigger request the flow runs against"
+        >
+          ✉ Request
+        </button>
+        <button
+          class="btn btn--run"
+          (click)="executeFlow(false)"
+          title="Run the flow once against the sample request"
+        >
+          ▶ Test-fire
+        </button>
+        <button
+          class="btn"
+          (click)="executeFlow(true)"
+          title="Step-through debug run against the sample request"
+        >
+          🐞 Debug
+        </button>
+      }
+    } @else if (pausedNode(); as pn) {
+      <span class="toolbar__paused mono" title="Paused at this node"
+        >⏸ {{ pn }}</span
+      >
+      <button
+        class="btn"
+        (click)="debugStep()"
+        title="Run this node, pause at the next"
+      >
+        ⤼ Step
+      </button>
+      <button
+        class="btn btn--run"
+        (click)="debugContinue()"
+        title="Continue to next breakpoint"
+      >
+        ▶ Continue
+      </button>
+      <button class="btn btn--danger" (click)="debugStop()">■ Stop</button>
+    } @else {
+      <button class="btn btn--danger" (click)="stopRun()">■ Stop</button>
+    }
+    @if (!flowMode) {
+      <button class="btn" (click)="validateNow()">Validate</button>
+    }
+    @if (scenarioId) {
+      <button class="btn" (click)="exportAs('json')" title="Download as JSON">
+        Export JSON
+      </button>
+      <button class="btn" (click)="exportAs('yaml')" title="Download as YAML">
+        Export YAML
+      </button>
+      <button class="btn" (click)="toggleHistory()">History</button>
+    }
+    <button class="btn btn--primary" (click)="save()" [disabled]="busy()">
+      {{ busy() ? "Saving…" : "Save" }}
+    </button>
+    <button
+      type="button"
+      class="btn theme-toggle"
+      (click)="theme.toggle()"
+      [attr.aria-label]="
+        theme.theme() === 'dark'
+          ? 'Switch to light theme'
+          : 'Switch to dark theme'
+      "
+    >
+      {{ theme.theme() === "dark" ? "☀" : "🌙" }}
+    </button>
+  </header>
+
+  @if (error(); as err) {
+    <div class="banner banner--error">{{ err }}</div>
+  }
+
+  <!-- Flow debug: the sample inbound message a test-fire / debug run is
+       triggered with (what the wire decode would produce). -->
+  @if (flowMode && showFlowRequest()) {
+    <div class="flow-request">
+      <div class="flow-request__head">
+        <span class="flow-request__title">Sample trigger request</span>
+        <span class="muted">
+          seeded as <code>$&#123;request.*&#125;</code> — ISO:
+          <code>mti</code> + <code>de</code> map · HSM: <code>command</code> ·
+          HTTP: <code>method</code>/<code>path</code>/<code>body</code>
+        </span>
+        <button
+          class="btn btn--ghost btn--sm"
+          (click)="showFlowRequest.set(false)"
+        >
+          ✕
+        </button>
+      </div>
+      <textarea
+        class="flow-request__input mono"
+        rows="6"
+        [ngModel]="flowRequestJson()"
+        (ngModelChange)="setFlowRequestJson($event)"
+        spellcheck="false"
+      ></textarea>
+    </div>
+  }
+
+  <div class="layout">
+    <!-- Step palette -->
+    <aside class="palette">
+      <div class="palette__title">
+        <h2>Step Palette</h2>
+        <span class="palette__links">
+          <a
+            routerLink="/step-types"
+            class="palette__manage"
+            title="Add or edit step types"
+            >⚙ Steps</a
+          >
+          <a
+            routerLink="/message-formats"
+            class="palette__manage"
+            title="ISO8583 / ISO20022 message formats"
+            >⛃ Formats</a
+          >
+        </span>
+      </div>
+      <p class="palette__hint muted">Drag onto the canvas to build the flow</p>
+
+      <div class="palette__ai">
+        <div class="palette__target">✨ Ask AI</div>
+        <textarea
+          class="palette__ai-input"
+          rows="2"
+          [(ngModel)]="aiPrompt"
+          (keydown.enter)="$event.preventDefault(); askAi()"
+          placeholder="e.g. chip purchase with PIN, approved, then check settlement"
+        ></textarea>
+        <button
+          class="palette__ai-btn"
+          (click)="askAi()"
+          [disabled]="aiBusy() || !aiPrompt.trim()"
+        >
+          {{ aiBusy() ? "Thinking…" : "Generate preview" }}
+        </button>
+
+        @if (aiProposal(); as p) {
+          <div class="ai-preview">
+            <div class="ai-preview__head">
+              <span class="ai-preview__mode">{{
+                p.mode === "extend" ? "Add to flow" : "New flow"
+              }}</span>
+              <span class="muted"
+                >{{ p.flow.steps.length }} step(s){{
+                  p.provider === "llm" ? " · AI" : ""
+                }}</span
+              >
+            </div>
+            <ol class="ai-preview__steps">
+              @for (s of p.flow.steps; track $index) {
+                <li>
+                  <span class="ai-preview__ref">{{ s.ref }}</span>
+                  <span class="ai-preview__call"
+                    >{{ targetLabel(s.target) }} · {{ s.action }}</span
+                  >
+                  @if (proposalAssertions(s); as a) {
+                    @if (a) {
+                      <span class="ai-preview__assert">⊨ {{ a }}</span>
+                    }
+                  }
+                </li>
+              }
+            </ol>
+            @if (p.notes?.length) {
+              <p class="ai-preview__note muted">{{ p.notes[0] }}</p>
+            }
+            <div class="ai-preview__actions">
+              <button class="palette__ai-btn" (click)="applyProposal()">
+                Apply
+              </button>
+              <button class="ai-preview__discard" (click)="discardProposal()">
+                Discard
+              </button>
+            </div>
+          </div>
+        }
+      </div>
+
+      @if (!flowMode && flowTemplates().length) {
+        <div class="palette__group">
+          <div class="palette__target">⚡ Starter Flows</div>
+          @for (f of flowTemplates(); track f.id) {
+            <div
+              class="palette__action palette__action--flow"
+              (click)="insertFlow(f)"
+              [title]="f.description + ' — click to insert the pre-wired chain'"
+            >
+              {{ f.label }}
+            </div>
+          }
+        </div>
+      }
+
+      <div class="palette__group">
+        <div class="palette__target">Logic &amp; Flow</div>
+        @for (c of controlPalette; track c.kind) {
+          <div
+            class="palette__action palette__action--control"
+            draggable="true"
+            (dragstart)="onControlDragStart($event, c.kind)"
+            (dblclick)="addControlNode(c.kind)"
+            [title]="c.hint"
+          >
+            <span class="palette__glyph" [style.color]="c.color">{{
+              c.glyph
+            }}</span>
+            {{ c.label }}
+          </div>
+        }
+      </div>
+
+      @if (flowMode) {
+        <div class="palette__group">
+          <div class="palette__target">⇄ Outbound call</div>
+          <div
+            class="palette__action palette__action--control"
+            (click)="addFlowCall('tcp_iso8583')"
+            title="Call a downstream ISO 8583 (TCP) connection or group"
+          >
+            <span class="palette__glyph">⇄</span>
+            ISO 8583
+          </div>
+          <div
+            class="palette__action palette__action--control"
+            (click)="addFlowCall('hsm')"
+            title="Call a downstream header-echo (HSM) connection"
+          >
+            <span class="palette__glyph">⇄</span>
+            HSM (header-echo)
+          </div>
+          <div
+            class="palette__action palette__action--control"
+            (click)="addFlowCall('grpc')"
+            title="Call a downstream gRPC connection"
+          >
+            <span class="palette__glyph">⇄</span>
+            gRPC
+          </div>
+          <div
+            class="palette__action palette__action--control"
+            (click)="addFlowCall('http')"
+            title="Call a downstream HTTP / REST connection"
+          >
+            <span class="palette__glyph">⇄</span>
+            HTTP / REST
+          </div>
+        </div>
+      } @else {
+        @for (target of catalog(); track target.target) {
+          <div
+            class="palette__group palette__group--cat"
+            [style.--cat-color]="target.color"
+          >
+            <div class="palette__target palette__target--cat">
+              @if (target.icon) {
+                <span class="palette__logo" [style.color]="target.color">
+                  <pp-icon [name]="target.icon" [size]="16"></pp-icon>
+                </span>
+              } @else {
+                <span class="dot" [style.background]="target.color"></span>
+              }
+              <span class="palette__cat-label">{{ target.label }}</span>
+              <span class="palette__cat-tag">{{ target.category }}</span>
+            </div>
+            @if (target.description) {
+              <p class="palette__desc">{{ target.description }}</p>
+            }
+            @for (action of target.actions; track action.name) {
+              <div
+                class="palette__action"
+                draggable="true"
+                (dragstart)="onPaletteDragStart($event, target, action)"
+                (dblclick)="addCatalogStep(target.target, action.name)"
+                [title]="'Drag to canvas or double-click to append'"
+              >
+                {{ action.label }}
+              </div>
+            }
+          </div>
+        }
+      }
+    </aside>
+
+    <!-- Canvas (n8n-style board) -->
+    <main class="canvas">
+      <div
+        #canvasEl
+        class="canvas__viewport"
+        [style.background-size]="gridSize() + ' ' + gridSize()"
+        [style.background-position]="gridPos()"
+        (dragover)="onCanvasDragOver($event)"
+        (drop)="onCanvasDrop($event)"
+        (pointerdown)="onCanvasPointerDown($event)"
+        (wheel)="onWheel($event)"
+      >
+        @if (steps().length === 0) {
+          <div class="canvas__empty">
+            <p>Drag a step from the palette to start building the flow.</p>
+          </div>
+        }
+
+        <div class="canvas__world" [style.transform]="worldTransform()">
+          <svg class="wires">
+            @for (w of wires(); track w.index) {
+              <g class="wire-group">
+                <path
+                  class="wire"
+                  [class.wire--invalid]="w.invalid"
+                  [attr.d]="w.d"
+                />
+                <path
+                  class="wire wire--hit"
+                  [attr.d]="w.d"
+                  (pointerdown)="removeEdge(w.index); $event.stopPropagation()"
+                >
+                  <title>
+                    {{
+                      w.invalid
+                        ? "Inconsistent direction — click to remove"
+                        : "Click to remove this connection"
+                    }}
+                  </title>
+                </path>
+                @if (w.label) {
+                  <text
+                    class="wire__label"
+                    [attr.x]="w.midX"
+                    [attr.y]="w.midY"
+                    text-anchor="middle"
+                  >
+                    {{ w.label }}
+                  </text>
+                }
+              </g>
+            }
+            @if (tempWirePath(); as tmp) {
+              <path class="wire wire--temp" [attr.d]="tmp" />
+            }
+          </svg>
+
+          @for (node of nodes(); track node.step.id) {
+            <div
+              class="cnode"
+              [class.cnode--control]="node.kind !== 'action'"
+              [attr.data-node-id]="node.step.id"
+              [attr.data-run]="nodeRunStatus(node.step.id)"
+              [class.cnode--selected]="node.step.id === selectedId()"
+              [class.cnode--error]="node.hasError"
+              [class.cnode--running]="
+                running() && activeNode() === node.step.id
+              "
+              [class.cnode--paused]="pausedNode() === node.step.id"
+              [style.left.px]="node.x"
+              [style.top.px]="node.y"
+              [style.width.px]="nodeW"
+              [style.height.px]="node.height"
+              [style.--node-color]="node.color"
+              (pointerdown)="onNodePointerDown($event, node)"
+              (dblclick)="openDetail(node.step.id)"
+            >
+              @if (node.isStart) {
+                <span
+                  class="cnode__flag cnode__flag--start"
+                  [class.cnode__flag--entry]="node.step.id === entryId()"
+                  [title]="
+                    node.step.id === entryId()
+                      ? 'Flow starts here'
+                      : 'Entry point (no incoming wire)'
+                  "
+                >
+                  ▶ Start
+                </span>
+              }
+              @if (node.isEnd) {
+                <span
+                  class="cnode__flag cnode__flag--end"
+                  title="Flow ends here (no outgoing wire)"
+                >
+                  End ◼
+                </span>
+              }
+              @if (isPinned(node.step.id)) {
+                <span
+                  class="cnode__pin"
+                  title="Output pinned — reused without re-running"
+                  >📌</span
+                >
+              }
+              @if (isBreakpoint(node.step.id)) {
+                <span class="cnode__bp" title="Breakpoint"></span>
+              }
+              <span
+                class="cnode__port cnode__port--in"
+                [attr.data-node-id]="node.step.id"
+              ></span>
+              <div class="cnode__body">
+                <div class="cnode__head mono">
+                  <span class="cnode__index">{{ node.index }}</span>
+                  <span class="cnode__id">{{ node.step.id }}</span>
+                  @if (node.hasError) {
+                    <span class="cnode__warn" title="Unresolved reference"
+                      >⚠</span
+                    >
+                  }
+                </div>
+                <div class="cnode__action">
+                  @if (node.glyph) {
+                    <span class="cnode__glyph">{{ node.glyph }}</span>
+                  }
+                  {{ node.title }}
+                </div>
+                <div class="cnode__meta">
+                  @if (node.kind === "action") {
+                    <span class="dot" [style.background]="node.color"></span>
+                  }
+                  <span class="cnode__target">{{ node.subtitle }}</span>
+                  @if (node.step.assertions.length > 0) {
+                    <span class="cnode__badge mono"
+                      >{{ node.step.assertions.length }} ✓</span
+                    >
+                  }
+                </div>
+              </div>
+              @for (p of node.ports; track p.port) {
+                <span
+                  class="cnode__port cnode__port--out"
+                  [class.cnode__port--connected]="p.connected"
+                  [style.top.px]="p.cy - node.y"
+                  [title]="
+                    node.kind === 'action'
+                      ? 'Drag onto another node to make it run next'
+                      : 'Output: ' + p.label
+                  "
+                  (pointerdown)="onPortPointerDown($event, node, p.port)"
+                >
+                  @if (node.kind !== "action") {
+                    <span class="cnode__portlabel">{{ p.label }}</span>
+                  }
+                </span>
+              }
+            </div>
+          }
+        </div>
+
+        <div class="canvas__controls" (pointerdown)="$event.stopPropagation()">
+          <button (click)="zoomBy(1.25)" title="Zoom in">+</button>
+          <button (click)="zoomBy(0.8)" title="Zoom out">−</button>
+          <button (click)="zoomReset()" title="Reset zoom" class="mono">
+            {{ (zoom() * 100).toFixed(0) }}%
+          </button>
+          <button (click)="fitView()" title="Fit view">⛶</button>
+        </div>
+      </div>
+
+      <!-- Validation results -->
+      @if (validation(); as result) {
+        <div class="validation" [class.validation--ok]="result.valid">
+          @if (result.valid && result.issues.length === 0) {
+            <span class="validation__ok">✓ Scenario is valid</span>
+          } @else {
+            @for (issue of result.issues; track $index) {
+              <button
+                class="validation__issue"
+                [class.validation__issue--warning]="
+                  issue.severity === 'warning'
+                "
+                (click)="issueClick(issue.step_id)"
+              >
+                <span class="validation__sev">{{ issue.severity }}</span>
+                @if (issue.step_id) {
+                  <span class="mono">{{ issue.step_id }}</span>
+                }
+                {{ issue.message }}
+              </button>
+            }
+          }
+        </div>
+      }
+    </main>
+
+    <!-- Config panel -->
+    <aside class="config">
+      @if (selectedStep(); as step) {
+        <div class="config__head">
+          <h2>
+            {{ isControl(step) ? "Node Configuration" : "Step Configuration" }}
+          </h2>
+          <button class="btn btn--ghost" (click)="clearSelection()">✕</button>
+        </div>
+
+        <label class="field">
+          <span>Node ID</span>
+          <input
+            class="mono"
+            [ngModel]="step.id"
+            (change)="onStepIdChange(step.id, $any($event.target).value)"
+          />
+        </label>
+
+        @if (isControl(step)) {
+          <!-- Control-flow node configuration -->
+          @switch (step.kind) {
+            @case ("trigger") {
+              <p class="muted config__hint">
+                Entry — fires on every incoming message. The message is
+                available to downstream nodes as
+                <span class="mono">${{ "{" }}request.*{{ "}" }}</span> (e.g.
+                <span class="mono">${{ "{" }}request.mti{{ "}" }}</span
+                >, <span class="mono">${{ "{" }}request.de.2{{ "}" }}</span
+                >). Set the listening connection in the toolbar.
+              </p>
+            }
+            @case ("reply") {
+              <label class="field">
+                <span>
+                  Reply action
+                  <span class="muted"
+                    >— set / echo / generate fields, ${{ "{" }}…{{
+                      "}"
+                    }}
+                    resolved</span
+                  >
+                </span>
+                <app-code-editor
+                  [value]="flowNodeJson(step)"
+                  language="json"
+                  [height]="220"
+                  (valueChange)="setFlowNodeJson(step, $event)"
+                ></app-code-editor>
+              </label>
+              <p class="muted config__hint">
+                e.g.
+                <span class="mono"
+                  >{{ "{" }} "echo": ["11","37"], "set": {{ "{" }} "39": "00"
+                  {{ "}" }} {{ "}" }}</span
+                >. Use <span class="mono">"drop": true</span> to send no reply.
+                To return an upstream answer received by a relay or action node,
+                use
+                <span class="mono"
+                  >"${{ "{" }}&lt;node_id&gt;.response{{ "}" }}"</span
+                >
+                (quoted).
+              </p>
+            }
+            @case ("state") {
+              <label class="field">
+                <span>
+                  State ops
+                  <span class="muted"
+                    >— set / incr / append; read via ${{ "{" }}state.*{{
+                      "}"
+                    }}</span
+                  >
+                </span>
+                <app-code-editor
+                  [value]="flowNodeJson(step)"
+                  language="json"
+                  [height]="200"
+                  (valueChange)="setFlowNodeJson(step, $event)"
+                ></app-code-editor>
+              </label>
+              <p class="muted config__hint">
+                e.g.
+                <span class="mono"
+                  >{{ "{" }} "incr": {{ "{" }} "count": 1 {{ "}" }}, "set":
+                  {{ "{" }} "last": "${{ "{" }}request.de.2{{ "}" }}" {{ "}" }}
+                  {{ "}" }}</span
+                >.
+              </p>
+            }
+            @case ("relay") {
+              <label class="field">
+                <span
+                  >Upstream connection
+                  <span class="muted">— where to forward</span></span
+                >
+                <select
+                  [ngModel]="step.config?.connection ?? ''"
+                  (ngModelChange)="setStepConnection(step, $event)"
+                >
+                  <option value="">Select a connection or group…</option>
+                  @for (c of upstreamConnections(); track c.name) {
+                    <option [value]="c.name">
+                      {{ c.name }}
+                      @if (c.group) {
+                        (group · {{ c.members }} members)
+                      } @else if (c.host) {
+                        ({{ c.host }}:{{ c.port }})
+                      }
+                    </option>
+                  }
+                </select>
+              </label>
+              <label class="field">
+                <span>Mode</span>
+                <select
+                  [ngModel]="relayMode(step)"
+                  (ngModelChange)="setRelayMode(step, $event)"
+                >
+                  <option value="decode">
+                    Decode &amp; forward (all commands, per-command trace)
+                  </option>
+                  <option value="raw">
+                    Raw passthrough (byte-exact, no parsing)
+                  </option>
+                </select>
+              </label>
+              <p class="muted config__hint">
+                Unwired (no outgoing wire): this flow becomes a transparent
+                proxy — every frame on the trigger connection is forwarded to
+                the upstream and its response returned unchanged.
+                <span class="mono">Decode</span> parses each command for the
+                trace/capture; <span class="mono">Raw</span> relays bytes blind.
+                Wired to further nodes: the relay runs in-graph instead — it
+                forwards each request and exposes the upstream's answer as
+                <span class="mono"
+                  >${{ "{" }}{{ step.id }}.response{{ "}" }}</span
+                >, so a following reply can return or reshape it (Mode is
+                ignored in-graph).
+              </p>
+            }
+            @case ("if") {
+              <label class="field">
+                <span
+                  >Left
+                  <span class="muted"
+                    >(value or ${{ "{" }}ref{{ "}" }})</span
+                  ></span
+                >
+                <input
+                  class="mono"
+                  [appRefAutocomplete]="allRefs()"
+                  [ngModel]="step.config?.left ?? ''"
+                  (ngModelChange)="updateConfig(step, { left: $event })"
+                  placeholder="${{ '{' }}step_001.response.response_code{{
+                    '}'
+                  }}"
+                />
+              </label>
+              <label class="field">
+                <span>Operator</span>
+                <select
+                  [ngModel]="step.config?.operator ?? 'eq'"
+                  (ngModelChange)="updateConfig(step, { operator: $event })"
+                >
+                  @for (op of operators; track op) {
+                    <option [value]="op">{{ op }}</option>
+                  }
+                </select>
+              </label>
+              @if (!isUnary(step.config?.operator ?? "eq")) {
+                <label class="field">
+                  <span
+                    >Right
+                    <span class="muted"
+                      >(value or ${{ "{" }}ref{{ "}" }})</span
+                    ></span
+                  >
+                  <input
+                    class="mono"
+                    [appRefAutocomplete]="allRefs()"
+                    [ngModel]="
+                      expectedAsString(
+                        $safeNavigationMigration(step.config?.right)
+                      )
+                    "
+                    (change)="
+                      updateConfig(step, {
+                        right: parseScalar($any($event.target).value),
+                      })
+                    "
+                    placeholder="00"
+                  />
+                </label>
+              }
+              <p class="muted config__hint">
+                Wire the <strong>true</strong> and <strong>false</strong> ports
+                to the nodes that run in each case.
+              </p>
+            }
+            @case ("switch") {
+              <label class="field">
+                <span
+                  >Route on
+                  <span class="muted"
+                    >(value or ${{ "{" }}ref{{ "}" }})</span
+                  ></span
+                >
+                <input
+                  class="mono"
+                  [appRefAutocomplete]="allRefs()"
+                  [ngModel]="step.config?.value ?? ''"
+                  (ngModelChange)="updateConfig(step, { value: $event })"
+                  placeholder="${{ '{' }}step_001.response.response_code{{
+                    '}'
+                  }}"
+                />
+              </label>
+              <div class="field">
+                <span>
+                  Cases
+                  <button class="btn btn--ghost" (click)="addSwitchCase(step)">
+                    + add
+                  </button>
+                </span>
+                @for (c of step.config?.cases ?? []; track $index) {
+                  <div class="assertion">
+                    <span class="mono muted">case_{{ $index }}</span>
+                    <input
+                      class="mono assertion__expected"
+                      placeholder="match value"
+                      [ngModel]="c.value"
+                      (ngModelChange)="updateSwitchCase(step, $index, $event)"
+                    />
+                    <button
+                      class="btn btn--ghost"
+                      (click)="removeSwitchCase(step, $index)"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                }
+              </div>
+              <p class="muted config__hint">
+                Unmatched values leave through the
+                <strong>default</strong> port.
+              </p>
+            }
+            @case ("loop") {
+              <label class="field">
+                <span>Mode</span>
+                <select
+                  [ngModel]="step.config?.mode ?? 'times'"
+                  (ngModelChange)="onLoopModeChange(step, $event)"
+                >
+                  <option value="times">Repeat N times</option>
+                  <option value="forEach">For each (list)</option>
+                  <option value="while">While (condition)</option>
+                </select>
+              </label>
+              @if ((step.config?.mode ?? "times") === "times") {
+                <label class="field">
+                  <span>Iterations</span>
+                  <input
+                    type="number"
+                    min="0"
+                    [ngModel]="step.config?.count ?? 0"
+                    (ngModelChange)="updateConfig(step, { count: +$event })"
+                  />
+                </label>
+              }
+              @if (step.config?.mode === "forEach") {
+                <label class="field">
+                  <span>List reference</span>
+                  <input
+                    class="mono"
+                    [appRefAutocomplete]="allRefs()"
+                    [ngModel]="step.config?.list ?? ''"
+                    (ngModelChange)="updateConfig(step, { list: $event })"
+                    placeholder="${{ '{' }}step_001.response.items{{ '}' }}"
+                  />
+                </label>
+              }
+              @if (step.config?.mode === "while") {
+                <label class="field">
+                  <span>Left</span>
+                  <input
+                    class="mono"
+                    [appRefAutocomplete]="allRefs()"
+                    [ngModel]="step.config?.condition?.left ?? ''"
+                    (ngModelChange)="updateCondition(step, { left: $event })"
+                    placeholder="${{ '{' }}step_001.response.status{{ '}' }}"
+                  />
+                </label>
+                <label class="field">
+                  <span>Operator</span>
+                  <select
+                    [ngModel]="step.config?.condition?.operator ?? 'eq'"
+                    (ngModelChange)="
+                      updateCondition(step, { operator: $event })
+                    "
+                  >
+                    @for (op of operators; track op) {
+                      <option [value]="op">{{ op }}</option>
+                    }
+                  </select>
+                </label>
+                @if (!isUnary(step.config?.condition?.operator ?? "eq")) {
+                  <label class="field">
+                    <span>Right</span>
+                    <input
+                      class="mono"
+                      [ngModel]="
+                        expectedAsString(
+                          $safeNavigationMigration(
+                            step.config?.condition?.right
+                          )
+                        )
+                      "
+                      (change)="
+                        updateCondition(step, {
+                          right: parseScalar($any($event.target).value),
+                        })
+                      "
+                    />
+                  </label>
+                }
+              }
+              <label class="field">
+                <span
+                  >Max iterations <span class="muted">(safety cap)</span></span
+                >
+                <input
+                  type="number"
+                  min="1"
+                  [ngModel]="step.config?.max_iterations ?? 1000"
+                  (ngModelChange)="
+                    updateConfig(step, { max_iterations: +$event })
+                  "
+                />
+              </label>
+              <p class="muted config__hint">
+                Wire the <strong>loop</strong> port to the body, and
+                <strong>done</strong> to what runs after the loop.
+              </p>
+            }
+            @case ("wait") {
+              <label class="field">
+                <span>Delay (ms)</span>
+                <input
+                  type="number"
+                  min="0"
+                  [ngModel]="step.config?.ms ?? 0"
+                  (ngModelChange)="updateConfig(step, { ms: +$event })"
+                />
+              </label>
+            }
+            @case ("merge") {
+              <p class="muted config__hint">
+                Merge has no settings — wire several branches into it and one
+                wire out to rejoin the flow.
+              </p>
+            }
+            @case ("init") {
+              <label class="field">
+                <span>
+                  Initial JSON
+                  <span class="muted"
+                    >— ${{ "{" }}vars.*{{ "}" }} / ${{ "{" }}tables.*{{
+                      "}"
+                    }}
+                    are resolved</span
+                  >
+                </span>
+                <app-code-editor
+                  [value]="step.config?.data ?? '{}'"
+                  language="json"
+                  [height]="240"
+                  (valueChange)="updateConfig(step, { data: $event })"
+                ></app-code-editor>
+              </label>
+              <p class="muted config__hint">
+                Wire this node's output into the first step. Downstream steps
+                read it as
+                <span class="mono"
+                  >${{ "{" }}{{ step.id }}.response.…{{ "}" }}</span
+                >.
+              </p>
+            }
+            @case ("crypto") {
+              <label class="field">
+                <span>Operation</span>
+                <select
+                  [ngModel]="step.config?.operation ?? 'pin_block_encode'"
+                  (ngModelChange)="updateConfig(step, { operation: $event })"
+                >
+                  @for (o of cryptoOperations; track o.value) {
+                    <option [value]="o.value">{{ o.label }}</option>
+                  }
+                </select>
+              </label>
+
+              <label class="field">
+                <span
+                  >Key <span class="muted">(hex; 16/32/48 chars)</span></span
+                >
+                <input
+                  class="mono"
+                  [appRefAutocomplete]="allRefs()"
+                  [ngModel]="step.config?.key ?? ''"
+                  (ngModelChange)="updateConfig(step, { key: $event })"
+                  placeholder="0123456789ABCDEFFEDCBA9876543210"
+                />
+              </label>
+
+              @switch (step.config?.operation) {
+                @case ("des") {
+                  <label class="field"
+                    ><span>Data (hex)</span>
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.data ?? ''"
+                      (ngModelChange)="updateConfig(step, { data: $event })"
+                  /></label>
+                  <div class="field field--inline">
+                    <select
+                      [ngModel]="step.config?.cipher_op ?? 'encrypt'"
+                      (ngModelChange)="
+                        updateConfig(step, { cipher_op: $event })
+                      "
+                    >
+                      <option value="encrypt">encrypt</option>
+                      <option value="decrypt">decrypt</option>
+                    </select>
+                    <select
+                      [ngModel]="step.config?.cipher_mode ?? 'ecb'"
+                      (ngModelChange)="
+                        updateConfig(step, { cipher_mode: $event })
+                      "
+                    >
+                      <option value="ecb">ECB</option>
+                      <option value="cbc">CBC</option>
+                    </select>
+                  </div>
+                  @if (step.config?.cipher_mode === "cbc") {
+                    <label class="field"
+                      ><span>IV (hex)</span>
+                      <input
+                        class="mono"
+                        [ngModel]="step.config?.iv ?? ''"
+                        (ngModelChange)="updateConfig(step, { iv: $event })"
+                        placeholder="0000000000000000"
+                    /></label>
+                  }
+                }
+                @case ("retail_mac") {
+                  <label class="field"
+                    ><span>Data (hex)</span>
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.data ?? ''"
+                      (ngModelChange)="updateConfig(step, { data: $event })"
+                  /></label>
+                }
+                @case ("arqc") {
+                  <label class="field"
+                    ><span>Transaction data (hex)</span>
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.data ?? ''"
+                      (ngModelChange)="updateConfig(step, { data: $event })"
+                      placeholder="amount‖country‖currency‖TVR‖…‖ATC‖CVR"
+                  /></label>
+                  <label class="field"
+                    ><span
+                      >Expected ARQC
+                      <span class="muted">(optional — to verify)</span></span
+                    >
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.expected ?? ''"
+                      (ngModelChange)="updateConfig(step, { expected: $event })"
+                      placeholder="leave blank to generate"
+                  /></label>
+                  <p class="muted config__hint">
+                    Key = AC session key. Output
+                    <span class="mono">arqc</span> (and
+                    <span class="mono">match</span> when an expected value is
+                    given).
+                  </p>
+                }
+                @case ("arpc") {
+                  <label class="field"
+                    ><span>ARQC (hex)</span>
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.arqc ?? ''"
+                      (ngModelChange)="updateConfig(step, { arqc: $event })"
+                      placeholder="${{ '{' }}arqc.response.arqc{{ '}' }}"
+                  /></label>
+                  <label class="field"
+                    ><span>Method</span>
+                    <select
+                      [ngModel]="step.config?.arpc_method ?? '1'"
+                      (ngModelChange)="
+                        updateConfig(step, { arpc_method: $event })
+                      "
+                    >
+                      <option value="1">Method 1 — ARC (XOR + 3DES)</option>
+                      <option value="2">Method 2 — CSU (Retail MAC)</option>
+                    </select>
+                  </label>
+                  @if ((step.config?.arpc_method ?? "1") === "1") {
+                    <label class="field"
+                      ><span
+                        >ARC
+                        <span class="muted"
+                          >(2 bytes — auth response code)</span
+                        ></span
+                      >
+                      <input
+                        class="mono"
+                        [appRefAutocomplete]="allRefs()"
+                        [ngModel]="step.config?.arc ?? ''"
+                        (ngModelChange)="updateConfig(step, { arc: $event })"
+                        placeholder="3030"
+                    /></label>
+                  } @else {
+                    <label class="field"
+                      ><span
+                        >CSU
+                        <span class="muted"
+                          >(4 bytes — card status update)</span
+                        ></span
+                      >
+                      <input
+                        class="mono"
+                        [appRefAutocomplete]="allRefs()"
+                        [ngModel]="step.config?.csu ?? ''"
+                        (ngModelChange)="updateConfig(step, { csu: $event })"
+                        placeholder="00120000"
+                    /></label>
+                    <label class="field"
+                      ><span
+                        >Proprietary auth data
+                        <span class="muted">(hex, optional)</span></span
+                      >
+                      <input
+                        class="mono"
+                        [appRefAutocomplete]="allRefs()"
+                        [ngModel]="step.config?.proprietary ?? ''"
+                        (ngModelChange)="
+                          updateConfig(step, { proprietary: $event })
+                        "
+                    /></label>
+                  }
+                  <label class="field"
+                    ><span
+                      >Expected ARPC
+                      <span class="muted">(optional — to verify)</span></span
+                    >
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.expected ?? ''"
+                      (ngModelChange)="updateConfig(step, { expected: $event })"
+                      placeholder="leave blank to generate"
+                  /></label>
+                  <p class="muted config__hint">
+                    Key = AC session key. Output
+                    <span class="mono">arpc</span> (and
+                    <span class="mono">match</span> when an expected value is
+                    given).
+                  </p>
+                }
+                @case ("pin_block_encode") {
+                  <label class="field"
+                    ><span>PIN</span>
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.pin ?? ''"
+                      (ngModelChange)="updateConfig(step, { pin: $event })"
+                      placeholder="1234"
+                  /></label>
+                  <label class="field"
+                    ><span>PAN</span>
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.pan ?? ''"
+                      (ngModelChange)="updateConfig(step, { pan: $event })"
+                  /></label>
+                }
+                @case ("pin_block_decode") {
+                  <label class="field"
+                    ><span>PIN block (hex)</span>
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.pin_block ?? ''"
+                      (ngModelChange)="
+                        updateConfig(step, { pin_block: $event })
+                      "
+                  /></label>
+                  <label class="field"
+                    ><span>PAN</span>
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.pan ?? ''"
+                      (ngModelChange)="updateConfig(step, { pan: $event })"
+                  /></label>
+                }
+                @case ("cvv") {
+                  <label class="field"
+                    ><span>PAN</span>
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.pan ?? ''"
+                      (ngModelChange)="updateConfig(step, { pan: $event })"
+                  /></label>
+                  <div class="field field--inline">
+                    <input
+                      class="mono"
+                      [ngModel]="step.config?.expiry ?? ''"
+                      (ngModelChange)="updateConfig(step, { expiry: $event })"
+                      placeholder="expiry YYMM"
+                    />
+                    <input
+                      class="mono"
+                      [ngModel]="step.config?.service_code ?? ''"
+                      (ngModelChange)="
+                        updateConfig(step, { service_code: $event })
+                      "
+                      placeholder="service 101"
+                    />
+                  </div>
+                }
+                @case ("emv_icc_mk") {
+                  <label class="field"
+                    ><span>PAN</span>
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.pan ?? ''"
+                      (ngModelChange)="updateConfig(step, { pan: $event })"
+                  /></label>
+                  <label class="field"
+                    ><span>PAN Sequence Number</span>
+                    <input
+                      class="mono"
+                      [ngModel]="step.config?.psn ?? '00'"
+                      (ngModelChange)="updateConfig(step, { psn: $event })"
+                      placeholder="00"
+                  /></label>
+                  <p class="muted config__hint">
+                    Key = Issuer Master Key (MDK). Output
+                    <span class="mono">udk</span>.
+                  </p>
+                }
+                @case ("emv_session_key") {
+                  <label class="field"
+                    ><span>ATC <span class="muted">(hex)</span></span>
+                    <input
+                      class="mono"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="step.config?.atc ?? ''"
+                      (ngModelChange)="updateConfig(step, { atc: $event })"
+                      placeholder="001C"
+                  /></label>
+                  <p class="muted config__hint">
+                    Key = ICC Master Key (UDK). Output
+                    <span class="mono">session_key</span>.
+                  </p>
+                }
+              }
+              <p class="muted config__hint">
+                Runs real payment crypto in the worker. Output is available as
+                <span class="mono"
+                  >${{ "{" }}{{ step.id }}.response.…{{ "}" }}</span
+                >. Any field can reference an earlier step.
+              </p>
+            }
+            @case ("call") {
+              <label class="field">
+                <span>Scenario to run</span>
+                <select
+                  [ngModel]="step.config?.scenario_id ?? ''"
+                  (ngModelChange)="updateConfig(step, { scenario_id: $event })"
+                >
+                  <option value="">— pick a scenario —</option>
+                  @for (s of callableScenarios(); track s.id) {
+                    <option [value]="s.id">{{ s.name }}</option>
+                  }
+                </select>
+              </label>
+              @if (!callableScenarios().length) {
+                <p class="muted config__hint">
+                  Save other scenarios first — a Call node runs one of them as a
+                  sub-flow.
+                </p>
+              }
+              <div class="field">
+                <span>
+                  Pass variables
+                  <span class="muted"
+                    >— override ${{ "{" }}vars.NAME{{ "}" }} in the
+                    sub-flow</span
+                  >
+                  <button class="btn btn--ghost" (click)="addCallVar(step)">
+                    + add
+                  </button>
+                </span>
+                @for (r of step.config?.variables ?? []; track $index) {
+                  <div class="assertion">
+                    <input
+                      class="mono assertion__field"
+                      placeholder="NAME"
+                      [ngModel]="r.name"
+                      (ngModelChange)="
+                        updateCallVar(step, $index, { name: $event })
+                      "
+                    />
+                    <input
+                      class="mono assertion__expected"
+                      placeholder="value or ${{ '{' }}ref{{ '}' }}"
+                      [appRefAutocomplete]="allRefs()"
+                      [ngModel]="r.value"
+                      (ngModelChange)="
+                        updateCallVar(step, $index, { value: $event })
+                      "
+                    />
+                    <button
+                      class="btn btn--ghost"
+                      (click)="removeCallVar(step, $index)"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                }
+              </div>
+              <p class="muted config__hint">
+                Output is exposed as
+                <span class="mono"
+                  >${{ "{"
+                  }}{{ step.id }}.response.&lt;sub_step&gt;.&lt;field&gt;{{
+                    "}"
+                  }}</span
+                >.
+              </p>
+            }
+            @case ("code") {
+              <label class="field">
+                <span>Language</span>
+                <select
+                  [ngModel]="step.config?.language ?? 'python'"
+                  (ngModelChange)="updateConfig(step, { language: $event })"
+                >
+                  @for (lang of codeLanguages; track lang) {
+                    <option [value]="lang">{{ lang }}</option>
+                  }
+                </select>
+              </label>
+              <div class="field">
+                <span>
+                  Inputs
+                  <span class="muted"
+                    >— available as <code>inputs.&lt;name&gt;</code>; value can
+                    be a ${{ "{" }}ref{{ "}" }}</span
+                  >
+                  <button class="btn btn--ghost" (click)="addInputRow(step)">
+                    + add
+                  </button>
+                </span>
+                @for (r of step.config?.inputs ?? []; track $index) {
+                  @if (r.format) {
+                    <div class="fmtpick">
+                      <div class="fmtpick__row">
+                        <span class="mono fmtpick__name">{{ r.name }}</span>
+                        <select
+                          class="fmtpick__sel"
+                          [ngModel]="r.formatId || ''"
+                          (ngModelChange)="applyFormat(step, $index, $event)"
+                        >
+                          <option value="">— custom / pasted —</option>
+                          @for (f of formatsFor(r.format); track f.id) {
+                            <option [value]="f.id">
+                              {{ f.group ? f.group + " · " : ""
+                              }}{{ f.name }} (v{{ f.version }})
+                            </option>
+                          }
+                        </select>
+                        <button
+                          class="btn btn--ghost"
+                          (click)="removeInputRow(step, $index)"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <span class="fmtpick__hint muted">
+                        @if (r.formatId) {
+                          Snapshotted {{ fieldCount(r) }} data elements from
+                          <strong>{{ r.formatId }}</strong> v{{
+                            r.formatVersion
+                          }}. Re-select to re-sync, or edit the JSON below.
+                        } @else {
+                          Custom field table ({{ fieldCount(r) }} data elements)
+                          — pick a Message Format to replace it.
+                        }
+                      </span>
+                      <details class="fmtpick__json">
+                        <summary>Field table (JSON)</summary>
+                        <textarea
+                          class="mono"
+                          rows="5"
+                          [ngModel]="r.value"
+                          spellcheck="false"
+                          (ngModelChange)="
+                            updateInputRow(step, $index, {
+                              value: $event,
+                              formatId: '',
+                              formatVersion: '',
+                            })
+                          "
+                        ></textarea>
+                      </details>
+                    </div>
+                  } @else {
+                    <div class="assertion">
+                      <input
+                        class="mono assertion__field"
+                        placeholder="name"
+                        [ngModel]="r.name"
+                        (ngModelChange)="
+                          updateInputRow(step, $index, { name: $event })
+                        "
+                      />
+                      @if (r.options?.length) {
+                        <select
+                          class="mono assertion__expected"
+                          [ngModel]="r.value"
+                          (ngModelChange)="
+                            updateInputRow(step, $index, { value: $event })
+                          "
+                        >
+                          @for (opt of r.options ?? []; track opt) {
+                            <option [value]="opt">{{ opt }}</option>
+                          }
+                        </select>
+                      } @else {
+                        <input
+                          class="mono assertion__expected"
+                          placeholder="value or ${{ '{' }}step_001.response.x{{
+                            '}'
+                          }}"
+                          [appRefAutocomplete]="allRefs()"
+                          [ngModel]="r.value"
+                          (ngModelChange)="
+                            updateInputRow(step, $index, { value: $event })
+                          "
+                        />
+                      }
+                      <button
+                        class="btn btn--ghost"
+                        (click)="removeInputRow(step, $index)"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  }
+                }
+                @if ((step.config?.inputs ?? []).length === 0) {
+                  <span class="muted"
+                    >No inputs — the snippet reads
+                    <code>context</code> directly.</span
+                  >
+                }
+              </div>
+
+              <label class="field">
+                <span>
+                  Code
+                  <span class="muted">
+                    — read <code>inputs</code> / <code>context</code>,
+                    <code>return</code> an object
+                  </span>
+                </span>
+                <app-code-editor
+                  [value]="step.config?.code ?? ''"
+                  [language]="step.config?.language ?? 'python'"
+                  [height]="280"
+                  (valueChange)="updateConfig(step, { code: $event })"
+                ></app-code-editor>
+              </label>
+              <label class="field">
+                <span>Timeout (ms)</span>
+                <input
+                  type="number"
+                  min="1"
+                  [ngModel]="step.config?.timeout_ms ?? 5000"
+                  (ngModelChange)="updateConfig(step, { timeout_ms: +$event })"
+                />
+              </label>
+              <p class="muted config__hint">
+                Runs in a sandboxed subprocess with a timeout. The returned
+                object is available downstream as
+                <span class="mono"
+                  >${{ "{" }}{{ step.id }}.response.…{{ "}" }}</span
+                >.
+              </p>
+            }
+            @case ("http") {
+              <div class="field field--inline">
+                <select
+                  class="http-method"
+                  [ngModel]="step.config?.method ?? 'GET'"
+                  (ngModelChange)="updateConfig(step, { method: $event })"
+                >
+                  @for (m of httpMethods; track m) {
+                    <option [value]="m">{{ m }}</option>
+                  }
+                </select>
+                <input
+                  class="mono http-url"
+                  [appRefAutocomplete]="allRefs()"
+                  [ngModel]="step.config?.url ?? ''"
+                  (ngModelChange)="updateConfig(step, { url: $event })"
+                  placeholder="https://api.example.com/v1/txn/${{
+                    '{'
+                  }}step_001.response.rrn{{ '}' }}"
+                />
+              </div>
+
+              <label class="field">
+                <span>Authentication</span>
+                <select
+                  [ngModel]="step.config?.authentication?.type ?? 'none'"
+                  (ngModelChange)="updateAuth(step, { type: $event })"
+                >
+                  @for (a of authTypes; track a.value) {
+                    <option [value]="a.value">{{ a.label }}</option>
+                  }
+                </select>
+              </label>
+              @switch (step.config?.authentication?.type) {
+                @case ("bearer") {
+                  <label class="field">
+                    <span>Token</span>
+                    <input
+                      class="mono"
+                      [ngModel]="step.config?.authentication?.token ?? ''"
+                      (ngModelChange)="updateAuth(step, { token: $event })"
+                    />
+                  </label>
+                }
+                @case ("basic") {
+                  <label class="field"
+                    ><span>Username</span>
+                    <input
+                      class="mono"
+                      [ngModel]="step.config?.authentication?.username ?? ''"
+                      (ngModelChange)="updateAuth(step, { username: $event })"
+                  /></label>
+                  <label class="field"
+                    ><span>Password</span>
+                    <input
+                      class="mono"
+                      type="password"
+                      [ngModel]="step.config?.authentication?.password ?? ''"
+                      (ngModelChange)="updateAuth(step, { password: $event })"
+                  /></label>
+                }
+                @case ("header") {
+                  <label class="field"
+                    ><span>Header name</span>
+                    <input
+                      class="mono"
+                      placeholder="X-API-Key"
+                      [ngModel]="step.config?.authentication?.headerName ?? ''"
+                      (ngModelChange)="
+                        updateAuth(step, { headerName: $event })
+                      "
+                  /></label>
+                  <label class="field"
+                    ><span>Header value</span>
+                    <input
+                      class="mono"
+                      [ngModel]="step.config?.authentication?.headerValue ?? ''"
+                      (ngModelChange)="
+                        updateAuth(step, { headerValue: $event })
+                      "
+                  /></label>
+                }
+                @case ("query") {
+                  <label class="field"
+                    ><span>Param name</span>
+                    <input
+                      class="mono"
+                      placeholder="api_key"
+                      [ngModel]="step.config?.authentication?.paramName ?? ''"
+                      (ngModelChange)="updateAuth(step, { paramName: $event })"
+                  /></label>
+                  <label class="field"
+                    ><span>Param value</span>
+                    <input
+                      class="mono"
+                      [ngModel]="step.config?.authentication?.paramValue ?? ''"
+                      (ngModelChange)="
+                        updateAuth(step, { paramValue: $event })
+                      "
+                  /></label>
+                }
+              }
+
+              <label class="field field--row">
+                <input
+                  type="checkbox"
+                  [ngModel]="step.config?.sendQueryParameters ?? false"
+                  (ngModelChange)="
+                    updateConfig(step, { sendQueryParameters: $event })
+                  "
+                />
+                <span>Send Query Parameters</span>
+              </label>
+              @if (step.config?.sendQueryParameters) {
+                @for (r of step.config?.queryParameters ?? []; track $index) {
+                  <div class="assertion">
+                    <input
+                      class="mono assertion__field"
+                      placeholder="name"
+                      [ngModel]="r.name"
+                      (ngModelChange)="
+                        updateRow(step, 'queryParameters', $index, {
+                          name: $event,
+                        })
+                      "
+                    />
+                    <input
+                      class="mono assertion__expected"
+                      placeholder="value"
+                      [ngModel]="r.value"
+                      (ngModelChange)="
+                        updateRow(step, 'queryParameters', $index, {
+                          value: $event,
+                        })
+                      "
+                    />
+                    <button
+                      class="btn btn--ghost"
+                      (click)="removeRow(step, 'queryParameters', $index)"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                }
+                <button
+                  class="btn btn--ghost"
+                  (click)="addRow(step, 'queryParameters')"
+                >
+                  + add param
+                </button>
+              }
+
+              <label class="field field--row">
+                <input
+                  type="checkbox"
+                  [ngModel]="step.config?.sendHeaders ?? false"
+                  (ngModelChange)="updateConfig(step, { sendHeaders: $event })"
+                />
+                <span>Send Headers</span>
+              </label>
+              @if (step.config?.sendHeaders) {
+                @for (r of step.config?.headers ?? []; track $index) {
+                  <div class="assertion">
+                    <input
+                      class="mono assertion__field"
+                      placeholder="name"
+                      [ngModel]="r.name"
+                      (ngModelChange)="
+                        updateRow(step, 'headers', $index, { name: $event })
+                      "
+                    />
+                    <input
+                      class="mono assertion__expected"
+                      placeholder="value"
+                      [ngModel]="r.value"
+                      (ngModelChange)="
+                        updateRow(step, 'headers', $index, { value: $event })
+                      "
+                    />
+                    <button
+                      class="btn btn--ghost"
+                      (click)="removeRow(step, 'headers', $index)"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                }
+                <button
+                  class="btn btn--ghost"
+                  (click)="addRow(step, 'headers')"
+                >
+                  + add header
+                </button>
+              }
+
+              <label class="field field--row">
+                <input
+                  type="checkbox"
+                  [ngModel]="step.config?.sendBody ?? false"
+                  (ngModelChange)="updateConfig(step, { sendBody: $event })"
+                />
+                <span>Send Body</span>
+              </label>
+              @if (step.config?.sendBody) {
+                <label class="field">
+                  <span>Body type</span>
+                  <select
+                    [ngModel]="step.config?.contentType ?? 'json'"
+                    (ngModelChange)="
+                      updateConfig(step, { contentType: $event })
+                    "
+                  >
+                    <option value="json">JSON</option>
+                    <option value="form">Form (x-www-form-urlencoded)</option>
+                    <option value="raw">Raw</option>
+                  </select>
+                </label>
+                @if (step.config?.contentType === "form") {
+                  @for (r of step.config?.bodyParameters ?? []; track $index) {
+                    <div class="assertion">
+                      <input
+                        class="mono assertion__field"
+                        placeholder="name"
+                        [ngModel]="r.name"
+                        (ngModelChange)="
+                          updateRow(step, 'bodyParameters', $index, {
+                            name: $event,
+                          })
+                        "
+                      />
+                      <input
+                        class="mono assertion__expected"
+                        placeholder="value"
+                        [ngModel]="r.value"
+                        (ngModelChange)="
+                          updateRow(step, 'bodyParameters', $index, {
+                            value: $event,
+                          })
+                        "
+                      />
+                      <button
+                        class="btn btn--ghost"
+                        (click)="removeRow(step, 'bodyParameters', $index)"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  }
+                  <button
+                    class="btn btn--ghost"
+                    (click)="addRow(step, 'bodyParameters')"
+                  >
+                    + add field
+                  </button>
+                } @else {
+                  <label class="field">
+                    <span>Body</span>
+                    <textarea
+                      class="mono code-editor"
+                      rows="6"
+                      spellcheck="false"
+                      [ngModel]="step.config?.body ?? ''"
+                      (ngModelChange)="updateConfig(step, { body: $event })"
+                      placeholder='{ "amount": 100 }'
+                    ></textarea>
+                  </label>
+                }
+              }
+
+              <details class="http-options">
+                <summary>Options</summary>
+                <label class="field"
+                  ><span>Timeout (ms)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    [ngModel]="step.config?.options?.timeout_ms ?? 30000"
+                    (ngModelChange)="
+                      updateOptions(step, { timeout_ms: +$event })
+                    "
+                /></label>
+                <label class="field"
+                  ><span>Response format</span>
+                  <select
+                    [ngModel]="step.config?.options?.responseFormat ?? 'auto'"
+                    (ngModelChange)="
+                      updateOptions(step, { responseFormat: $event })
+                    "
+                  >
+                    <option value="auto">Auto (by content-type)</option>
+                    <option value="json">JSON</option>
+                    <option value="text">Text</option>
+                  </select></label
+                >
+                <label class="field field--row">
+                  <input
+                    type="checkbox"
+                    [ngModel]="step.config?.options?.followRedirects ?? true"
+                    (ngModelChange)="
+                      updateOptions(step, { followRedirects: $event })
+                    "
+                  />
+                  <span>Follow redirects</span></label
+                >
+                <label class="field field--row">
+                  <input
+                    type="checkbox"
+                    [ngModel]="step.config?.options?.ignoreSsl ?? false"
+                    (ngModelChange)="updateOptions(step, { ignoreSsl: $event })"
+                  />
+                  <span>Ignore SSL issues</span></label
+                >
+              </details>
+
+              <div class="config__actions">
+                <button class="btn btn--primary" (click)="openDetail(step.id)">
+                  Open & Execute ▸
+                </button>
+              </div>
+            }
+          }
+
+          <div class="config__actions">
+            <button class="btn btn--danger" (click)="removeStep(step.id)">
+              Delete node
+            </button>
+          </div>
+        } @else {
+          <div class="field">
+            <span>Target</span>
+            <div class="config__target">
+              <span
+                class="dot"
+                [style.background]="targetColor(step.target)"
+              ></span>
+              {{ targetLabel(step.target) }}
+              <span class="mono muted">({{ step.target }})</span>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Action</span>
+            <select
+              [ngModel]="step.action"
+              (ngModelChange)="onActionChange(step, $event)"
+            >
+              @for (
+                action of selectedTargetSpec()?.actions ?? [];
+                track action.name
+              ) {
+                <option [value]="action.name">
+                  {{ action.label }} ({{ action.name }})
+                </option>
+              }
+            </select>
+          </label>
+
+          @if (canBindConnection(step)) {
+            <label class="field">
+              <span>Connection</span>
+              <select
+                [ngModel]="step.config?.connection ?? ''"
+                (ngModelChange)="setStepConnection(step, $event)"
+              >
+                <option value="">Default {{ step.target }} connection</option>
+                @for (c of connectionsFor(step); track c.name) {
+                  <option [value]="c.name">
+                    {{ c.name
+                    }}{{
+                      c.protocol === "group"
+                        ? " (group · " + c.family + ")"
+                        : ""
+                    }}
+                  </option>
+                }
+              </select>
+              <small class="muted">
+                @if (connectionsFor(step).length) {
+                  Which system this step talks to: a saved connection, or the
+                  default {{ step.target }} connection (the one marked default
+                  for this adapter type).
+                } @else {
+                  No saved connections for this protocol yet — add one in Manage
+                  → Connections.
+                }
+              </small>
+            </label>
+          }
+
+          <div class="field">
+            <span class="param-head">
+              Parameters
+              <span class="param-toggle">
+                <button
+                  type="button"
+                  [class.on]="!rawPayload()"
+                  (click)="rawPayload.set(false)"
+                >
+                  Form
+                </button>
+                <button
+                  type="button"
+                  [class.on]="rawPayload()"
+                  (click)="rawPayload.set(true)"
+                >
+                  Raw JSON
+                </button>
+              </span>
+            </span>
+
+            @if (!rawPayload()) {
+              @if (selectedParams().length === 0) {
+                <span class="muted">No parameters for this action.</span>
+              }
+              @for (p of selectedParams(); track p.name) {
+                <div class="param">
+                  <label class="param__label">
+                    {{ p.label || p.name }}
+                    @if (p.required) {
+                      <span class="param__req">*</span>
+                    }
+                  </label>
+                  @switch (p.type) {
+                    @case ("boolean") {
+                      <input
+                        type="checkbox"
+                        class="param__check"
+                        [checked]="paramBool(p.name)"
+                        (change)="setParam(p, $any($event.target).checked)"
+                      />
+                    }
+                    @case ("format") {
+                      <select
+                        class="param__control"
+                        [ngModel]="paramStr(p.name)"
+                        (ngModelChange)="applyDialect(p, $event)"
+                      >
+                        <option value="">
+                          {{ p.placeholder || "— environment default —" }}
+                        </option>
+                        @for (fmt of dialectFormats(p); track fmt.id) {
+                          <option [value]="fmt.id">{{ fmt.name }}</option>
+                        }
+                      </select>
+                    }
+                    @case ("enum") {
+                      <select
+                        class="param__control"
+                        [ngModel]="paramStr(p.name)"
+                        (ngModelChange)="setParam(p, $event)"
+                      >
+                        @if (!p.required && !enumIsCustom(p)) {
+                          <option value="">— none —</option>
+                        }
+                        @for (opt of effectiveOptions(p); track opt) {
+                          <option [value]="opt">{{ opt }}</option>
+                        }
+                        @if (enumIsCustom(p)) {
+                          <option [value]="paramStr(p.name)">
+                            {{ paramStr(p.name) }} (custom)
+                          </option>
+                        }
+                      </select>
+                    }
+                    @case ("number") {
+                      <input
+                        class="mono param__control"
+                        inputmode="decimal"
+                        [placeholder]="p.placeholder || '0'"
+                        [appRefAutocomplete]="allRefs()"
+                        [ngModel]="paramStr(p.name)"
+                        (ngModelChange)="setParam(p, $event)"
+                      />
+                    }
+                    @case ("json") {
+                      <textarea
+                        class="mono param__control"
+                        rows="2"
+                        [placeholder]="p.placeholder || '{}'"
+                        [appRefAutocomplete]="allRefs()"
+                        [ngModel]="paramStr(p.name)"
+                        (ngModelChange)="setParam(p, $event)"
+                      ></textarea>
+                    }
+                    @default {
+                      <input
+                        class="mono param__control"
+                        [placeholder]="p.placeholder || ''"
+                        [appRefAutocomplete]="allRefs()"
+                        [ngModel]="paramStr(p.name)"
+                        (ngModelChange)="setParam(p, $event)"
+                      />
+                    }
+                  }
+                </div>
+              }
+            } @else {
+              <textarea
+                #payloadArea
+                class="mono"
+                rows="7"
+                [appRefAutocomplete]="allRefs()"
+                [ngModel]="payloadText()"
+                (ngModelChange)="onPayloadInput($event)"
+                spellcheck="false"
+              ></textarea>
+              @if (payloadError(); as perr) {
+                <span class="field__error">{{ perr }}</span>
+              }
+            }
+          </div>
+
+          @if (rawPayload() && availableRefs().length > 0) {
+            <div class="field">
+              <span
+                >Insert reference
+                <span class="muted">(from earlier steps)</span></span
+              >
+              <div class="refs">
+                @for (r of availableRefs(); track r.ref) {
+                  <button
+                    class="refs__chip mono"
+                    (click)="insertRef(r.ref)"
+                    [title]="'Insert ' + r.ref"
+                  >
+                    {{ r.ref }}
+                  </button>
+                }
+              </div>
+            </div>
+          }
+
+          <div class="field">
+            <span>
+              Assertions
+              <button class="btn btn--ghost" (click)="addAssertion(step)">
+                + add
+              </button>
+            </span>
+            @for (a of step.assertions; track $index) {
+              <div class="assertion">
+                <input
+                  class="mono assertion__field"
+                  placeholder="field"
+                  [attr.list]="
+                    selectedResponseFields().length
+                      ? 'respfields-' + step.id
+                      : null
+                  "
+                  [ngModel]="a.field"
+                  (ngModelChange)="
+                    updateAssertion(step, $index, { field: $event })
+                  "
+                />
+                @if (selectedResponseFields().length) {
+                  <datalist [id]="'respfields-' + step.id">
+                    @for (f of selectedResponseFields(); track f) {
+                      <option [value]="f"></option>
+                    }
+                  </datalist>
+                }
+                <select
+                  class="assertion__op"
+                  [ngModel]="a.operator"
+                  (ngModelChange)="onOperatorChange(step, $index, $event)"
+                >
+                  @for (op of operators; track op) {
+                    <option [value]="op">{{ op }}</option>
+                  }
+                </select>
+                @if (!isUnary(a.operator)) {
+                  <input
+                    class="mono assertion__expected"
+                    placeholder="expected"
+                    [appRefAutocomplete]="allRefs()"
+                    [ngModel]="expectedAsString(a.expected)"
+                    (change)="
+                      onExpectedChange(step, $index, $any($event.target).value)
+                    "
+                  />
+                } @else {
+                  <span class="assertion__expected muted">—</span>
+                }
+                <button
+                  class="btn btn--ghost"
+                  (click)="removeAssertion(step, $index)"
+                >
+                  ✕
+                </button>
+              </div>
+            }
+            @if (step.assertions.length === 0) {
+              <span class="muted">No assertions — step always passes.</span>
+            }
+          </div>
+
+          <div class="config__actions">
+            <button
+              class="btn"
+              (click)="moveStep(step.id, -1)"
+              [disabled]="selectedIndex() === 0"
+            >
+              ↑ Move up
+            </button>
+            <button
+              class="btn"
+              (click)="moveStep(step.id, 1)"
+              [disabled]="selectedIndex() === steps().length - 1"
+            >
+              ↓ Move down
+            </button>
+            <button class="btn btn--danger" (click)="removeStep(step.id)">
+              Delete step
+            </button>
+          </div>
+        }
+      } @else {
+        <h2>Scenario Settings</h2>
+
+        <label class="field">
+          <span>Project</span>
+          <select
+            [ngModel]="currentProjectId()"
+            (ngModelChange)="onProjectChange($event)"
+          >
+            @for (p of projects(); track p.id) {
+              <option [value]="p.id">{{ p.name }}</option>
+            }
+          </select>
+        </label>
+
+        @if (scenarioId) {
+          <div class="field">
+            <span>Sets <span class="muted">(in this project)</span></span>
+            @if (projectSets().length === 0) {
+              <span class="muted">No sets in this project yet.</span>
+            }
+            <div class="setlist">
+              @for (s of projectSets(); track s.id) {
+                <label class="setlist__row">
+                  <input
+                    type="checkbox"
+                    [checked]="inSet(s)"
+                    (change)="toggleSet(s)"
+                  />
+                  {{ s.name }}
+                  <span class="muted mono">{{ s.scenario_ids.length }}</span>
+                </label>
+              }
+            </div>
+          </div>
+        } @else {
+          <p class="muted setlist__hint">
+            Save the scenario first to manage set membership.
+          </p>
+        }
+
+        <label class="field">
+          <span>Category <span class="muted">(logo &amp; color)</span></span>
+          <span class="catpick">
+            <span
+              class="catpick__logo"
+              [class.catpick__logo--empty]="!metaBadge()"
+              [style.color]="metaBadge()?.color"
+            >
+              @if (metaBadge(); as b) {
+                <pp-icon [name]="b.icon" [size]="16"></pp-icon>
+              }
+            </span>
+            <select
+              [ngModel]="meta().category ?? ''"
+              (ngModelChange)="setCategory($event)"
+            >
+              <option value="">— none —</option>
+              @for (c of categoryPresets; track c.label) {
+                <option [value]="c.label">{{ c.label }}</option>
+              }
+            </select>
+          </span>
+        </label>
+
+        <label class="field">
+          <span>Test class</span>
+          <select
+            [ngModel]="meta().test_class"
+            (ngModelChange)="updateMeta('test_class', $event)"
+          >
+            @for (c of testClasses; track c) {
+              <option [value]="c">{{ c }}</option>
+            }
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Description</span>
+          <textarea
+            rows="3"
+            [ngModel]="meta().description"
+            (ngModelChange)="updateMeta('description', $event)"
+          ></textarea>
+        </label>
+
+        <label class="field">
+          <span>Tags <span class="muted">(comma-separated)</span></span>
+          <input
+            class="mono"
+            [ngModel]="tagsText"
+            (ngModelChange)="onTagsChange($event)"
+            placeholder="regression, emv, happy-path"
+          />
+        </label>
+
+        <div class="field">
+          <span>
+            Variables
+            <span class="muted"
+              >— use as <code>${{ "{" }}vars.NAME{{ "}" }}</code> in steps</span
+            >
+            <button class="btn btn--ghost" (click)="addVar()">+ add</button>
+          </span>
+          @for (r of varRows(); track $index) {
+            <div class="assertion">
+              <input
+                class="mono assertion__field"
+                placeholder="NAME"
+                [ngModel]="r.key"
+                (ngModelChange)="updateVar($index, { key: $event })"
+              />
+              <input
+                class="mono assertion__expected"
+                placeholder="value"
+                [type]="r.secret ? 'password' : 'text'"
+                [ngModel]="r.value"
+                (ngModelChange)="updateVar($index, { value: $event })"
+              />
+              <button
+                class="btn btn--ghost"
+                (click)="toggleVarSecret($index)"
+                [class.btn--bp]="r.secret"
+                [title]="
+                  r.secret
+                    ? 'Secret (masked + redacted in logs)'
+                    : 'Mark as secret'
+                "
+              >
+                {{ r.secret ? "🔒" : "🔓" }}
+              </button>
+              <button class="btn btn--ghost" (click)="removeVar($index)">
+                ✕
+              </button>
+            </div>
+          }
+          @if (varRows().length === 0) {
+            <span class="muted"
+              >No scenario variables. Global/project/set variables still
+              apply.</span
+            >
+          }
+          <a
+            routerLink="/variables"
+            class="palette__manage"
+            style="font-size: 12px"
+          >
+            ⚙ Manage global / project / set variables
+          </a>
+        </div>
+
+        <label class="field">
+          <span>Timeout (ms)</span>
+          <input
+            type="number"
+            min="1"
+            [ngModel]="meta().timeout_ms"
+            (ngModelChange)="updateMeta('timeout_ms', $event)"
+          />
+        </label>
+
+        <label class="field field--row">
+          <input
+            type="checkbox"
+            [ngModel]="meta().stop_on_failure"
+            (ngModelChange)="updateMeta('stop_on_failure', $event)"
+          />
+          <span>Stop on first failure</span>
+        </label>
+
+        <label class="field">
+          <span
+            >Card pool
+            <span class="muted"
+              >— feeds ${{ "{" }}pool.card{{ "}" }}</span
+            ></span
+          >
+          <select
+            [ngModel]="meta().card_pool ?? ''"
+            (ngModelChange)="updateMeta('card_pool', $event)"
+          >
+            <option value="">(none)</option>
+            @for (p of cardPools(); track p.name) {
+              <option [value]="p.name">
+                {{ p.name }} ({{ p.cards.length }})
+              </option>
+            }
+          </select>
+        </label>
+
+        <label class="field">
+          <span
+            >Terminal pool
+            <span class="muted"
+              >— feeds ${{ "{" }}pool.terminal{{ "}" }}</span
+            ></span
+          >
+          <select
+            [ngModel]="meta().terminal_pool ?? ''"
+            (ngModelChange)="updateMeta('terminal_pool', $event)"
+          >
+            <option value="">(none)</option>
+            @for (p of terminalPools(); track p.name) {
+              <option [value]="p.name">
+                {{ p.name }} ({{ p.terminals.length }})
+              </option>
+            }
+          </select>
+        </label>
+
+        <p class="muted config__hint">
+          Select a node on the canvas to configure its action, payload, and
+          assertions.
+        </p>
+      }
+    </aside>
+  </div>
+
+  <!-- Run results panel -->
+  @if (showResults()) {
+    <section class="results">
+      <header class="results__head">
+        <span class="results__title">Run results</span>
+        @if (runResultStatus(); as rs) {
+          <span class="results__chip" [attr.data-status]="rs">{{ rs }}</span>
+        } @else if (running()) {
+          <span class="results__chip" data-status="running">running…</span>
+        }
+        <span class="results__counts muted">
+          {{ runCounts().passed }} passed · {{ runCounts().failed }} failed ·
+          {{ runCounts().total }} steps
+        </span>
+        <span class="toolbar__spacer"></span>
+        @if (runId(); as rid) {
+          <a [routerLink]="['/reports', rid]" class="btn btn--ghost"
+            >Full report ↗</a
+          >
+        }
+        <button
+          class="btn btn--ghost"
+          (click)="toggleResults()"
+          title="Hide results"
+        >
+          ✕
+        </button>
+      </header>
+
+      <div class="results__body">
+        @if (runLog().length === 0) {
+          <p class="muted results__empty">
+            {{ running() ? "Waiting for step results…" : "No steps reported." }}
+          </p>
+        }
+        <table class="results__table">
+          <tbody>
+            @for (s of runLog(); track $index) {
+              <tr
+                (click)="openDetail(s.step)"
+                [class.results__row--active]="detailNodeId() === s.step"
+              >
+                <td class="results__idx">{{ $index + 1 }}</td>
+                <td class="results__node mono">{{ s.step }}</td>
+                <td class="results__target muted">
+                  {{ s.target }}{{ s.action ? " · " + s.action : "" }}
+                </td>
+                <td>
+                  <span class="results__status" [attr.data-status]="s.status">{{
+                    s.status
+                  }}</span>
+                </td>
+                <td class="results__dur muted">{{ s.duration_ms }} ms</td>
+                <td class="results__err">
+                  @if (failReason(s); as reason) {
+                    <span class="results__errtext">{{ reason }}</span>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  }
+
+  <!-- n8n-style node detail (INPUT | params | OUTPUT) -->
+  @if (detailStep(); as step) {
+    <div class="ndv-backdrop" (click)="closeDetail()"></div>
+    <div class="ndv" (pointerdown)="$event.stopPropagation()">
+      <header class="ndv__head">
+        <span class="ndv__title">
+          @if (nodeGlyph(step); as glyph) {
+            <span class="cnode__glyph">{{ glyph }}</span>
+          }
+          {{ nodeTitle(step) }}
+          <span class="mono muted">{{ step.id }}</span>
+        </span>
+        <button
+          class="btn btn--ghost btn--sm"
+          [class.btn--bp]="isBreakpoint(step.id)"
+          (click)="toggleBreakpoint(step.id)"
+          [title]="
+            isBreakpoint(step.id)
+              ? 'Remove breakpoint'
+              : 'Set a breakpoint (Debug run pauses here)'
+          "
+        >
+          ● {{ isBreakpoint(step.id) ? "Breakpoint" : "Set breakpoint" }}
+        </button>
+        <button class="btn btn--ghost" (click)="closeDetail()">✕</button>
+      </header>
+
+      <div class="ndv__body">
+        <!-- INPUT -->
+        <section class="ndv__pane ndv__pane--io">
+          <h3>INPUT</h3>
+          @if (ancestorsCount(step.id) === 0) {
+            <p class="muted ndv__empty">
+              No upstream nodes — this is a start node.
+            </p>
+          } @else if (asJson(detailInput()) === "{}") {
+            <p class="muted ndv__empty">No input yet.</p>
+            <button
+              class="btn"
+              [disabled]="executing()"
+              (click)="executeUpstream(step)"
+            >
+              {{ executing() ? "Running…" : "Execute previous nodes" }}
+            </button>
+          } @else {
+            <pre class="ndv__json">{{ asJson(detailInput()) }}</pre>
+          }
+        </section>
+
+        <!-- PARAMS -->
+        <section class="ndv__pane ndv__pane--params">
+          <div class="ndv__params-head">
+            <h3>Parameters</h3>
+            <button
+              class="btn btn--primary"
+              [disabled]="executing()"
+              (click)="executeNode(step)"
+            >
+              {{ executing() ? "Executing…" : "⚗ Execute step" }}
+            </button>
+          </div>
+          <p class="muted ndv__hint">
+            Edit parameters in the right-hand panel; this view shows the input
+            it receives and the output it produces.
+          </p>
+          <pre class="ndv__json ndv__config">{{
+            asJson(step.config ?? {})
+          }}</pre>
+        </section>
+
+        <!-- OUTPUT -->
+        <section class="ndv__pane ndv__pane--io">
+          <h3>OUTPUT</h3>
+          @if (detailOutput(); as out) {
+            <div class="ndv__out-head">
+              <div
+                class="ndv__status"
+                [class.ndv__status--ok]="out.status === 'passed'"
+                [class.ndv__status--bad]="out.status !== 'passed'"
+              >
+                {{ out.status }}
+                @if (out.duration_ms !== undefined) {
+                  · {{ out.duration_ms }} ms
+                }
+              </div>
+              <button
+                class="btn btn--ghost btn--sm"
+                [class.btn--pinned]="isPinned(step.id)"
+                (click)="togglePin(step)"
+                [title]="
+                  isPinned(step.id)
+                    ? 'Unpin — node will run again'
+                    : 'Pin this output as mock; downstream runs skip re-running it'
+                "
+              >
+                {{ isPinned(step.id) ? "📌 Pinned" : "📌 Pin output" }}
+              </button>
+            </div>
+            @if (out.error) {
+              <pre class="ndv__json ndv__error">{{ out.error }}</pre>
+            }
+            @if (assertionRows(out.assertions).length) {
+              <h4 class="ndv__subhead">Assertions</h4>
+              <div class="asserts">
+                @for (a of assertionRows(out.assertions); track $index) {
+                  <div
+                    class="asserts__row"
+                    [class.asserts__row--bad]="!a.passed"
+                  >
+                    <span class="asserts__mark">{{
+                      a.passed ? "✓" : "✕"
+                    }}</span>
+                    <span class="mono"
+                      >{{ a.field }} {{ a.operator }}
+                      {{ valueLabelPub(a.expected) }}</span
+                    >
+                    @if (!a.passed) {
+                      <span class="asserts__got muted"
+                        >got {{ valueLabelPub(a.actual) }}</span
+                      >
+                    }
+                  </div>
+                }
+              </div>
+            }
+            <h4 class="ndv__subhead">Response</h4>
+            <pre class="ndv__json">{{ asJson(out.response) }}</pre>
+            @if (out.request) {
+              <h4 class="ndv__subhead">Request</h4>
+              <pre class="ndv__json">{{ asJson(out.request) }}</pre>
+            }
+          } @else {
+            <p class="muted ndv__empty">No output yet.</p>
+            <button
+              class="btn btn--primary"
+              [disabled]="executing()"
+              (click)="executeNode(step)"
+            >
+              {{ executing() ? "Executing…" : "Execute step" }}
+            </button>
+          }
+        </section>
+      </div>
+    </div>
+  }
+
+  <!-- Version history drawer -->
+  @if (showHistory()) {
+    <div class="drawer-backdrop" (click)="toggleHistory()"></div>
+    <aside class="drawer">
+      <div class="drawer__head">
+        <h2>Version History</h2>
+        <button class="btn btn--ghost" (click)="toggleHistory()">✕</button>
+      </div>
+      @if (versions(); as list) {
+        @for (v of list; track v.version) {
+          <div
+            class="drawer__item"
+            [class.drawer__item--current]="v.version === version()"
+            (click)="viewVersion(v)"
+          >
+            <div class="drawer__item-head">
+              <span class="mono">v{{ v.version }}</span>
+              <span class="muted">{{
+                v.created_at | date: "MMM d, HH:mm"
+              }}</span>
+            </div>
+            <p>{{ v.comment || "No comment" }} · {{ v.step_count }} steps</p>
+            @if (v.version !== version()) {
+              <button class="btn" (click)="restoreVersion(v, $event)">
+                Restore
+              </button>
+            } @else {
+              <span class="tag">current</span>
+            }
+          </div>
+        }
+      } @else {
+        <p class="muted">Loading…</p>
+      }
+    </aside>
+  }
+</div>

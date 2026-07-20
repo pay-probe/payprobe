@@ -1,0 +1,303 @@
+<div class="td">
+  <pp-page-header>
+    <div class="td__heading" subtitle>
+      <span class="muted"
+        >Reusable card pools, BIN ranges, terminal pools and crypto keys for
+        your scenarios and load runs.</span
+      >
+    </div>
+  </pp-page-header>
+
+  <nav class="td__tabs">
+    <button [class.active]="tab() === 'cards'" (click)="setTab('cards')">
+      Card Pools <span class="pill">{{ td.cardPools().length }}</span>
+    </button>
+    <button [class.active]="tab() === 'bins'" (click)="setTab('bins')">
+      BIN Ranges <span class="pill">{{ td.binRanges().length }}</span>
+    </button>
+    <button
+      [class.active]="tab() === 'terminals'"
+      (click)="setTab('terminals')"
+    >
+      Terminal Pools <span class="pill">{{ td.terminalPools().length }}</span>
+    </button>
+    <button [class.active]="tab() === 'keys'" (click)="setTab('keys')">
+      Keys <span class="pill">{{ td.keys().length }}</span>
+    </button>
+  </nav>
+
+  <!-- CARD POOLS -->
+  @if (tab() === "cards") {
+    <section class="td__pane">
+      <div class="td__list">
+        <button class="btn btn--primary" (click)="newCard()">
+          + New card pool
+        </button>
+        @if (td.cardPools().length === 0) {
+          <p class="muted empty">No card pools yet.</p>
+        }
+        <ul>
+          @for (p of td.cardPools(); track p) {
+            <li [class.sel]="cardDraft()?.original === p.name">
+              <button class="row" (click)="editCard(p)">
+                <strong>{{ p.name }}</strong>
+                <span class="muted">{{ p.cards.length }} cards</span>
+              </button>
+              <button
+                class="iconbtn danger"
+                (click)="deleteCard(p)"
+                title="Delete"
+              >
+                🗑
+              </button>
+            </li>
+          }
+        </ul>
+      </div>
+      @if (cardDraft(); as d) {
+        <div class="td__editor">
+          <h2>{{ d.isNew ? "New card pool" : "Edit “" + d.original + "”" }}</h2>
+          <label
+            >Name<input [(ngModel)]="d.name" placeholder="visa_goods"
+          /></label>
+          <label>Description<input [(ngModel)]="d.description" /></label>
+          <label
+            >Cards
+            <span class="muted"
+              >({{ countLines(d.text) }}) — one per line. A bare PAN, or a JSON
+              record for per-card data:
+              &#123;"pan","expiry","cvv","type","track2"&#125;</span
+            >
+            <textarea
+              rows="10"
+              [(ngModel)]="d.text"
+              placeholder='4111111111111111
+{"pan":"4242424242424242","expiry":"2705","cvv":"456","type":"visa"}'
+            ></textarea>
+          </label>
+          <div class="actions">
+            <button class="btn btn--primary" (click)="saveCard()">Save</button>
+            <button class="btn" (click)="cardDraft.set(null)">Cancel</button>
+          </div>
+        </div>
+      }
+    </section>
+  }
+
+  <!-- BIN RANGES -->
+  @if (tab() === "bins") {
+    <section class="td__pane">
+      <div class="td__list">
+        <button class="btn btn--primary" (click)="newBin()">
+          + New BIN range
+        </button>
+        @if (td.binRanges().length === 0) {
+          <p class="muted empty">No BIN ranges yet.</p>
+        }
+        <ul>
+          @for (b of td.binRanges(); track b) {
+            <li [class.sel]="binDraft()?.original === b.name">
+              <button class="row" (click)="editBin(b)">
+                <strong>{{ b.name }}</strong>
+                <span class="muted mono"
+                  >{{ b.bin }} · {{ b.length }}d{{
+                    b.brand ? " · " + b.brand : ""
+                  }}</span
+                >
+              </button>
+              <button
+                class="iconbtn danger"
+                (click)="deleteBin(b)"
+                title="Delete"
+              >
+                🗑
+              </button>
+            </li>
+          }
+        </ul>
+      </div>
+      @if (binDraft(); as d) {
+        <div class="td__editor">
+          <h2>{{ d.isNew ? "New BIN range" : "Edit “" + d.original + "”" }}</h2>
+          <label
+            >Name<input [(ngModel)]="d.name" placeholder="visa_test"
+          /></label>
+          <label
+            >BIN<input [(ngModel)]="d.bin" class="mono" placeholder="411111"
+          /></label>
+          <label
+            >PAN length<input
+              type="number"
+              min="12"
+              max="19"
+              [(ngModel)]="d.length"
+          /></label>
+          <label>Brand<input [(ngModel)]="d.brand" placeholder="visa" /></label>
+          <label>Description<input [(ngModel)]="d.description" /></label>
+          <div class="actions">
+            <button class="btn btn--primary" (click)="saveBin()">Save</button>
+            <button class="btn" (click)="binDraft.set(null)">Cancel</button>
+          </div>
+          @if (!d.isNew) {
+            <div class="gen">
+              <h3>Generate PANs</h3>
+              <div class="gen__row">
+                <label
+                  >Count<input
+                    type="number"
+                    min="1"
+                    max="10000"
+                    [ngModel]="genCount()"
+                    (ngModelChange)="genCount.set($event)"
+                /></label>
+                <label
+                  >Save as pool<input
+                    [ngModel]="genPoolName()"
+                    (ngModelChange)="genPoolName.set($event)"
+                    placeholder="(optional)"
+                /></label>
+              </div>
+              <div class="actions">
+                <button class="btn" (click)="generate(false)">Preview</button>
+                <button class="btn btn--primary" (click)="generate(true)">
+                  Generate → save pool
+                </button>
+              </div>
+              @if (genResult(); as pans) {
+                <textarea rows="8" readonly class="mono">{{
+                  pans.join("\n")
+                }}</textarea>
+              }
+            </div>
+          }
+        </div>
+      }
+    </section>
+  }
+
+  <!-- TERMINAL POOLS -->
+  @if (tab() === "terminals") {
+    <section class="td__pane">
+      <div class="td__list">
+        <button class="btn btn--primary" (click)="newTerm()">
+          + New terminal pool
+        </button>
+        @if (td.terminalPools().length === 0) {
+          <p class="muted empty">No terminal pools yet.</p>
+        }
+        <ul>
+          @for (p of td.terminalPools(); track p) {
+            <li [class.sel]="termDraft()?.original === p.name">
+              <button class="row" (click)="editTerm(p)">
+                <strong>{{ p.name }}</strong>
+                <span class="muted">{{ p.terminals.length }} terminals</span>
+              </button>
+              <button
+                class="iconbtn danger"
+                (click)="deleteTerm(p)"
+                title="Delete"
+              >
+                🗑
+              </button>
+            </li>
+          }
+        </ul>
+      </div>
+      @if (termDraft(); as d) {
+        <div class="td__editor">
+          <h2>
+            {{ d.isNew ? "New terminal pool" : "Edit “" + d.original + "”" }}
+          </h2>
+          <label
+            >Name<input [(ngModel)]="d.name" placeholder="lane_terminals"
+          /></label>
+          <label>Description<input [(ngModel)]="d.description" /></label>
+          <label
+            >Terminals
+            <span class="muted">({{ countLines(d.text) }}) — one per line</span>
+            <textarea
+              rows="10"
+              [(ngModel)]="d.text"
+              placeholder="TERM0001"
+            ></textarea>
+          </label>
+          <div class="actions">
+            <button class="btn btn--primary" (click)="saveTerm()">Save</button>
+            <button class="btn" (click)="termDraft.set(null)">Cancel</button>
+          </div>
+        </div>
+      }
+    </section>
+  }
+
+  <!-- KEYS -->
+  @if (tab() === "keys") {
+    <section class="td__pane">
+      <div class="td__list">
+        <button class="btn btn--primary" (click)="newKey()">+ New key</button>
+        <p class="muted note">
+          🔒 Key material is encrypted at rest and never shown after saving.
+        </p>
+        @if (td.keys().length === 0) {
+          <p class="muted empty">No keys yet.</p>
+        }
+        <ul>
+          @for (k of td.keys(); track k) {
+            <li [class.sel]="keyDraft()?.original === k.name">
+              <button class="row" (click)="editKey(k)">
+                <strong>{{ k.name }}</strong>
+                <span class="muted mono"
+                  >{{ k.type }} · {{ k.length }}B ·
+                  {{ k.fingerprint || "—" }}</span
+                >
+              </button>
+              <button
+                class="iconbtn danger"
+                (click)="deleteKey(k)"
+                title="Delete"
+              >
+                🗑
+              </button>
+            </li>
+          }
+        </ul>
+      </div>
+      @if (keyDraft(); as d) {
+        <div class="td__editor">
+          <h2>{{ d.isNew ? "New key" : "Edit “" + d.original + "”" }}</h2>
+          <label
+            >Name<input [(ngModel)]="d.name" placeholder="bdk_primary"
+          /></label>
+          <label
+            >Type
+            <select [(ngModel)]="d.type">
+              @for (t of keyTypes; track t) {
+                <option [value]="t">{{ t }}</option>
+              }
+            </select>
+          </label>
+          <label>Description<input [(ngModel)]="d.description" /></label>
+          <label
+            >Key material (hex)
+            @if (!d.isNew) {
+              <span class="muted"
+                >— current: {{ d.fingerprint || "—" }}; leave blank to
+                keep</span
+              >
+            }
+            <input
+              [(ngModel)]="d.value"
+              class="mono"
+              placeholder="0123456789ABCDEF…"
+              autocomplete="off"
+            />
+          </label>
+          <div class="actions">
+            <button class="btn btn--primary" (click)="saveKey()">Save</button>
+            <button class="btn" (click)="keyDraft.set(null)">Cancel</button>
+          </div>
+        </div>
+      }
+    </section>
+  }
+</div>

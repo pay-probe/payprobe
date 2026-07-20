@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "payprobe-mcp-server"
+version = "0.1.0"
+description = "MCP server exposing the PayProbe scenario catalog + operations to AI agents"
+requires-python = ">=3.11"
+# >=1.9 for the title/annotations kwargs on tool()/prompt() and resource titles.
+dependencies = ["mcp>=1.9", "pyjwt>=2.0"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+payprobe-mcp = "mcp_server.server:main"
+
+# Project name normalizes to `payprobe_mcp_server`, but the package dir is
+# `mcp_server`, so hatchling can't auto-detect it — name it explicitly.
+[tool.hatch.build.targets.wheel]
+packages = ["mcp_server"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

@@ -1,0 +1,2 @@
+# Generated from packages/mcp-server (python -m scripts.gen_catalog)
+src/app/integrations/mcp-catalog.generated.ts

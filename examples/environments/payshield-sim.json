@@ -1,0 +1,6 @@
+{
+  "_comment": "Start the payShield 10K simulator first (Simulators page → payShield 10K preset, or `python -m worker.responder examples/simulators/payshield_10k.json`), then run the payshield_hsm_smoke scenario against this environment using the `payshield_hsm` connection.",
+  "name": "payshield-sim",
+  "description": "Selector environment for the payShield 10K simulator. The HSM endpoint is now the `payshield_hsm` connection (host port 1500).",
+  "adapters": {}
+}

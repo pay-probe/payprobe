@@ -1,0 +1,337 @@
+# PayProbe — run the whole platform from prebuilt Docker Hub images.
+#
+# No local build required. Everything pulls from datikos/payprobe-*:
+#
+#     docker compose -f infra/docker/docker-compose.hub.yml up -d
+#
+# Then open http://localhost:8080 and start a run.
+#
+# Pin a specific version by exporting PAYPROBE_TAG (default: latest), or point
+# at a different namespace with PAYPROBE_NS (default: datikos):
+#
+#     PAYPROBE_TAG=v0.1.0 docker compose -f infra/docker/docker-compose.hub.yml up -d
+#
+# This file mirrors docker-compose.yml but replaces every `build:` with the
+# published `image:`. It still mounts two repo directories read-only — the
+# nginx routing config (portal) and the example seeds (scenario-service) — so
+# run it from a checkout of the repo. Copy .env.example -> .env to override
+# ports/secrets.
+
+name: payprobe
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+
+  # ---- data layer --------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-payprobe}
+      POSTGRES_USER: ${POSTGRES_USER:-payprobe}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-payprobe}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-payprobe} -d ${POSTGRES_DB:-payprobe}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    <<: *restart
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    <<: *restart
+
+  # ---- messaging fabric (ADR-0006): 3-node NATS cluster + JetStream --------
+  nats-1:
+    image: nats:2.11-alpine
+    command: >-
+      --name nats-1 --cluster_name payprobe
+      --cluster nats://0.0.0.0:6222
+      --routes nats://nats-1:6222,nats://nats-2:6222,nats://nats-3:6222
+      --jetstream --store_dir /data -m 8222
+    volumes:
+      - nats1_data:/data
+    ports:
+      - "${NATS_1_PORT:-4222}:4222"
+      - "${NATS_1_MON_PORT:-8222}:8222"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    <<: *restart
+
+  nats-2:
+    image: nats:2.11-alpine
+    command: >-
+      --name nats-2 --cluster_name payprobe
+      --cluster nats://0.0.0.0:6222
+      --routes nats://nats-1:6222,nats://nats-2:6222,nats://nats-3:6222
+      --jetstream --store_dir /data -m 8222
+    volumes:
+      - nats2_data:/data
+    ports:
+      - "${NATS_2_PORT:-4223}:4222"
+      - "${NATS_2_MON_PORT:-8223}:8222"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      - nats-1
+    <<: *restart
+
+  nats-3:
+    image: nats:2.11-alpine
+    command: >-
+      --name nats-3 --cluster_name payprobe
+      --cluster nats://0.0.0.0:6222
+      --routes nats://nats-1:6222,nats://nats-2:6222,nats://nats-3:6222
+      --jetstream --store_dir /data -m 8222
+    volumes:
+      - nats3_data:/data
+    ports:
+      - "${NATS_3_PORT:-4224}:4222"
+      - "${NATS_3_MON_PORT:-8224}:8222"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      - nats-1
+    <<: *restart
+
+  # ---- identity ----------------------------------------------------------
+  auth-service:
+    image: ${PAYPROBE_NS:-datikos}/payprobe-auth-service:${PAYPROBE_TAG:-latest}
+    environment:
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+      AUTH_DB: /data/auth.db
+      AUTH_TOKEN_TTL_SEC: ${AUTH_TOKEN_TTL_SEC:-3600}
+      AUTH_ADMIN_USER: ${AUTH_ADMIN_USER:-admin}
+      AUTH_ADMIN_PASSWORD: ${AUTH_ADMIN_PASSWORD:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
+      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
+    volumes:
+      - auth_data:/data
+    ports:
+      - "${AUTH_PORT:-8300}:8300"
+    <<: *restart
+
+  # ---- application services ----------------------------------------------
+  scenario-service:
+    image: ${PAYPROBE_NS:-datikos}/payprobe-scenario-service:${PAYPROBE_TAG:-latest}
+    environment:
+      DATABASE_URL: ${SCENARIO_DATABASE_URL:-/data/scenarios.db}
+      RUN_API_URL: http://orchestrator:8100
+      SCENARIO_SEED_DIR: /seed
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
+      API_TOKEN: ${SCENARIO_API_TOKEN:-}
+      ASSIST_LLM_KEY: ${ASSIST_LLM_API_KEY:-}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
+    volumes:
+      # First-start registry seeding (read-only repo files).
+      - ../../examples/scenarios:/seed:ro
+      - ../../examples/environments:/environments:ro
+      - ../../examples/connections:/connections:ro
+      - scenario_data:/data
+    ports:
+      - "${SCENARIO_PORT:-8000}:8000"
+    depends_on:
+      auth-service:
+        condition: service_started
+    <<: *restart
+
+  orchestrator:
+    image: ${PAYPROBE_NS:-datikos}/payprobe-orchestrator:${PAYPROBE_TAG:-latest}
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      PAYPROBE_EXAMPLES_DIR: /app/examples
+      RUN_DB: /data/runs.db
+      SIMULATORS_FILE: /data/simulators.json
+      ORCH_RUNTIME_FILE: /data/runtime.json
+      SCENARIO_API_URL: http://scenario-service:8000
+      AUTH_API_URL: http://auth-service:8300
+      MCP_API_URL: http://mcp-server:8200
+      ASSIST_API_URL: http://assistant:8400
+      INSIGHT_API_URL: http://insight-service:8500
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
+      PAYPROBE_CODE_SANDBOX: ${PAYPROBE_CODE_SANDBOX:-auto}
+      PAYPROBE_WORKER_PROVISIONER: ${PAYPROBE_WORKER_PROVISIONER:-docker}
+      # Pull the published worker for dynamically-provisioned load workers.
+      PAYPROBE_WORKER_IMAGE: ${PAYPROBE_WORKER_IMAGE:-${PAYPROBE_NS:-datikos}/payprobe-worker:${PAYPROBE_TAG:-latest}}
+      PAYPROBE_WORKER_NETWORK: ${PAYPROBE_WORKER_NETWORK:-payprobe_default}
+    volumes:
+      - orchestrator_data:/data
+      # docker provisioner spawns load-worker containers via the host socket
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "${ORCH_PORT:-8100}:8100"
+    depends_on:
+      redis:
+        condition: service_healthy
+      scenario-service:
+        condition: service_started
+      auth-service:
+        condition: service_started
+    <<: *restart
+
+  mcp-server:
+    image: ${PAYPROBE_NS:-datikos}/payprobe-mcp-server:${PAYPROBE_TAG:-latest}
+    environment:
+      SCENARIO_API_URL: http://scenario-service:8000
+      RUN_API_URL: http://orchestrator:8100
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8200
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+    ports:
+      - "${MCP_PORT:-8200}:8200"
+    depends_on:
+      scenario-service:
+        condition: service_started
+      orchestrator:
+        condition: service_started
+    <<: *restart
+
+  assistant:
+    image: ${PAYPROBE_NS:-datikos}/payprobe-assistant:${PAYPROBE_TAG:-latest}
+    environment:
+      SCENARIO_API_URL: http://scenario-service:8000
+      RUN_API_URL: http://orchestrator:8100
+      INSIGHT_API_URL: http://insight-service:8500
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+      ASSIST_LLM_PROVIDER: ${ASSIST_LLM_PROVIDER:-openai}
+      ASSIST_LLM_API_KEY: ${ASSIST_LLM_API_KEY:-}
+      ASSIST_LLM_MODEL: ${ASSIST_LLM_MODEL:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
+      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
+    ports:
+      - "${ASSIST_PORT:-8400}:8400"
+    depends_on:
+      scenario-service:
+        condition: service_started
+      orchestrator:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    <<: *restart
+
+  insight-service:
+    image: ${PAYPROBE_NS:-datikos}/payprobe-insight-service:${PAYPROBE_TAG:-latest}
+    environment:
+      RUN_API_URL: http://orchestrator:8100
+      INSIGHT_DB: /data/insight.db
+      INSIGHT_DATA_DIR: /data/models
+      INSIGHT_TRAIN_INTERVAL_SEC: ${INSIGHT_TRAIN_INTERVAL_SEC:-86400}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
+      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
+    volumes:
+      - insight-data:/data
+    ports:
+      - "${INSIGHT_PORT:-8500}:8500"
+    depends_on:
+      orchestrator:
+        condition: service_started
+    <<: *restart
+
+  portal:
+    image: ${PAYPROBE_NS:-datikos}/payprobe-portal:${PAYPROBE_TAG:-latest}
+    ports:
+      - "${PORTAL_PORT:-8080}:80"
+    volumes:
+      # /api routing config (portal -> scenario-service / orchestrator).
+      - ../nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - scenario-service
+      - orchestrator
+      - assistant
+    <<: *restart
+
+  # ---- observability (opt-in) --------------------------------------------
+  #   docker compose -f infra/docker/docker-compose.hub.yml --profile observability up -d
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:latest
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    <<: *restart
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    <<: *restart
+
+  # ---- load-worker fleet (profile "load") --------------------------------
+  # Manual scaling:
+  #   LOAD_RUN_ID=<id> docker compose -f infra/docker/docker-compose.hub.yml \
+  #     --profile load up -d --scale load-worker=4 load-worker
+  # Dynamic scaling from the Load page uses the orchestrator's docker
+  # provisioner, which runs PAYPROBE_WORKER_IMAGE directly (see orchestrator).
+  load-worker:
+    profiles: ["load"]
+    image: ${PAYPROBE_NS:-datikos}/payprobe-worker:${PAYPROBE_TAG:-latest}
+    entrypoint: ["python", "-m", "worker.load_worker"]
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      LOAD_RUN_ID: ${LOAD_RUN_ID:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  # ---- one-shot batch/smoke worker CLI (profile "tools") -----------------
+  #   docker compose -f infra/docker/docker-compose.hub.yml --profile tools run --rm worker
+  worker:
+    profiles: ["tools"]
+    image: ${PAYPROBE_NS:-datikos}/payprobe-worker:${PAYPROBE_TAG:-latest}
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:
+  nats1_data:
+  nats2_data:
+  nats3_data:
+  scenario_data:
+  orchestrator_data:
+  auth_data:
+  insight-data:
+  prometheus_data:
+  grafana_data:

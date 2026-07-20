@@ -1,0 +1,181 @@
+:host {
+  display: block;
+  color: var(--color-text);
+}
+
+.td {
+  padding: var(--space-4, 1rem);
+  margin: 0 auto;
+
+  &__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3, 0.75rem);
+    margin-bottom: var(--space-4, 1rem);
+  }
+  &__heading h1 {
+    margin: 0;
+    font-size: var(--text-xl, 1.25rem);
+  }
+  &__spacer {
+    flex: 1;
+  }
+
+  &__tabs {
+    display: flex;
+    gap: var(--space-1, 0.25rem);
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: var(--space-4, 1rem);
+
+    button {
+      background: none;
+      border: none;
+      padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+      color: var(--color-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      font-size: var(--text-sm, 0.875rem);
+
+      &.active {
+        color: var(--color-primary);
+        border-bottom-color: var(--color-primary);
+        font-weight: var(--weight-semibold, 600);
+      }
+    }
+  }
+
+  &__pane {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) 1.4fr;
+    gap: var(--space-4, 1rem);
+    align-items: start;
+  }
+
+  &__list {
+    ul {
+      list-style: none;
+      margin: var(--space-3, 0.75rem) 0 0;
+      padding: 0;
+    }
+    li {
+      display: flex;
+      align-items: center;
+      gap: var(--space-1, 0.25rem);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md, 8px);
+      margin-bottom: var(--space-2, 0.5rem);
+      &.sel {
+        border-color: var(--color-primary);
+      }
+    }
+    .row {
+      flex: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: var(--space-2, 0.5rem);
+      background: none;
+      border: none;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+      padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+    }
+    .empty,
+    .note {
+      margin-top: var(--space-3, 0.75rem);
+      font-size: var(--text-sm, 0.875rem);
+    }
+  }
+
+  &__editor {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg, 12px);
+    padding: var(--space-4, 1rem);
+    background: var(--color-node, transparent);
+
+    h2 {
+      margin-top: 0;
+      font-size: var(--text-lg, 1.1rem);
+    }
+    h3 {
+      font-size: var(--text-base, 1rem);
+      margin-bottom: var(--space-2, 0.5rem);
+    }
+    label {
+      display: block;
+      margin-bottom: var(--space-3, 0.75rem);
+      font-size: var(--text-sm, 0.875rem);
+      color: var(--color-muted);
+    }
+    input,
+    select,
+    textarea {
+      display: block;
+      width: 100%;
+      margin-top: var(--space-1, 0.25rem);
+      padding: var(--space-2, 0.5rem);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm, 6px);
+      background: var(--color-bg);
+      color: var(--color-text);
+      font: inherit;
+      box-sizing: border-box;
+    }
+    textarea {
+      resize: vertical;
+    }
+    .actions {
+      display: flex;
+      gap: var(--space-2, 0.5rem);
+      margin-top: var(--space-2, 0.5rem);
+    }
+    .gen {
+      margin-top: var(--space-4, 1rem);
+      padding-top: var(--space-4, 1rem);
+      border-top: 1px dashed var(--color-border);
+    }
+    .gen__row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-3, 0.75rem);
+    }
+  }
+}
+
+.iconbtn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  color: var(--color-muted);
+  padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
+  font-size: var(--text-base, 1rem);
+
+  &:hover {
+    background: var(--color-border);
+  }
+  &.danger:hover {
+    color: var(--color-danger, #c0392b);
+  }
+}
+
+.pill {
+  display: inline-block;
+  min-width: 1.4em;
+  text-align: center;
+  font-size: var(--text-xs, 0.75rem);
+  background: var(--color-border);
+  color: var(--color-text);
+  border-radius: var(--radius-pill, 999px);
+  padding: 0 0.4em;
+  margin-left: 0.25em;
+}
+
+.muted {
+  color: var(--color-muted);
+}
+.mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs, 0.8rem);
+}

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "payprobe-assistant"
+version = "0.1.0"
+description = "PayProbe configuration assistant — a tool-calling agent and unified LLM gateway over the PayProbe services"
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.110", "uvicorn>=0.27", "pyjwt>=2.0"]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx"]
+redis = ["redis>=5.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["assistant_service"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

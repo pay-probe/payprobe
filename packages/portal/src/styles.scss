@@ -1,0 +1,805 @@
+/* ============================================================================
+   PayProbe design tokens + foundation
+   Brand: indigo #5333ED. Single global stylesheet (per project decision).
+   Components consume the SEMANTIC ALIASES so dark mode flips automatically.
+   ========================================================================== */
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap");
+
+/* ---- dark-theme token values (shared by [data-theme=dark] and OS default) -- */
+@mixin pp-dark {
+  --bg-base: #0b0d12;
+  --bg-surface: #14171f;
+  --bg-subtle: #1b1f29;
+  --border: #272c38;
+  --border-strong: #3a4150;
+  --text-primary: #eef1f7;
+  --text-secondary: #aeb6c4;
+  --text-muted: #7c8493;
+
+  --color-success: #2dd4a7;
+  --color-warning: #e0a82e;
+  --color-danger: #fb6a62;
+  --color-info: #6ea0ff;
+
+  --brand-hover: #8a7bff;
+
+  --surface-code: #05070b;
+  --code-text: #c9d1d9;
+  --canvas: #0b0f14;
+  --canvas-dot: #262d36;
+  --node: #1c2129;
+  --wire: #4a5159;
+  --backdrop: rgba(1, 4, 9, 0.66);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 14px 36px rgba(0, 0, 0, 0.58);
+}
+
+:root {
+  /* -- brand scale (indigo, 600 = brand) -- */
+  --indigo-50: #eef0fe;
+  --indigo-100: #dee0fd;
+  --indigo-200: #c0c2fb;
+  --indigo-300: #9a9bf6;
+  --indigo-400: #7b78f0;
+  --indigo-500: #6a54ea;
+  --indigo-600: #5333ed;
+  --indigo-700: #4327c4;
+  --indigo-800: #361f9c;
+  --indigo-900: #251563;
+
+  --brand: var(--indigo-600);
+  --brand-hover: #4327c4;
+  --on-brand: #ffffff;
+
+  /* -- neutrals (light) -- */
+  --bg-base: #f7f8fb;
+  --bg-surface: #ffffff;
+  --bg-subtle: #eef1f6;
+  --border: #e2e7ef;
+  --border-strong: #cdd4e0;
+  --text-primary: #161a23;
+  --text-secondary: #4b5363;
+  --text-muted: #79808f;
+
+  /* -- status (light) -- */
+  --color-success: #0c9b6f;
+  --color-warning: #b4690e;
+  --color-danger: #dc2626;
+  --color-info: #4f7cf0;
+
+  /* -- code/canvas surfaces (mostly dark in both themes) -- */
+  --surface-code: #0f172a;
+  --code-text: #e2e8f0;
+  --canvas: #f1f5f9;
+  --canvas-dot: #cbd5e1;
+  --node: #ffffff;
+  --wire: #94a3b8;
+  --backdrop: rgba(15, 23, 42, 0.45);
+
+  --focus-ring: color-mix(in srgb, var(--brand) 40%, transparent);
+
+  /* -- spacing -- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+
+  /* -- radius -- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* -- type -- */
+  --font-sans: "Inter", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --lh-tight: 1.2;
+  --lh-normal: 1.5;
+  --lh-relaxed: 1.7;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* -- elevation -- */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 6px 18px rgba(15, 23, 42, 0.12);
+  --shadow-lg: 0 14px 36px rgba(15, 23, 42, 0.18);
+
+  /* -- motion -- */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+
+  /* -- layering -- */
+  --z-base: 1;
+  --z-dropdown: 1000;
+  --z-sticky: 1100;
+  --z-modal: 1200;
+  --z-toast: 1300;
+
+  /* -- layout -- */
+  --sidebar-w: 236px;
+  --content-max: 1200px;
+
+  /* ---- backward-compatibility aliases (legacy --color-* used by components
+         that haven't been hand-migrated to semantic names yet). They point at
+         the semantic tokens, so dark mode flips automatically. ---- */
+  --color-primary: var(--brand);
+  --color-primary-hover: var(--brand-hover);
+  --color-primary-dark: var(--indigo-800);
+  --color-primary-contrast: var(--on-brand);
+  --color-accent: var(--color-success);
+  --color-accent-hover: var(--color-success);
+  --color-bg: var(--bg-base);
+  --color-card: var(--bg-surface);
+  --color-surface: var(--bg-surface);
+  --color-elevated: var(--bg-surface);
+  --color-bg-soft: var(--bg-subtle);
+  --color-text: var(--text-primary);
+  --color-muted: var(--text-secondary);
+  --color-border: var(--border);
+  --color-border-soft: var(--bg-subtle);
+  --color-fail: var(--color-danger);
+  --color-warn: var(--color-warning);
+  --color-pass: var(--color-success);
+  --color-terminal: var(--surface-code);
+  --color-terminal-text: var(--code-text);
+  --color-canvas: var(--canvas);
+  --color-canvas-dot: var(--canvas-dot);
+  --color-node: var(--node);
+  --color-wire: var(--wire);
+  --color-backdrop: var(--backdrop);
+  --radius: var(--radius-md);
+  --shadow-card: var(--shadow-sm);
+  --shadow-pop: var(--shadow-md);
+  --shadow-node: var(--shadow-md);
+
+  /* ---- design-system bridge: full token surface for the pp-* component
+         library and the DS shell (sidenav/topbar). Additive — existing tokens
+         above are unchanged. ---- */
+  --color-primary-50: var(--indigo-50);
+  --color-primary-100: var(--indigo-100);
+  --color-primary-200: var(--indigo-200);
+  --color-primary-300: var(--indigo-300);
+  --color-primary-400: var(--indigo-400);
+  --color-primary-500: var(--indigo-500);
+  --color-primary-600: var(--indigo-600);
+  --color-primary-700: var(--indigo-700);
+  --color-primary-800: var(--indigo-800);
+  --color-primary-900: var(--indigo-900);
+  --color-primary-950: #1a0d5b;
+  --color-primary-rgb: 83 51 237;
+
+  --brand-active: var(--indigo-800);
+  --text-on-brand: var(--on-brand);
+  --bg-muted: var(--bg-subtle);
+
+  /* half-step spacing + extra radii used by DS components */
+  --space-1-5: 6px;
+  --space-2-5: 10px;
+  --radius-xl: 16px;
+  --radius-full: 999px;
+
+  /* extra type tokens */
+  --text-3xl: 30px;
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+  --weight-bold: 700;
+
+  /* extra elevation + motion + layering */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-brand: 0 8px 24px -6px rgb(var(--color-primary-rgb) / 0.45);
+  --duration-normal: var(--duration-base);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --z-popover: 1500;
+}
+
+/* explicit theme override + OS preference when no explicit choice is set */
+[data-theme="dark"] {
+  @include pp-dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    @include pp-dark;
+  }
+}
+
+/* ---- reset + foundation --------------------------------------------------- */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--lh-normal);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  transition:
+    background var(--duration-base) var(--ease-standard),
+    color var(--duration-base) var(--ease-standard);
+}
+
+a {
+  color: var(--brand);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--brand-hover);
+  text-decoration: underline;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 var(--space-3);
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+  line-height: var(--lh-tight);
+}
+h1 {
+  font-size: var(--text-2xl);
+}
+h2 {
+  font-size: var(--text-xl);
+}
+h3 {
+  font-size: var(--text-lg);
+}
+
+*:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--brand) 28%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===================================================================
+   App shell — persistent sidebar + content
+   =================================================================== */
+.pp-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.pp-sidebar {
+  width: var(--sidebar-w);
+  flex: none;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-5) var(--space-4);
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+}
+
+.pp-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-5);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.pp-brand__mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--brand);
+  color: var(--on-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: var(--weight-semibold);
+}
+
+/* Shared button system (used across the manager/editor pages) */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-node);
+  color: var(--color-text);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    box-shadow 0.14s ease,
+    color 0.14s ease,
+    transform 0.04s ease;
+
+  &:hover:not(:disabled) {
+    border-color: color-mix(
+      in srgb,
+      var(--color-primary) 45%,
+      var(--color-border)
+    );
+    background: color-mix(in srgb, var(--color-primary) 7%, var(--color-node));
+  }
+  &:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px
+      color-mix(in srgb, var(--color-primary) 32%, transparent);
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &--primary {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-primary-contrast);
+    font-weight: 600;
+    box-shadow: var(--shadow-sm);
+
+    &:hover:not(:disabled) {
+      background: var(--color-primary-hover);
+      border-color: var(--color-primary-hover);
+      box-shadow: var(--shadow-md);
+    }
+  }
+
+  &--danger {
+    background: transparent;
+    color: var(--color-fail);
+    border-color: color-mix(
+      in srgb,
+      var(--color-fail) 40%,
+      var(--color-border)
+    );
+
+    &:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--color-fail) 12%, transparent);
+      border-color: var(--color-fail);
+    }
+  }
+
+  &--ghost {
+    padding: 6px 11px;
+    background: transparent;
+    border-color: transparent;
+    color: var(--color-muted);
+
+    &:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+      border-color: transparent;
+      color: var(--color-primary);
+    }
+  }
+
+  &--sm {
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+}
+
+/* Reference autocomplete dropdown (appended to body by the directive) */
+.ref-ac {
+  position: fixed;
+  z-index: 9999;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--color-card, var(--bg-surface));
+  border: 1px solid var(--color-border, var(--border));
+  border-radius: 8px;
+  box-shadow: var(--shadow-md, 0 6px 18px rgba(0, 0, 0, 0.3));
+  padding: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+
+  &__item {
+    padding: 5px 9px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--color-text, var(--text-primary));
+    white-space: nowrap;
+  }
+
+  &__item--active,
+  &__item:hover {
+    background: color-mix(
+      in srgb,
+      var(--color-primary, var(--brand)) 16%,
+      transparent
+    );
+    color: var(--color-primary, var(--brand));
+  }
+}
+
+.pp-nav__label {
+  margin: var(--space-4) var(--space-3) var(--space-1);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.pp-nav__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.pp-nav__item:hover {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.pp-nav__item.active {
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  color: var(--brand);
+}
+
+.pp-nav__item svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.9;
+}
+
+.pp-sidebar__foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.pp-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.pp-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-success) 22%, transparent);
+}
+
+.pp-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ===================================================================
+   Shared components
+   =================================================================== */
+.pp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  text-transform: capitalize;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+}
+
+.pp-badge--pass {
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  color: var(--color-success);
+}
+.pp-badge--fail {
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  color: var(--color-danger);
+}
+.pp-badge--warn {
+  background: color-mix(in srgb, var(--color-warning) 20%, transparent);
+  color: var(--color-warning);
+}
+.pp-badge--info {
+  background: color-mix(in srgb, var(--color-info) 18%, transparent);
+  color: var(--color-info);
+}
+
+.pp-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.pp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-base);
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.pp-btn:hover {
+  border-color: var(--brand);
+  text-decoration: none;
+}
+.pp-btn:active {
+  transform: scale(0.98);
+}
+.pp-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.pp-btn--primary {
+  background: var(--brand);
+  color: var(--on-brand);
+  border-color: transparent;
+  box-shadow: var(--shadow-sm);
+}
+.pp-btn--primary:hover {
+  background: var(--brand-hover);
+}
+
+/* ===================================================================
+   Shared data tables — one look for every table in the portal.
+   Two structures, identical styling:
+     - .tbl / .tbl__row  (CSS-grid rows, for precise columns + action cells)
+     - table.pp-table     (semantic <table> elements)
+   =================================================================== */
+.tbl {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+.tbl__row {
+  display: grid;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-base);
+}
+.tbl__row:not(.tbl__head) {
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+.tbl__row:not(.tbl__head):nth-of-type(even) {
+  background: var(--bg-subtle);
+}
+.tbl__row:not(.tbl__head):hover {
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+}
+.tbl__head {
+  background: var(--indigo-800);
+  color: var(--on-brand);
+  border-top: none;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+.tbl__head .num,
+.tbl__head .act {
+  color: var(--on-brand);
+}
+.tbl__empty {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* row-grid presets (per surface) */
+.tbl__row--runs {
+  grid-template-columns: 96px 100px 1fr 168px 160px 150px 120px;
+}
+
+.cell-name {
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.num {
+  text-align: right;
+}
+.act {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  position: relative;
+}
+
+.ic {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+.ic:hover {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+.ic--run:hover {
+  color: var(--color-success);
+}
+.ic--danger:hover {
+  color: var(--color-danger);
+}
+.ic--active {
+  color: var(--brand);
+}
+
+/* status/class pills shared by tables */
+.cbadge {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: capitalize;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+}
+.cbadge--component {
+  background: color-mix(in srgb, var(--color-info) 16%, transparent);
+  color: var(--color-info);
+}
+.cbadge--integration {
+  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+  color: var(--color-warning);
+}
+.cbadge--e2e {
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  color: var(--brand);
+}
+.cbadge--pass {
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  color: var(--color-success);
+}
+.cbadge--fail {
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  color: var(--color-danger);
+}
+.cbadge--warn {
+  background: color-mix(in srgb, var(--color-warning) 20%, transparent);
+  color: var(--color-warning);
+}
+.cbadge--info {
+  background: color-mix(in srgb, var(--color-info) 18%, transparent);
+  color: var(--color-info);
+}
+
+.tags {
+  display: flex;
+  gap: var(--space-1);
+  overflow: hidden;
+}
+
+/* semantic <table> variant — same visual language */
+.pp-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-surface);
+  font-size: var(--text-base);
+}
+.pp-table thead th {
+  background: var(--indigo-800);
+  color: var(--on-brand);
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  padding: var(--space-3) var(--space-4);
+  white-space: nowrap;
+}
+.pp-table tbody td {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.pp-table tbody tr:nth-child(even) td {
+  background: var(--bg-subtle);
+}
+.pp-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+}
+.pp-table .num,
+.pp-table td.num,
+.pp-table th.num {
+  text-align: right;
+}

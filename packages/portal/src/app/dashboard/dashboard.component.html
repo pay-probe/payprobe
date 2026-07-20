@@ -1,0 +1,230 @@
+<div class="dashboard">
+  <!-- Live status bar -->
+  <div class="status-bar">
+    <span class="status-bar__dot"></span>
+    <span class="status-bar__log">{{ tickerLine() }}</span>
+    <pp-stale-chip [health]="pollHealth" />
+    <span class="status-bar__clock">{{ now() | date: "HH:mm:ss" }}</span>
+  </div>
+
+  <pp-page-header>
+    <div subtitle>
+      <p class="subtitle">{{ healthSummary() }}</p>
+    </div>
+    <div class="quick-actions">
+      <a routerLink="/runs" class="btn">View runs</a>
+      <a routerLink="/run-monitor" class="btn btn--primary">▶ Start run</a>
+    </div>
+  </pp-page-header>
+
+  @if (loadError()) {
+    <div class="banner banner--error">
+      <span>⚠ {{ loadError() }}</span>
+      <span class="banner__hint">Showing whatever data is reachable.</span>
+    </div>
+  }
+
+  <!-- Stat cards -->
+  <section class="stats">
+    @for (stat of stats(); track stat.label) {
+      <pp-kpi-card
+        [label]="stat.label"
+        [value]="stat.value"
+        [icon]="stat.icon"
+        [delta]="stat.delta"
+        [deltaSuffix]="stat.deltaSuffix ?? '%'"
+        [invertColor]="stat.invert ?? false"
+        [caption]="stat.hint"
+        [spark]="stat.spark ?? []"
+      />
+    }
+  </section>
+
+  <!-- Live run -->
+  @if (liveRun(); as run) {
+    <section class="live-run">
+      <div class="live-run__head">
+        <span class="badge badge--running">RUNNING</span>
+        <span class="live-run__id mono">{{ run.id }}</span>
+        <span class="live-run__suite">{{ run.label }}</span>
+        <span class="live-run__terminal">{{ run.environment }}</span>
+        <span class="live-run__pct">{{ run.progress | number: "1.0-0" }}%</span>
+      </div>
+      <div class="progress">
+        <div class="progress__fill" [style.width.%]="run.progress"></div>
+      </div>
+      <span class="live-run__step">{{ run.step }}</span>
+    </section>
+  }
+
+  <div class="dashboard__grid">
+    <!-- Recent runs -->
+    <section class="panel">
+      <div class="panel__head">
+        <h2>Recent runs</h2>
+        <a routerLink="/runs" class="panel__link">View all →</a>
+      </div>
+
+      @if (loading()) {
+        <p class="panel__empty">Loading runs…</p>
+      } @else if (recentRuns().length === 0) {
+        <p class="panel__empty">
+          No runs yet.
+          <a routerLink="/run-monitor" class="panel__link"
+            >Start your first run →</a
+          >
+        </p>
+      } @else {
+        <table class="runs-table pp-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Suite</th>
+              <th>Env</th>
+              <th>Status</th>
+              <th>Pass rate</th>
+              <th>Duration</th>
+              <th>Started</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (run of recentRuns(); track run.id) {
+              <tr>
+                <td class="mono">
+                  <a [routerLink]="['/reports', run.id]" class="panel__link">{{
+                    run.id
+                  }}</a>
+                </td>
+                <td>{{ run.label ?? "—" }}</td>
+                <td class="mono muted">{{ run.environment ?? "—" }}</td>
+                <td>
+                  <span
+                    class="badge"
+                    [class.badge--pass]="statusKind(run.status) === 'pass'"
+                    [class.badge--fail]="statusKind(run.status) === 'fail'"
+                    [class.badge--running]="statusKind(run.status) === 'run'"
+                  >
+                    {{ run.status | uppercase }}
+                  </span>
+                </td>
+                <td>
+                  <div class="rate">
+                    <div class="rate__bar">
+                      <div
+                        class="rate__fill"
+                        [class.rate__fill--low]="passRate(run) < 90"
+                        [style.width.%]="passRate(run)"
+                      ></div>
+                    </div>
+                    <span class="mono"
+                      >{{ run.scenarios.passed }}/{{
+                        run.scenarios.total
+                      }}</span
+                    >
+                  </div>
+                </td>
+                <td class="mono">{{ durationLabel(run) }}</td>
+                <td class="muted">{{ timeAgo(run.created_at) }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </section>
+
+    <!-- Right column -->
+    <div class="side">
+      <!-- Endpoints monitor -->
+      <section class="panel">
+        <div class="panel__head">
+          <h2>Endpoints</h2>
+          <a routerLink="/settings" class="panel__link">Configure →</a>
+        </div>
+        <ul class="endpoints">
+          @for (ep of endpoints(); track ep.cfg.key) {
+            <li class="endpoint">
+              <span
+                class="health__dot"
+                [class.health__dot--degraded]="
+                  ep.result.status === 'degraded' ||
+                  ep.result.status === 'unknown'
+                "
+                [class.health__dot--offline]="ep.result.status === 'offline'"
+              ></span>
+              <div class="endpoint__main">
+                <span class="endpoint__name">{{ ep.cfg.label }}</span>
+                @if (ep.cfg.kind === "http") {
+                  <a
+                    class="endpoint__url mono"
+                    [href]="ep.url"
+                    target="_blank"
+                    rel="noopener"
+                    >{{ ep.url }}</a
+                  >
+                } @else {
+                  <span class="endpoint__url mono">{{ ep.url }}</span>
+                }
+              </div>
+              <span class="endpoint__meta">
+                <span class="endpoint__status">{{ ep.result.detail }}</span>
+                @if (ep.result.latencyMs != null) {
+                  <span class="endpoint__latency mono"
+                    >{{ ep.result.latencyMs }} ms</span
+                  >
+                }
+              </span>
+            </li>
+          }
+        </ul>
+      </section>
+
+      <!-- System health -->
+      <section class="panel">
+        <div class="panel__head">
+          <h2>System health</h2>
+        </div>
+        @if (services().length === 0) {
+          <p class="panel__empty">
+            {{ loading() ? "Checking services…" : "Status unavailable" }}
+          </p>
+        } @else {
+          <ul class="health">
+            @for (svc of services(); track svc.name) {
+              <li class="health__row">
+                <span
+                  class="health__dot"
+                  [class.health__dot--degraded]="svc.status === 'degraded'"
+                  [class.health__dot--offline]="svc.status === 'offline'"
+                ></span>
+                <span class="health__name">{{ svc.name }}</span>
+                <span class="health__status">{{ svc.detail }}</span>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+
+      <!-- Simulators -->
+      <section class="panel">
+        <div class="panel__head">
+          <h2>Simulators</h2>
+          <a routerLink="/simulators" class="panel__link">Manage →</a>
+        </div>
+        @if (simulators().length === 0) {
+          <p class="panel__empty">No simulators running.</p>
+        } @else {
+          <ul class="health">
+            @for (sim of simulators(); track sim.id) {
+              <li class="health__row">
+                <span class="health__dot"></span>
+                <span class="health__name">{{ sim.label }}</span>
+                <span class="health__status">{{ sim.protocol }}</span>
+                <span class="health__latency mono">{{ sim.received }} rx</span>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+    </div>
+  </div>
+</div>

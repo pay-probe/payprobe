@@ -1,0 +1,249 @@
+<div class="mf">
+  <pp-page-header>
+    <div class="mf__heading" subtitle>
+      <span class="muted"
+        >Versioned ISO 8583 / ISO 20022 specs · per integration</span
+      >
+    </div>
+    <button class="btn" (click)="newFormat('iso8583')">+ ISO 8583</button>
+    <button class="btn" (click)="newFormat('iso20022')">+ ISO 20022</button>
+  </pp-page-header>
+
+  @if (error(); as e) {
+    <div class="banner banner--error">{{ e }}</div>
+  }
+
+  <div class="mf__body">
+    <aside class="rail">
+      @if (loading()) {
+        <p class="muted rail__msg">Loading…</p>
+      }
+      @for (g of groups(); track g.protocol) {
+        <div class="rail__group">
+          <div class="rail__group-head">
+            {{ g.label }} <span class="muted">{{ g.count }}</span>
+          </div>
+          @for (sub of g.subgroups; track sub.name) {
+            <div class="rail__sub">
+              <div class="rail__sub-head">
+                {{ sub.name }} <span class="muted">{{ sub.items.length }}</span>
+              </div>
+              @for (f of sub.items; track f.id) {
+                <button
+                  class="fcard"
+                  [class.fcard--active]="isActive(f)"
+                  (click)="edit(f)"
+                >
+                  <span class="fcard__main">
+                    <span class="fcard__name">{{ f.name }}</span>
+                    <span class="fcard__meta mono muted">v{{ f.version }}</span>
+                  </span>
+                  @if (f.builtin) {
+                    <span class="pill">built-in</span>
+                  } @else {
+                    <span class="pill pill--custom">custom</span>
+                  }
+                </button>
+              }
+            </div>
+          }
+        </div>
+      }
+    </aside>
+
+    <main class="editor">
+      @if (draft(); as d) {
+        <div class="editor__head">
+          <span class="badge" [class.badge--alt]="d.protocol === 'iso20022'">
+            {{ d.protocol === "iso8583" ? "ISO 8583" : "ISO 20022" }}
+          </span>
+          <h2>{{ d.isNew ? "New format" : d.name }}</h2>
+          @if (d.builtin) {
+            <span class="pill">read-only</span>
+          }
+          @if (dirty()) {
+            <span class="editor__dirty">● unsaved</span>
+          }
+          <button class="btn" (click)="clone(d)">Clone</button>
+          @if (!d.isNew && !d.builtin) {
+            <button class="btn btn--danger" (click)="remove(d)">Delete</button>
+          }
+          <button class="btn" (click)="cancel()">Close</button>
+          @if (!d.builtin) {
+            <button
+              class="btn btn--primary"
+              (click)="save()"
+              [disabled]="saving()"
+            >
+              {{ saving() ? "Saving…" : "Save" }}
+            </button>
+          }
+        </div>
+
+        @if (d.builtin) {
+          <p class="note">
+            This is a built-in format. <strong>Clone</strong> it to make an
+            editable, integration-specific version.
+          </p>
+        }
+
+        <div
+          class="editor__scroll"
+          (input)="markDirty()"
+          (change)="markDirty()"
+        >
+          <div class="grid3">
+            <label class="field"
+              ><span>Name</span>
+              <input
+                [(ngModel)]="d.name"
+                [readonly]="d.builtin"
+                placeholder="Acme Acquirer"
+            /></label>
+            <label class="field"
+              ><span>Version</span>
+              <input
+                [(ngModel)]="d.version"
+                [readonly]="d.builtin"
+                placeholder="1.0"
+            /></label>
+            <label class="field"
+              ><span>Encoding</span>
+              @if (d.protocol === "iso8583") {
+                <input
+                  [(ngModel)]="d.encoding"
+                  [readonly]="d.builtin"
+                  placeholder="ascii"
+                />
+              } @else {
+                <input [ngModel]="d.protocol" readonly />
+              }
+            </label>
+          </div>
+          <label class="field"
+            ><span
+              >Group
+              <span class="muted"
+                >(optional — files this format under a heading)</span
+              ></span
+            >
+            <input
+              [(ngModel)]="d.group"
+              [readonly]="d.builtin"
+              list="mf-groups"
+              placeholder="e.g. Acme Acquirer"
+            />
+            <datalist id="mf-groups">
+              @for (gn of groupNames(); track gn) {
+                <option [value]="gn"></option>
+              }
+            </datalist>
+          </label>
+          <label class="field"
+            ><span>Description</span>
+            <textarea
+              rows="2"
+              [(ngModel)]="d.description"
+              [readonly]="d.builtin"
+            ></textarea>
+          </label>
+
+          @if (d.protocol === "iso8583") {
+            <div class="section-head">
+              <h3>
+                Data elements <span class="muted">{{ d.rows.length }}</span>
+              </h3>
+              @if (!d.builtin) {
+                <button class="btn btn--ghost" (click)="addRow()">
+                  + add DE
+                </button>
+              }
+            </div>
+            <div class="tbl">
+              <div class="tbl__head">
+                <span>DE</span><span>Name</span><span>Length type</span
+                ><span>Len</span><span>Type</span><span></span>
+              </div>
+              @for (r of d.rows; track $index) {
+                <div class="tbl__row">
+                  <input
+                    class="mono"
+                    [(ngModel)]="r.de"
+                    [readonly]="d.builtin"
+                  />
+                  <input [(ngModel)]="r.name" [readonly]="d.builtin" />
+                  <select [(ngModel)]="r.len_type" [disabled]="d.builtin">
+                    @for (lt of lenTypes; track lt) {
+                      <option [value]="lt">{{ lt }}</option>
+                    }
+                  </select>
+                  <input
+                    class="mono"
+                    type="number"
+                    [(ngModel)]="r.length"
+                    [readonly]="d.builtin"
+                  />
+                  <select [(ngModel)]="r.type" [disabled]="d.builtin">
+                    @for (ft of fieldTypes; track ft) {
+                      <option [value]="ft">{{ ft }}</option>
+                    }
+                  </select>
+                  @if (!d.builtin) {
+                    <button class="iconbtn" (click)="removeRow($index)">
+                      ✕
+                    </button>
+                  } @else {
+                    <span></span>
+                  }
+                </div>
+              }
+            </div>
+          } @else {
+            <div class="grid2">
+              <label class="field"
+                ><span>Message type</span>
+                <input
+                  class="mono"
+                  [(ngModel)]="d.messageType"
+                  [readonly]="d.builtin"
+                  placeholder="pacs.008.001.08"
+              /></label>
+              <label class="field"
+                ><span>Root element</span>
+                <input
+                  class="mono"
+                  [(ngModel)]="d.root"
+                  [readonly]="d.builtin"
+                  placeholder="Document"
+              /></label>
+            </div>
+            <label class="field"
+              ><span>Namespace</span>
+              <input
+                class="mono"
+                [(ngModel)]="d.namespace"
+                [readonly]="d.builtin"
+                placeholder="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"
+            /></label>
+          }
+
+          <p class="note">
+            Use a format in a flow: drop an <strong>ISO Messaging</strong> step
+            (ISO8583 pack/parse, ISO20022 build/parse) from the palette, then
+            paste this definition into the step’s field table to target this
+            integration.
+          </p>
+        </div>
+      } @else {
+        <div class="placeholder">
+          <div class="placeholder__icon">🗂</div>
+          <h2>Versioned message specs</h2>
+          <p class="muted">
+            Pick a format to view it, or create one per integration / dialect.
+            Built-ins are read-only — clone to customise.
+          </p>
+        </div>
+      }
+    </main>
+  </div>
+</div>

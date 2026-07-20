@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: PayProbe
+    orgId: 1
+    folder: PayProbe
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

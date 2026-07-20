@@ -1,0 +1,115 @@
+[
+  {
+    "label": "TestPay · Card payment (auth)",
+    "description": "Single card authorization: send an auth request to RestPay. This is the unit transaction the Load Test drives under the steady / ramp / spike profiles — mirrors the TestPay console's SimpleTestStrategy / payment flow.",
+    "steps": [
+      {
+        "ref": "auth",
+        "target": "http",
+        "action": "send_auth_request",
+        "config": { "amount": 10000, "currency": "USD", "card_profile": "visa_credit" }
+      }
+    ]
+  },
+  {
+    "label": "TestPay · Refund",
+    "description": "Authorize, then refund by RRN. The refund references the original auth's retrieval reference number — mirrors the TestPay RefundTestStrategy.",
+    "steps": [
+      {
+        "ref": "auth",
+        "target": "http",
+        "action": "send_auth_request",
+        "config": { "amount": 10000, "currency": "USD", "card_profile": "visa_credit" }
+      },
+      {
+        "ref": "refund",
+        "target": "http",
+        "action": "send_refund",
+        "config": { "rrn": "${auth.response.rrn}", "amount": 10000 }
+      }
+    ]
+  },
+  {
+    "label": "TestPay · Reversal pair",
+    "description": "Payment followed by a reversal of that same transaction (reversal references the original RRN) — mirrors the TestPay ReversalTestStrategy, which sends payment + reversal pairs.",
+    "steps": [
+      {
+        "ref": "auth",
+        "target": "http",
+        "action": "send_auth_request",
+        "config": { "amount": 10000, "currency": "USD", "card_profile": "visa_credit" }
+      },
+      {
+        "ref": "rev",
+        "target": "http",
+        "action": "send_reversal",
+        "config": { "rrn": "${auth.response.rrn}" }
+      }
+    ]
+  },
+  {
+    "label": "TestPay · Heartbeat / echo",
+    "description": "Connection keepalive / liveness probe against RestPay. This is the unit the Soak (heartbeat) load profile holds open across many long-lived connections — mirrors the TestPay HeartbeatTestStrategy.",
+    "steps": [
+      {
+        "ref": "echo",
+        "target": "http",
+        "action": "echo_test"
+      }
+    ]
+  },
+  {
+    "label": "TestPay · ISO 8583 purchase + reversal",
+    "description": "0200 financial request then 0420 reversal advice over the TCP/ISO 8583 switch link, the reversal correlated by RRN. ISO variant of the reversal test for switch-facing load.",
+    "steps": [
+      {
+        "ref": "p",
+        "target": "tcp_iso8583",
+        "action": "send_0200",
+        "config": { "amount": 10000, "pan": "4111111111111111", "currency": "USD" }
+      },
+      {
+        "ref": "rev",
+        "target": "tcp_iso8583",
+        "action": "send_0420",
+        "config": { "rrn": "${p.response.rrn}" }
+      }
+    ]
+  },
+  {
+    "label": "payShield · CVV generate + verify",
+    "description": "HSM host-command flow against the payShield 10K simulator: generate a CVK (A0), generate a CVV for a card with it (CW), then verify that CVV (CY). Each step chains the previous response. Run against the payshield-sim environment.",
+    "steps": [
+      {
+        "ref": "cvk",
+        "target": "hsm",
+        "action": "generate_key",
+        "config": { "key_type": "402", "scheme": "U" }
+      },
+      {
+        "ref": "cvv",
+        "target": "hsm",
+        "action": "generate_cvv",
+        "config": { "cvk": "${cvk.response.key}", "pan": "4000000000000002", "expiry": "2512", "service_code": "000" }
+      },
+      {
+        "ref": "verify",
+        "target": "hsm",
+        "action": "verify_cvv",
+        "config": { "cvk": "${cvk.response.key}", "cvv": "${cvv.response.cvv}", "pan": "4000000000000002", "expiry": "2512", "service_code": "000" }
+      }
+    ]
+  },
+  {
+    "label": "payShield · PIN verify (PVV)",
+    "description": "HSM interchange PIN verification against the payShield 10K simulator: verify a customer PIN block under a ZPK using the Visa PVV method (EC). Supply zpk, pvk, pin_block, pan, pvki and pvv. Run against the payshield-sim environment.",
+    "steps": [
+      {
+        "ref": "verify_pin",
+        "target": "hsm",
+        "action": "verify_pin",
+        "config": { "zpk": "U...", "pvk": "U...", "pin_block": "0123456789ABCDEF", "pan": "400000000000", "pvki": "1", "pvv": "0000" }
+      }
+    ]
+  }
+]

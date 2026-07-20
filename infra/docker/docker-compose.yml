@@ -1,0 +1,513 @@
+# PayProbe — full-stack deployment.
+#
+# Runs the entire platform in Docker. By default it comes up in MOCK mode
+# (in-memory adapters, no payment hardware or secrets needed):
+#
+#     docker compose -f infra/docker/docker-compose.yml up --build
+#
+# Then open http://localhost:8080 and start a run.
+#
+# Profiles:
+#   (default)      postgres, redis, scenario-service, orchestrator, portal/nginx
+#                  -> the working end-to-end mock stack
+#   --profile full additionally starts placeholder containers for the services
+#                  that are scaffolded but not implemented yet (auth, report,
+#                  helper probes). They pass health checks and return 501.
+#   --profile tools the one-shot worker CLI image (batch/smoke execution)
+#
+# Production: copy .env.example -> .env, set real secrets/endpoints, and switch
+# the mock env mounts for real adapter configs. See infra/docker/README.md.
+
+name: payprobe
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+
+  # ---- data layer --------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-payprobe}
+      POSTGRES_USER: ${POSTGRES_USER:-payprobe}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-payprobe}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-payprobe} -d ${POSTGRES_DB:-payprobe}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    <<: *restart
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    <<: *restart
+
+  # ---- messaging fabric (ADR-0006) ---------------------------------------
+  # A real 3-node NATS cluster with JetStream, so PayProbe can act as either
+  # side of a NATS conversation AND chaos-test the broker itself (kill a node,
+  # watch queue-group / JetStream-replica failover). The broker is treated as
+  # infrastructure — like redis/postgres — never as a PayProbe-managed
+  # simulator: PayProbe connects to it, it does not embed it.
+  #
+  # Full-mesh cluster routes on :6222; JetStream file-store per node on its own
+  # volume; client ports published 4222/4223/4224 and monitoring ports
+  # 8222/8223/8224 (each node's :8222 for /healthz, /varz, /jsz) — so a host-run
+  # orchestrator / the portal NATS page can probe cluster health over localhost,
+  # not just node-to-node inside the compose network. A laptop-constrained dev
+  # can instead run the trimmed single-node `nats` service in docker-compose.dev.yml.
+  #
+  #   nats-py joins the optional deps: pip install nats-py --break-system-packages
+  nats-1:
+    image: nats:2.11-alpine
+    command: >-
+      --name nats-1 --cluster_name payprobe
+      --cluster nats://0.0.0.0:6222
+      --routes nats://nats-1:6222,nats://nats-2:6222,nats://nats-3:6222
+      --jetstream --store_dir /data -m 8222
+    volumes:
+      - nats1_data:/data
+    ports:
+      - "${NATS_1_PORT:-4222}:4222"
+      - "${NATS_1_MON_PORT:-8222}:8222"   # monitoring (/healthz, /varz, /jsz)
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    <<: *restart
+
+  nats-2:
+    image: nats:2.11-alpine
+    command: >-
+      --name nats-2 --cluster_name payprobe
+      --cluster nats://0.0.0.0:6222
+      --routes nats://nats-1:6222,nats://nats-2:6222,nats://nats-3:6222
+      --jetstream --store_dir /data -m 8222
+    volumes:
+      - nats2_data:/data
+    ports:
+      - "${NATS_2_PORT:-4223}:4222"
+      - "${NATS_2_MON_PORT:-8223}:8222"   # monitoring (/healthz, /varz, /jsz)
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      - nats-1
+    <<: *restart
+
+  nats-3:
+    image: nats:2.11-alpine
+    command: >-
+      --name nats-3 --cluster_name payprobe
+      --cluster nats://0.0.0.0:6222
+      --routes nats://nats-1:6222,nats://nats-2:6222,nats://nats-3:6222
+      --jetstream --store_dir /data -m 8222
+    volumes:
+      - nats3_data:/data
+    ports:
+      - "${NATS_3_PORT:-4224}:4222"
+      - "${NATS_3_MON_PORT:-8224}:8222"   # monitoring (/healthz, /varz, /jsz)
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      - nats-1
+    <<: *restart
+
+  # ---- identity ----------------------------------------------------------
+  # Issues JWTs the other services verify with the shared AUTH_JWT_SECRET.
+  # Get a token:  curl -X POST localhost:8300/token -d username=admin -d password=admin
+  auth-service:
+    build:
+      context: ../../packages/auth-service
+    environment:
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+      AUTH_DB: /data/auth.db
+      AUTH_TOKEN_TTL_SEC: ${AUTH_TOKEN_TTL_SEC:-3600}
+      AUTH_ADMIN_USER: ${AUTH_ADMIN_USER:-admin}
+      AUTH_ADMIN_PASSWORD: ${AUTH_ADMIN_PASSWORD:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
+      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
+    volumes:
+      - auth_data:/data
+    ports:
+      - "${AUTH_PORT:-8300}:8300"
+    <<: *restart
+
+  # ---- application services ----------------------------------------------
+  scenario-service:
+    build:
+      # packages/ context so the image can include the shared payprobe_common
+      # (agent toolkit) alongside the service's own source.
+      context: ../../packages
+      dockerfile: scenario-service/Dockerfile
+    environment:
+      # SQLite by default (zero-config, persisted on the scenario_data volume).
+      # The Postgres store needs schema reconciliation with infra/postgres/init.sql
+      # before it can be used here; override SCENARIO_DATABASE_URL once that lands.
+      DATABASE_URL: ${SCENARIO_DATABASE_URL:-/data/scenarios.db}
+      # the in-process assistant's runtime-read tools (list_runs,
+      # list_network_runs, …) reach the orchestrator here
+      RUN_API_URL: http://orchestrator:8100
+      SCENARIO_SEED_DIR: /seed
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
+      API_TOKEN: ${SCENARIO_API_TOKEN:-}
+      # Same key as the standalone assistant, so infra/docker/.env is the ONE
+      # place for it. The in-process ✨ Ask AI uses this env key when Settings →
+      # AI assistant has no key saved (a saved key wins; provider/model/endpoint
+      # still come from Settings).
+      ASSIST_LLM_KEY: ${ASSIST_LLM_API_KEY:-}
+      # Verify JWTs minted by auth-service (shared secret).
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
+    volumes:
+      - ../../examples/scenarios:/seed:ro
+      # First-start registry seeding: environments (selectors) + connections
+      # (the modern adapter instances). Siblings of /seed; consumed by
+      # ENV_SEED_DIR / CONN_SEED_DIR in scenario-service.
+      - ../../examples/environments:/environments:ro
+      - ../../examples/connections:/connections:ro
+      - scenario_data:/data
+    ports:
+      - "${SCENARIO_PORT:-8000}:8000"
+    depends_on:
+      auth-service:
+        condition: service_started
+    <<: *restart
+
+  orchestrator:
+    build:
+      context: ../..
+      dockerfile: packages/orchestrator/Dockerfile
+    environment:
+      # Redis Streams backbone -> durable, resumable run event streams.
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      PAYPROBE_EXAMPLES_DIR: /app/examples
+      # durable run registry (history + per-case reports survive restarts)
+      RUN_DB: /data/runs.db
+      # durable simulator registry so saved simulators (and enabled ones, which
+      # auto-start on boot) survive a container rebuild/restart. Without this it
+      # defaults to :memory: and saved simulators vanish when the container is
+      # recreated. (Live running state is always in-memory; mark a simulator
+      # "enabled" so it is brought back up automatically on the next boot.)
+      SIMULATORS_FILE: /data/simulators.json
+      # durable desired-state for participant listeners + topology runs, so the
+      # whole simulated network is re-launched after a container rebuild/restart.
+      ORCH_RUNTIME_FILE: /data/runtime.json
+      # where to fetch real scenarios when running a project / set / case
+      SCENARIO_API_URL: http://scenario-service:8000
+      AUTH_API_URL: http://auth-service:8300
+      # MCP server, so /status reports its reachability in the portal monitor.
+      MCP_API_URL: http://mcp-server:8200
+      # Config assistant, so /status (dashboard "System health") reports it too.
+      ASSIST_API_URL: http://assistant:8400
+      # Insight service (ADR-0005), same reason.
+      INSIGHT_API_URL: http://insight-service:8500
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
+      # Fail-closed auth gate. Verify JWTs from auth-service (shared secret);
+      # PAYPROBE_ENV=dev keeps the gate open for local work.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
+      # Code-node sandbox: auto (isolate network when the kernel allows),
+      # strict (require it — recommended for untrusted authors), or off.
+      PAYPROBE_CODE_SANDBOX: ${PAYPROBE_CODE_SANDBOX:-auto}
+      # Worker provisioner (dynamic fleet scaling from the portal):
+      #   auto (default) -> docker if image set, else compose, else local
+      #   local          -> spawn workers inside this container (dev/single box)
+      #   docker         -> start each worker as a fresh `docker run` container
+      #                     (needs the socket mount below + PAYPROBE_WORKER_IMAGE)
+      #   compose        -> run load-worker containers via `docker compose run`
+      #                     (needs the socket mount + PAYPROBE_COMPOSE_FILE)
+      #   none           -> custom path only (operator starts workers manually)
+      PAYPROBE_WORKER_PROVISIONER: ${PAYPROBE_WORKER_PROVISIONER:-docker}
+      # docker backend: the prebuilt worker image + the network where Redis is
+      # reachable (so REDIS_URL=redis://redis:6379 resolves inside the worker).
+      # The `load-worker` service pins this same tag via its `image:` key, so
+      # `docker compose build load-worker` updates exactly what runs here (see the
+      # load-worker service for the rebuild note). Default net "<project>_default".
+      PAYPROBE_WORKER_IMAGE: ${PAYPROBE_WORKER_IMAGE:-payprobe-load-worker}
+      PAYPROBE_WORKER_NETWORK: ${PAYPROBE_WORKER_NETWORK:-payprobe_default}
+      # compose backend: where this file lives inside the container (uncomment
+      # the mount below and point this at it):
+      # PAYPROBE_COMPOSE_FILE: /app/infra/docker/docker-compose.yml
+    volumes:
+      - orchestrator_data:/data
+      # Container-spawning backends (docker / compose) need the docker socket
+      # mounted and the docker CLI in the orchestrator image (now installed).
+      # The `docker` backend (PAYPROBE_WORKER_PROVISIONER=docker) needs only the
+      # socket. The `compose` backend additionally needs this file mounted —
+      # uncomment the second line and set PAYPROBE_COMPOSE_FILE for that path.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # - ../../infra/docker/docker-compose.yml:/app/infra/docker/docker-compose.yml:ro
+    ports:
+      - "${ORCH_PORT:-8100}:8100"
+    depends_on:
+      redis:
+        condition: service_healthy
+      scenario-service:
+        condition: service_started
+      auth-service:
+        condition: service_started
+    <<: *restart
+
+  # MCP server — exposes the scenario catalog + operations to AI agents over the
+  # Model Context Protocol (Streamable HTTP). Point an MCP client at
+  # http://<host>:8200/mcp.
+  mcp-server:
+    build:
+      context: ../../packages/mcp-server
+    environment:
+      SCENARIO_API_URL: http://scenario-service:8000
+      RUN_API_URL: http://orchestrator:8100
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8200
+      # Service-to-service auth: mints a short-lived JWT with the shared secret
+      # that scenario-service and the orchestrator verify. (Or set MCP_API_TOKEN
+      # to use a static bearer instead.)
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+    ports:
+      - "${MCP_PORT:-8200}:8200"
+    depends_on:
+      scenario-service:
+        condition: service_started
+      orchestrator:
+        condition: service_started
+    <<: *restart
+
+  # Configuration assistant — the tool-calling agent + unified LLM gateway.
+  # Reads/writes config via the scenario-service / orchestrator REST APIs (service
+  # JWT) and is the only service that talks to LLM providers. Portal calls
+  # http://<host>:8400/agent/chat. Service is named `assistant` so the container
+  # is `payprobe-assistant` (the compose project prefix is already `payprobe`).
+  assistant:
+    build:
+      # packages/ context so the image can include the shared payprobe_common
+      # (agent toolkit) alongside the service's own source.
+      context: ../../packages
+      dockerfile: payprobe-assistant/Dockerfile
+    environment:
+      SCENARIO_API_URL: http://scenario-service:8000
+      RUN_API_URL: http://orchestrator:8100
+      # insight-service reads (advisory tools + Phase-2 /insights/explain)
+      INSIGHT_API_URL: http://insight-service:8500
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # Service-to-service auth (mints a short-lived JWT with the shared secret).
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+      # LLM provider — this is the egress boundary + key store.
+      ASSIST_LLM_PROVIDER: ${ASSIST_LLM_PROVIDER:-openai}
+      ASSIST_LLM_API_KEY: ${ASSIST_LLM_API_KEY:-}
+      ASSIST_LLM_MODEL: ${ASSIST_LLM_MODEL:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
+      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
+    ports:
+      - "${ASSIST_PORT:-8400}:8400"
+    depends_on:
+      scenario-service:
+        condition: service_started
+      orchestrator:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    <<: *restart
+
+  # Advisory ML insight service (ADR-0005): failure categorization,
+  # evidence-pack explanations, outcome/flakiness prediction. Read-only over
+  # the orchestrator's run history — it can never touch registries or verdicts.
+  insight-service:
+    build:
+      # packages/ context so the image can include the shared report_service
+      # library (the failure taxonomy) alongside the service's own source.
+      context: ../../packages
+      dockerfile: insight-service/Dockerfile
+    environment:
+      RUN_API_URL: http://orchestrator:8100
+      # File-backed corpus/model store (beside the other registries).
+      INSIGHT_DB: /data/insight.db
+      # Pickled model artifacts (custom + auto-trained), reloaded at boot.
+      INSIGHT_DATA_DIR: /data/models
+      # Periodic self-training (incremental ingest + refit): seconds between
+      # ticks; 0 disables (then only explicit POST /train trains). Nightly.
+      INSIGHT_TRAIN_INTERVAL_SEC: ${INSIGHT_TRAIN_INTERVAL_SEC:-86400}
+      # Service-to-service auth (mints a short-lived JWT with the shared secret).
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
+      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
+    volumes:
+      - insight-data:/data
+    ports:
+      - "${INSIGHT_PORT:-8500}:8500"
+    depends_on:
+      orchestrator:
+        condition: service_started
+    <<: *restart
+
+  portal:
+    # Multi-stage image: builds the Angular portal, serves it via nginx and
+    # proxies /api/scenarios + /api/orch (REST + WebSocket) to the services.
+    build:
+      context: ../../packages/portal
+    ports:
+      - "${PORTAL_PORT:-8080}:80"
+    volumes:
+      - ../nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - scenario-service
+      - orchestrator
+      - assistant
+    <<: *restart
+
+  # ---- not-yet-implemented services (placeholders) -----------------------
+  # Brought up only with `--profile full`. Each is the shared stub image; it
+  # passes health checks and returns 501 on real endpoints.
+  report-service:
+    profiles: ["full"]
+    build: &stub_build
+      context: ./stub
+    environment:
+      SERVICE_NAME: report-service
+    <<: *restart
+
+  helper-restpay:
+    profiles: ["full"]
+    build: *stub_build
+    environment:
+      SERVICE_NAME: helper-restpay
+    <<: *restart
+
+  helper-hsm:
+    profiles: ["full"]
+    build: *stub_build
+    environment:
+      SERVICE_NAME: helper-hsm
+    <<: *restart
+
+  helper-log:
+    profiles: ["full"]
+    build: *stub_build
+    environment:
+      SERVICE_NAME: helper-log
+    <<: *restart
+
+  helper-db-probe:
+    profiles: ["full"]
+    build: *stub_build
+    environment:
+      SERVICE_NAME: helper-db-probe
+    <<: *restart
+
+  # ---- observability (opt-in) --------------------------------------------
+  # `docker compose --profile observability up` adds Prometheus + Grafana.
+  # Each service already exposes /metrics; Prometheus scrapes them and Grafana
+  # ships a pre-provisioned "Load & Service Health" dashboard.
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:latest
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    <<: *restart
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    <<: *restart
+
+  # ---- batch / smoke tooling ---------------------------------------------
+  worker:
+    profiles: ["tools"]
+    build:
+      context: ../..
+      dockerfile: packages/worker/Dockerfile
+    # one-shot: `docker compose run --rm worker`
+    restart: "no"
+
+  # ---- load-worker fleet --------------------------------------------------
+  # A single load worker: claims one shard of a run and drives it. Not started
+  # by default (profile "load"). Two ways to use it:
+  #
+  #   custom (manual): bind it to a run and scale by replica count
+  #     LOAD_RUN_ID=<id> docker compose --profile load up -d --scale load-worker=4 load-worker
+  #
+  #   dynamic (portal): the orchestrator's DockerProvisioner runs containers for
+  #     you when you scale a run from the Load page (default:
+  #     PAYPROBE_WORKER_PROVISIONER=docker). It does `docker run <PAYPROBE_WORKER_IMAGE>`
+  #     — so the load worker executes THIS image, not this service definition.
+  #
+  # ┌─ IMPORTANT: rebuilding after a worker code change ──────────────────────┐
+  # │ The provisioner launches the image tagged `payprobe-load-worker` (the   │
+  # │ orchestrator's PAYPROBE_WORKER_IMAGE). The explicit `image:` below pins  │
+  # │ that tag, so a plain rebuild updates exactly what the provisioner runs:  │
+  # │                                                                         │
+  # │     docker compose build load-worker        # tags payprobe-load-worker │
+  # │                                                                         │
+  # │ Without the `image:` pin, `docker compose build` would tag the image    │
+  # │ `<project>-load-worker` (e.g. docker-load-worker), leaving the stale    │
+  # │ `payprobe-load-worker` in place — the worker would keep running OLD     │
+  # │ code (symptoms: `generated` stuck at 0, drain always runs the full      │
+  # │ configured time). No restart needed: the provisioner spawns a fresh     │
+  # │ container from the tag on the next run. Verify while a run is live:      │
+  # │     docker ps --filter name=lw- --format '{{.Image}}\t{{.CreatedAt}}'   │
+  # └─────────────────────────────────────────────────────────────────────────┘
+  load-worker:
+    profiles: ["load"]
+    build:
+      context: ../..
+      dockerfile: packages/worker/Dockerfile
+    # Pin the built tag to the image the orchestrator's provisioner runs, so a
+    # rebuild always updates what actually drives load runs (see box above).
+    image: ${PAYPROBE_WORKER_IMAGE:-payprobe-load-worker}
+    entrypoint: ["python", "-m", "worker.load_worker"]
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # bound per-invocation by `--scale` (custom) or `-e LOAD_RUN_ID=` (dynamic)
+      LOAD_RUN_ID: ${LOAD_RUN_ID:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:
+  nats1_data:
+  nats2_data:
+  nats3_data:
+  scenario_data:
+  orchestrator_data:
+  auth_data:
+  insight-data:
+  prometheus_data:
+  grafana_data:

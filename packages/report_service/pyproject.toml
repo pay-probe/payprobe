@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Same layout as `packages/worker`: code lives at this directory's root but is
+# imported as `report_service` (the repo puts `packages/` on PYTHONPATH).
+#  - `only-include` selects the package modules (not tests/README);
+#  - `sources` relocates them under a top-level `report_service/` in the wheel;
+#  - `dev-mode-dirs` makes `pip install -e .` add the parent `packages/` dir to
+#    sys.path via a .pth so `import report_service` resolves to this directory.
+[tool.hatch.build.targets.wheel]
+only-include = ["generators.py", "diagnose.py", "gates.py", "provenance.py", "__init__.py"]
+dev-mode-dirs = [".."]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = "report_service"
+
+[project]
+name = "payprobe-report-service"
+version = "0.1.0"
+description = "PayProbe report generators — JUnit / HTML / certification / run diffs"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

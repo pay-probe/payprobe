@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "payprobe-auth-service"
+version = "0.1.0"
+description = "PayProbe Auth Service — JWT issuance and user management."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.0",
+    "PyJWT>=2.8",
+    "python-multipart>=0.0.9",  # OAuth2 form parsing for /token
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx", "pytest-asyncio"]
+
+# Project name normalizes to `payprobe_auth_service`, but the package dirs are
+# `api`/`models`, so hatchling can't auto-detect them — name them explicitly.
+[tool.hatch.build.targets.wheel]
+packages = ["api", "models"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

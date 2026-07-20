@@ -1,0 +1,3 @@
+# Moved into conftest.py (as FakeBackend + the `backend` fixture) so the fake
+# isn't imported across packages by a clashing `tests.` module name. This file
+# is intentionally left empty.

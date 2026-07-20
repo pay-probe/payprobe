@@ -1,0 +1,537 @@
+<div class="cat">
+  <pp-page-header>
+    <div class="cat__heading" subtitle>
+      <span class="cat__sub muted"
+        >Customise the palette · build your own steps</span
+      >
+    </div>
+    <button class="btn btn--primary" (click)="newTarget()">
+      + New step type
+    </button>
+  </pp-page-header>
+
+  @if (error(); as e) {
+    <div class="banner banner--error">{{ e }}</div>
+  }
+
+  <div class="cat__body">
+    <!-- Library rail -->
+    <aside class="rail">
+      <div class="rail__search">
+        <pp-icon class="rail__search-icon" name="search" [size]="15" />
+        <input
+          [ngModel]="search()"
+          (ngModelChange)="search.set($event)"
+          placeholder="Search step types…"
+        />
+        @if (search()) {
+          <button class="rail__clear" (click)="search.set('')" title="Clear">
+            <pp-icon name="x" [size]="13" />
+          </button>
+        }
+      </div>
+
+      <div class="chips">
+        @for (f of filters; track f.value) {
+          <button
+            class="chip"
+            [class.chip--on]="filterMode() === f.value"
+            (click)="filterMode.set(f.value)"
+          >
+            {{ f.label }}
+            <span class="chip__count">{{ counts()[f.value] }}</span>
+          </button>
+        }
+      </div>
+
+      <div class="rail__list">
+        @if (loading()) {
+          <p class="muted rail__msg">Loading…</p>
+        } @else if (groups().length === 0) {
+          <p class="muted rail__msg">No step types match.</p>
+        }
+        @for (g of groups(); track g.category) {
+          <div class="rail__group">
+            <div class="rail__group-head">
+              {{ g.category }}
+              <span class="muted">{{ g.items.length }}</span>
+            </div>
+            @for (t of g.items; track t.target) {
+              <button
+                class="tcard"
+                [class.tcard--active]="isActive(t)"
+                [class.tcard--hidden]="t.hidden"
+                (click)="edit(t)"
+              >
+                @if (t.icon) {
+                  <span class="tcard__logo" [style.color]="t.color">
+                    <pp-icon [name]="t.icon" [size]="15"></pp-icon>
+                  </span>
+                } @else {
+                  <span class="tcard__dot" [style.background]="t.color"></span>
+                }
+                <span class="tcard__main">
+                  <span class="tcard__label">{{ t.label }}</span>
+                  <span class="tcard__meta mono muted"
+                    >{{ t.target }} · {{ t.actions.length }} action{{
+                      t.actions.length === 1 ? "" : "s"
+                    }}</span
+                  >
+                </span>
+                @if (t.hidden) {
+                  <span class="pill pill--muted">hidden</span>
+                } @else if (!t.builtin) {
+                  <span class="pill pill--custom">custom</span>
+                } @else if (t.overridden) {
+                  <span class="pill pill--edit">edited</span>
+                }
+              </button>
+            }
+          </div>
+        }
+      </div>
+    </aside>
+
+    <!-- Editor -->
+    <main class="editor">
+      @if (draft(); as d) {
+        <div class="editor__head">
+          <span class="editor__node" [style.--node-color]="d.color">
+            <span class="editor__node-dot" [style.background]="d.color"></span>
+            {{ d.label || d.target || "New step type" }}
+          </span>
+          @if (d.builtin) {
+            <span class="pill pill--muted"
+              >built-in{{ d.overridden ? " · edited" : "" }}</span
+            >
+          } @else if (!d.isNew) {
+            <span class="pill pill--custom">custom</span>
+          }
+          @if (dirty()) {
+            <span class="pill pill--dirty">unsaved changes</span>
+          }
+          <span class="editor__spacer"></span>
+          @if (d.builtin && (d.overridden || d.hidden)) {
+            <button class="btn" (click)="restore(d.target)">
+              <pp-icon name="undo" [size]="14" /> Restore default
+            </button>
+          }
+          @if (!d.isNew) {
+            <button class="btn btn--danger" (click)="deleteOrHide(d)">
+              {{ d.builtin ? "Hide" : "Delete" }}
+            </button>
+          }
+          <button class="btn" (click)="cancel()">Close</button>
+          <button
+            class="btn btn--primary"
+            (click)="save()"
+            [disabled]="saving()"
+          >
+            <pp-icon name="check" [size]="14" />
+            {{ saving() ? "Saving…" : "Save" }}
+          </button>
+        </div>
+
+        <div
+          class="editor__scroll"
+          (input)="markDirty()"
+          (change)="markDirty()"
+        >
+          @if (d.isNew) {
+            <div class="steps-hint">
+              <span class="steps-hint__step"
+                ><b>1</b> Give it an id &amp; label</span
+              >
+              <span class="steps-hint__step"
+                ><b>2</b> Pick a behaviour — <strong>HTTP</strong> and
+                <strong>Code</strong> run without an adapter</span
+              >
+              <span class="steps-hint__step"
+                ><b>3</b> Add typed parameters for the step editor</span
+              >
+            </div>
+          }
+          <section class="panel">
+            <h3 class="panel__title">Identity</h3>
+            <div class="grid2">
+              <label class="field">
+                <span>Id <span class="muted">(target)</span></span>
+                <input
+                  class="mono"
+                  [(ngModel)]="d.target"
+                  [readonly]="!d.isNew"
+                  placeholder="my_service"
+                />
+              </label>
+              <label class="field">
+                <span>Label</span>
+                <input [(ngModel)]="d.label" placeholder="My Service" />
+              </label>
+              <label class="field">
+                <span>Category</span>
+                <input [(ngModel)]="d.category" placeholder="Custom" />
+              </label>
+              <label class="field">
+                <span>Colour</span>
+                <span class="colorpick">
+                  <input type="color" [(ngModel)]="d.color" />
+                  <span class="mono muted">{{ d.color }}</span>
+                </span>
+              </label>
+              <label class="field">
+                <span>Logo</span>
+                <span class="colorpick">
+                  <span
+                    class="editor__logo"
+                    [style.color]="d.color"
+                    [class.editor__logo--empty]="!d.icon"
+                  >
+                    @if (d.icon) {
+                      <pp-icon [name]="d.icon" [size]="16"></pp-icon>
+                    }
+                  </span>
+                  <select [(ngModel)]="d.icon" (ngModelChange)="markDirty()">
+                    @for (o of iconOptions; track o.value) {
+                      <option [value]="o.value">{{ o.label }}</option>
+                    }
+                  </select>
+                </span>
+              </label>
+              <label class="field field--wide">
+                <span>Description</span>
+                <input
+                  [(ngModel)]="d.description"
+                  (ngModelChange)="markDirty()"
+                  placeholder="One line — what this step type drives and does"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__title panel__title--row">
+              <h3>
+                Actions <span class="muted">{{ d.actions.length }}</span>
+              </h3>
+              <button class="btn btn--ghost" (click)="addAction()">
+                + add action
+              </button>
+            </div>
+
+            @for (a of d.actions; track $index) {
+              <div class="acard" [class.acard--open]="a.open">
+                <button
+                  class="acard__head"
+                  type="button"
+                  (click)="toggleAction(a)"
+                >
+                  <pp-icon
+                    class="acard__chev"
+                    [class.acard__chev--open]="a.open"
+                    name="chevron-right"
+                    [size]="14"
+                  />
+                  <span class="acard__name mono">{{
+                    a.name || "unnamed_action"
+                  }}</span>
+                  <span class="acard__label muted">{{ a.label }}</span>
+                  <span
+                    class="badge"
+                    [class.badge--http]="a.behaviorKind === 'http'"
+                    [class.badge--code]="a.behaviorKind === 'code'"
+                    [class.badge--crypto]="a.behaviorKind === 'crypto'"
+                  >
+                    {{ behaviorBadge(a) }}
+                  </span>
+                </button>
+
+                @if (a.open) {
+                  <div class="acard__body">
+                    <div class="grid2">
+                      <label class="field">
+                        <span>Name</span>
+                        <input
+                          class="mono"
+                          [(ngModel)]="a.name"
+                          placeholder="action_name"
+                        />
+                      </label>
+                      <label class="field">
+                        <span>Label</span>
+                        <input
+                          [(ngModel)]="a.label"
+                          placeholder="Action label"
+                        />
+                      </label>
+                    </div>
+
+                    <div class="field">
+                      <span>Behaviour</span>
+                      <div class="seg">
+                        @for (b of behaviorKinds; track b.value) {
+                          <button
+                            type="button"
+                            class="seg__opt"
+                            [class.seg__opt--on]="a.behaviorKind === b.value"
+                            (click)="setBehavior(a, b.value)"
+                            [title]="b.hint"
+                          >
+                            <pp-icon [name]="b.icon" [size]="14" />
+                            {{ b.label }}
+                          </button>
+                        }
+                      </div>
+                    </div>
+
+                    @if (a.behaviorKind === "adapter") {
+                      <p class="note">
+                        Runs via the backend adapter named by this step’s id —
+                        only works for built-in targets. For a brand-new step
+                        pick
+                        <strong>HTTP</strong> or <strong>Code</strong> so it
+                        runs on its own.
+                      </p>
+                    }
+                    @if (a.behaviorKind === "http") {
+                      <div class="field field--inline">
+                        <select class="http-method" [(ngModel)]="a.method">
+                          @for (m of httpMethods; track m) {
+                            <option [value]="m">{{ m }}</option>
+                          }
+                        </select>
+                        <input
+                          class="mono http-url"
+                          [(ngModel)]="a.url"
+                          placeholder="https://api.example.com/${host}"
+                        />
+                      </div>
+                      <div class="rows">
+                        <span class="rows__head">Headers</span>
+                        @for (h of a.headerRows; track $index) {
+                          <div class="row2">
+                            <input
+                              class="mono"
+                              [(ngModel)]="h.name"
+                              placeholder="header"
+                            />
+                            <input
+                              class="mono"
+                              [(ngModel)]="h.value"
+                              placeholder="value"
+                            />
+                            <button
+                              class="iconbtn"
+                              title="Remove header"
+                              (click)="removeHeader(a, $index)"
+                            >
+                              <pp-icon name="x" [size]="13" />
+                            </button>
+                          </div>
+                        }
+                        <button class="btn btn--ghost" (click)="addHeader(a)">
+                          + header
+                        </button>
+                      </div>
+                      <label class="field">
+                        <span
+                          >Body
+                          <span class="muted">(JSON, optional)</span></span
+                        >
+                        <textarea
+                          class="mono code"
+                          rows="3"
+                          [(ngModel)]="a.body"
+                          placeholder='{ "key": "value" }'
+                        ></textarea>
+                      </label>
+                    }
+                    @if (a.behaviorKind === "code") {
+                      <label class="field">
+                        <span>Language</span>
+                        <select
+                          [(ngModel)]="a.language"
+                          (ngModelChange)="markDirty()"
+                        >
+                          @for (l of codeLanguages; track l) {
+                            <option [value]="l">{{ l }}</option>
+                          }
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>Code</span>
+                        <app-code-editor
+                          [value]="a.code"
+                          [language]="a.language"
+                          [height]="220"
+                          (valueChange)="a.code = $event; markDirty()"
+                        ></app-code-editor>
+                      </label>
+                    }
+
+                    @if (a.behaviorKind === "crypto") {
+                      <label class="field">
+                        <span>HSM operation</span>
+                        <select
+                          [(ngModel)]="a.cryptoOp"
+                          (ngModelChange)="markDirty()"
+                        >
+                          @for (o of cryptoOperations; track o.value) {
+                            <option [value]="o.value">{{ o.label }}</option>
+                          }
+                        </select>
+                      </label>
+                      <p class="note">
+                        Dropping this step adds a pre-configured
+                        <strong>crypto</strong> node (real DES/3DES in the
+                        worker). Field values like keys and data are wired on
+                        the canvas with
+                        <span class="mono">${{ "{" }}…{{ "}" }}</span> refs.
+                      </p>
+                    }
+
+                    <div class="rows">
+                      <span class="rows__head">
+                        Parameters
+                        <span class="muted"
+                          >(typed fields shown in the step editor)</span
+                        >
+                      </span>
+                      @if (a.paramRows.length) {
+                        <div class="prow prow--head">
+                          <span>Name</span>
+                          <span>Label</span>
+                          <span>Type</span>
+                          <span>Default</span>
+                          <span class="prow__req-head" title="Required"
+                            >Req</span
+                          >
+                          <span></span>
+                        </div>
+                      }
+                      @for (p of a.paramRows; track $index) {
+                        <div
+                          class="prow"
+                          [class.prow--enum]="p.type === 'enum'"
+                        >
+                          <input
+                            class="mono prow__name"
+                            [(ngModel)]="p.name"
+                            (ngModelChange)="markDirty()"
+                            placeholder="name"
+                          />
+                          <input
+                            class="prow__label"
+                            [(ngModel)]="p.label"
+                            (ngModelChange)="markDirty()"
+                            placeholder="label"
+                          />
+                          <select
+                            class="prow__type"
+                            [(ngModel)]="p.type"
+                            (ngModelChange)="markDirty()"
+                          >
+                            @for (t of paramTypes; track t) {
+                              <option [value]="t">{{ t }}</option>
+                            }
+                          </select>
+                          <input
+                            class="mono prow__default"
+                            [(ngModel)]="p.default"
+                            (ngModelChange)="markDirty()"
+                            placeholder="—"
+                          />
+                          <label class="prow__req" title="Required">
+                            <input
+                              type="checkbox"
+                              [(ngModel)]="p.required"
+                              (ngModelChange)="markDirty()"
+                            />
+                          </label>
+                          <button
+                            class="iconbtn"
+                            title="Remove parameter"
+                            (click)="removeParam(a, $index)"
+                          >
+                            <pp-icon name="x" [size]="13" />
+                          </button>
+                          @if (p.type === "enum") {
+                            <div class="prow__opts">
+                              <span class="prow__opts-tag">options</span>
+                              <input
+                                class="mono"
+                                [(ngModel)]="p.options"
+                                (ngModelChange)="markDirty()"
+                                placeholder="visa, mastercard, amex"
+                              />
+                            </div>
+                          }
+                        </div>
+                      }
+                      <button class="btn btn--ghost" (click)="addParam(a)">
+                        + parameter
+                      </button>
+                    </div>
+
+                    <label class="field">
+                      <span
+                        >Response fields
+                        <span class="muted"
+                          >(comma-separated; power reference autocomplete)</span
+                        ></span
+                      >
+                      <input
+                        class="mono"
+                        [(ngModel)]="a.responseText"
+                        placeholder="status, id, amount"
+                      />
+                    </label>
+
+                    <div class="acard__foot">
+                      <button
+                        class="btn btn--danger btn--sm"
+                        (click)="removeAction($index)"
+                        [disabled]="d.actions.length === 1"
+                      >
+                        Remove action
+                      </button>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </section>
+        </div>
+      } @else {
+        <div class="placeholder">
+          <div class="placeholder__icon">
+            <pp-icon name="box" [size]="28" />
+          </div>
+          <h2>Build your palette</h2>
+          <p class="muted">
+            Pick a step type on the left to edit it, or create your own.
+          </p>
+          <div class="placeholder__cards">
+            <div class="pcard">
+              <pp-icon name="globe" [size]="18" />
+              <strong>HTTP</strong>
+              <span class="muted">Call any REST API — runs immediately</span>
+            </div>
+            <div class="pcard">
+              <pp-icon name="terminal" [size]="18" />
+              <strong>Code</strong>
+              <span class="muted">Run a snippet — no adapter required</span>
+            </div>
+            <div class="pcard">
+              <pp-icon name="lock" [size]="18" />
+              <strong>Crypto</strong>
+              <span class="muted">Pre-configured HSM operations</span>
+            </div>
+          </div>
+          <button class="btn btn--primary" (click)="newTarget()">
+            + New step type
+          </button>
+        </div>
+      }
+    </main>
+  </div>
+</div>

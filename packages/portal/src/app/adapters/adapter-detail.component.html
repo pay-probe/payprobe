@@ -1,0 +1,327 @@
+<div class="det" [style.--accent]="accent()">
+  <pp-page-header>
+    <nav class="det__crumb" subtitle>
+      <a routerLink="/adapters" class="det__back">
+        <pp-icon name="arrow-left" [size]="14" /> Adapters
+      </a>
+      @if (adapter(); as a) {
+        <span class="det__sep">/</span>
+        <span class="det__crumb-cur">{{ a.label }}</span>
+      }
+    </nav>
+  </pp-page-header>
+
+  <div class="det__scroll">
+    @if (adapter(); as a) {
+      <!-- hero -->
+      <header class="hero" id="overview-top">
+        <span class="hero__ico"
+          ><pp-icon [name]="categoryIcon()" [size]="26"
+        /></span>
+        <div class="hero__main">
+          <div class="hero__titlerow">
+            <h1 class="hero__title">{{ a.label }}</h1>
+            <span
+              class="badge"
+              [class.badge--builtin]="a.availability === 'builtin'"
+              [class.badge--optional]="a.availability === 'optional'"
+              [class.badge--planned]="a.availability === 'planned'"
+            >
+              {{ availabilityLabel(a.availability) }}
+            </span>
+          </div>
+          <p class="hero__desc">{{ a.description }}</p>
+          <div class="hero__chips">
+            <span class="chip chip--accent">{{ a.category }}</span>
+            @for (t of a.targets; track t) {
+              <code class="chip chip--key">{{ t }}</code>
+            }
+            @if (a.protocols?.length) {
+              <span class="chip">{{ a.protocols!.join(" · ") }}</span>
+            }
+          </div>
+        </div>
+      </header>
+
+      @if (a.availability === "planned") {
+        <div class="callout callout--warn">
+          <pp-icon name="alert-circle" [size]="16" />
+          <span
+            >Planned adapter — registered in the worker but not yet implemented,
+            so it is unavailable on current workers. The spec below describes
+            the intended surface.</span
+          >
+        </div>
+      }
+
+      <div class="layout">
+        <!-- main column -->
+        <main class="content">
+          <!-- overview -->
+          <section class="sec" id="overview">
+            <h2 class="sec__h"><span class="sec__bar"></span>Overview</h2>
+            @for (p of a.overview; track $index) {
+              <p class="prose">{{ p }}</p>
+            }
+          </section>
+
+          <!-- protocol notes -->
+          @if (a.protocolNotes?.length) {
+            <section class="sec" id="protocol">
+              <h2 class="sec__h">
+                <span class="sec__bar"></span>Protocol &amp; framing
+              </h2>
+              @for (p of a.protocolNotes!; track $index) {
+                <p class="prose">{{ p }}</p>
+              }
+            </section>
+          }
+
+          <!-- extra rich sections (e.g. dialects & validation) -->
+          @for (xs of a.extraSections || []; track xs.id) {
+            <section class="sec" [id]="xs.id">
+              <h2 class="sec__h">
+                <span class="sec__bar"></span>{{ xs.title }}
+              </h2>
+              @for (p of xs.paragraphs; track $index) {
+                <p class="prose">{{ p }}</p>
+              }
+              @if (xs.points?.length) {
+                <ul class="ptlist">
+                  @for (pt of xs.points!; track $index) {
+                    <li>
+                      <span class="ptlist__mark"></span><span>{{ pt }}</span>
+                    </li>
+                  }
+                </ul>
+              }
+            </section>
+          }
+
+          <!-- config -->
+          @if (a.configGroups?.length) {
+            <section class="sec" id="config">
+              <h2 class="sec__h">
+                <span class="sec__bar"></span>Configuration
+              </h2>
+              @for (g of a.configGroups!; track g.title) {
+                <div class="cfg">
+                  <h3 class="cfg__title">{{ g.title }}</h3>
+                  @if (g.note) {
+                    <p class="prose prose--sm">{{ g.note }}</p>
+                  }
+                  <div class="tbl">
+                    <div class="tbl__head">
+                      <span>Key</span><span>Type</span><span>Default</span
+                      ><span>Description</span>
+                    </div>
+                    @for (c of g.keys; track c.key) {
+                      <div class="tbl__row">
+                        <span class="tbl__key">
+                          <code>{{ c.key }}</code>
+                          @if (c.required) {
+                            <span class="req">required</span>
+                          }
+                        </span>
+                        <span class="tbl__type">
+                          @if (c.type) {
+                            <span class="pill">{{ c.type }}</span>
+                          } @else {
+                            —
+                          }
+                        </span>
+                        <span class="tbl__def">
+                          @if (c.default) {
+                            <code>{{ c.default }}</code>
+                          } @else {
+                            <span class="dash">—</span>
+                          }
+                        </span>
+                        <span class="tbl__desc">{{ c.desc }}</span>
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
+            </section>
+          }
+
+          <!-- actions -->
+          @if (a.actions?.length) {
+            <section class="sec" id="actions">
+              <h2 class="sec__h"><span class="sec__bar"></span>Actions</h2>
+              <div class="acts">
+                @for (act of a.actions!; track act.name) {
+                  <div class="act">
+                    <div class="act__top">
+                      <span class="act__dot"></span>
+                      <code class="act__name">{{ act.name }}</code>
+                    </div>
+                    <p class="act__sum">{{ act.summary }}</p>
+                    @if (act.params) {
+                      <p class="act__meta">
+                        <span class="act__lbl">Params</span>
+                        <code>{{ act.params }}</code>
+                      </p>
+                    }
+                    @if (act.returns) {
+                      <p class="act__meta">
+                        <span class="act__lbl">Returns</span>
+                        <code>{{ act.returns }}</code>
+                      </p>
+                    }
+                  </div>
+                }
+              </div>
+            </section>
+          }
+
+          <!-- examples -->
+          @if (a.examples?.length) {
+            <section class="sec" id="examples">
+              <h2 class="sec__h"><span class="sec__bar"></span>Examples</h2>
+              @for (ex of a.examples!; track ex.title) {
+                <figure class="ex">
+                  <figcaption class="ex__cap">
+                    <span class="ex__dots"><i></i><i></i><i></i></span>
+                    <span class="ex__title">{{ ex.title }}</span>
+                    <span class="ex__lang">{{ ex.lang }}</span>
+                    <button
+                      class="ex__copy"
+                      type="button"
+                      (click)="copy(ex.code, ex.title)"
+                    >
+                      <pp-icon
+                        [name]="copied() === ex.title ? 'check' : 'copy'"
+                        [size]="13"
+                      />
+                      {{ copied() === ex.title ? "Copied" : "Copy" }}
+                    </button>
+                  </figcaption>
+                  <pre class="ex__code"><code>{{ ex.code }}</code></pre>
+                </figure>
+              }
+            </section>
+          }
+
+          <!-- errors -->
+          @if (a.errors?.length) {
+            <section class="sec" id="errors">
+              <h2 class="sec__h">
+                <span class="sec__bar"></span>Errors &amp; failure behaviour
+              </h2>
+              <ul class="bullets">
+                @for (e of a.errors!; track $index) {
+                  <li>
+                    <pp-icon name="alert-circle" [size]="14" /><span>{{
+                      e
+                    }}</span>
+                  </li>
+                }
+              </ul>
+            </section>
+          }
+
+          @if (a.notes) {
+            <p class="prose prose--note">{{ a.notes }}</p>
+          }
+
+          <!-- related -->
+          @if (related().length) {
+            <section class="sec" id="related">
+              <h2 class="sec__h">
+                <span class="sec__bar"></span>Related adapters
+              </h2>
+              <div class="rel">
+                @for (r of related(); track r.slug) {
+                  <a class="rel__item" [routerLink]="['/adapters', r.slug]">
+                    <span
+                      class="rel__ico"
+                      [style.color]="metaAccent(r.category)"
+                    >
+                      <pp-icon [name]="metaIcon(r.category)" [size]="16" />
+                    </span>
+                    <span class="rel__text">
+                      <span class="rel__label">{{ r.label }}</span>
+                      <span class="rel__cat">{{ r.category }}</span>
+                    </span>
+                    <pp-icon name="chevron-right" [size]="15" />
+                  </a>
+                }
+              </div>
+            </section>
+          }
+        </main>
+
+        <!-- sticky sidebar -->
+        <aside class="aside">
+          <div class="facts">
+            <h3 class="facts__h">Quick facts</h3>
+            <dl class="facts__list">
+              <dt>Category</dt>
+              <dd>{{ a.category }}</dd>
+              <dt>Availability</dt>
+              <dd>{{ availabilityLabel(a.availability) }}</dd>
+              @if (a.protocols?.length) {
+                <dt>Protocols</dt>
+                <dd>{{ a.protocols!.join(", ") }}</dd>
+              }
+              @if (a.direction) {
+                <dt>Direction</dt>
+                <dd>{{ a.direction }}</dd>
+              }
+              @if (a.dependency) {
+                <dt>Requires</dt>
+                <dd>
+                  <code class="key">{{ a.dependency }}</code>
+                </dd>
+              }
+              <dt>Target keys</dt>
+              <dd class="facts__keys">
+                @for (t of a.targets; track t) {
+                  <code class="key">{{ t }}</code>
+                }
+              </dd>
+              @if (a.source) {
+                <dt>Source</dt>
+                <dd>
+                  <code class="path">{{ a.source }}</code>
+                </dd>
+              }
+            </dl>
+          </div>
+
+          @if (sections().length > 1) {
+            <nav class="onpage">
+              <h3 class="onpage__h">On this page</h3>
+              <ul>
+                @for (s of sections(); track s.id) {
+                  <li>
+                    <button type="button" (click)="scrollTo(s.id)">
+                      {{ s.label }}
+                    </button>
+                  </li>
+                }
+              </ul>
+            </nav>
+          }
+        </aside>
+      </div>
+    } @else {
+      <div class="empty">
+        <pp-icon name="alert-circle" [size]="24" />
+        <h1>Unknown adapter</h1>
+        <p class="muted">
+          No adapter matches this address. Pick one from the catalog:
+        </p>
+        <div class="empty__list">
+          @for (a of all; track a.slug) {
+            <a [routerLink]="['/adapters', a.slug]" class="empty__link">{{
+              a.label
+            }}</a>
+          }
+        </div>
+      </div>
+    }
+  </div>
+</div>

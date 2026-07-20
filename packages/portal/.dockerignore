@@ -1,0 +1,8 @@
+# The portal image runs `npm ci` inside the build, so the local node_modules /
+# build artifacts must NOT be shipped in the context (was ~383 MB).
+node_modules/
+.angular/
+dist/
+*.log
+npm-debug.log*
+.git/

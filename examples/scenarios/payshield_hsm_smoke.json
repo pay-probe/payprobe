@@ -1,0 +1,61 @@
+{
+  "id": "example-hsm-001",
+  "name": "payshield_hsm_smoke",
+  "description": "Drive the payShield 10K HSM simulator end-to-end: sign on (NC), generate a CVK, generate a CVV with it, then verify that CVV. Each step chains the previous step's response — proving the HSM client adapter and simulator work together in a real run.",
+  "tags": ["example", "hsm", "payshield", "smoke"],
+  "stop_on_failure": true,
+  "timeout_ms": 10000,
+  "test_class": "e2e",
+  "steps": [
+    {
+      "id": "nc",
+      "target": "hsm",
+      "action": "nc",
+      "payload": {},
+      "assertions": [
+        { "field": "error_code", "operator": "eq", "expected": "00" },
+        { "field": "firmware", "operator": "present" }
+      ]
+    },
+    {
+      "id": "gen_cvk",
+      "target": "hsm",
+      "action": "generate_key",
+      "payload": { "key_type": "402", "scheme": "U" },
+      "assertions": [
+        { "field": "ok", "operator": "eq", "expected": true },
+        { "field": "key", "operator": "present" }
+      ]
+    },
+    {
+      "id": "gen_cvv",
+      "target": "hsm",
+      "action": "generate_cvv",
+      "payload": {
+        "cvk": "${gen_cvk.response.key}",
+        "pan": "4000000000000002",
+        "expiry": "2512",
+        "service_code": "000"
+      },
+      "assertions": [
+        { "field": "error_code", "operator": "eq", "expected": "00" },
+        { "field": "cvv", "operator": "present" }
+      ]
+    },
+    {
+      "id": "verify_cvv",
+      "target": "hsm",
+      "action": "verify_cvv",
+      "payload": {
+        "cvk": "${gen_cvk.response.key}",
+        "cvv": "${gen_cvv.response.cvv}",
+        "pan": "4000000000000002",
+        "expiry": "2512",
+        "service_code": "000"
+      },
+      "assertions": [
+        { "field": "error_code", "operator": "eq", "expected": "00" }
+      ]
+    }
+  ]
+}

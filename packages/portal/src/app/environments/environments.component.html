@@ -1,0 +1,518 @@
+<div class="env">
+  <pp-page-header
+    subtitle="Adapter-target profiles a run executes against. ${vars.*} in config resolves from global Variables at run time."
+  >
+    <input
+      class="search"
+      type="search"
+      placeholder="Search environments…"
+      [ngModel]="query()"
+      (ngModelChange)="query.set($event)"
+    />
+    <pp-button variant="primary" icon="plus" (click)="newEnv()">
+      New environment
+    </pp-button>
+    <button
+      type="button"
+      class="iconbtn"
+      (click)="theme.toggle()"
+      title="Toggle theme"
+    >
+      <pp-icon [name]="theme.theme() === 'dark' ? 'sun' : 'moon'" [size]="18" />
+    </button>
+  </pp-page-header>
+
+  <div class="env__body">
+    <!-- list -->
+    <aside class="env__list">
+      @if (envs.loading()) {
+        <p class="muted pad">Loading…</p>
+      } @else if (filtered().length === 0) {
+        <p class="muted pad">
+          @if (query()) {
+            No environments match “{{ query() }}”.
+          } @else {
+            No environments yet. Create one to get started.
+          }
+        </p>
+      } @else {
+        @for (e of filtered(); track e.name) {
+          <div class="row" [class.active]="isActive(e)">
+            <button class="row__main" (click)="edit(e)">
+              <span class="row__ico"
+                ><pp-icon name="layers" [size]="16"
+              /></span>
+              <span class="row__text">
+                <span class="row__name">{{ e.name }}</span>
+                <span class="row__sub">{{ summaryOf(e) }}</span>
+              </span>
+            </button>
+            <pp-badge [tone]="sourceTone(e.source)">{{ e.source }}</pp-badge>
+            <button
+              class="iconbtn iconbtn--sm"
+              (click)="clone(e)"
+              title="Clone"
+            >
+              <pp-icon name="layers" [size]="14" />
+            </button>
+            <button
+              class="iconbtn iconbtn--sm danger"
+              (click)="remove(e)"
+              [disabled]="e.source === 'bundled'"
+              [title]="
+                e.source === 'bundled' ? 'Bundled — clone to edit' : 'Delete'
+              "
+            >
+              <pp-icon name="x" [size]="14" />
+            </button>
+          </div>
+        }
+      }
+    </aside>
+
+    <!-- editor -->
+    <section class="env__editor">
+      @if (draft(); as d) {
+        <div class="ed">
+          <header class="ed__head">
+            <h2>
+              {{
+                d.isNew
+                  ? "New environment"
+                  : "Edit “" + (d.original || d.name) + "”"
+              }}
+            </h2>
+            <button class="iconbtn" (click)="close()" title="Close">
+              <pp-icon name="x" [size]="16" />
+            </button>
+          </header>
+
+          <div class="grid2">
+            <label class="fld">
+              <span>Name <small class="muted">(id, e.g. staging)</small></span>
+              <input
+                class="mono"
+                [(ngModel)]="d.name"
+                (ngModelChange)="markDirty()"
+                placeholder="staging"
+              />
+            </label>
+            <label class="fld">
+              <span>Label</span>
+              <input
+                [(ngModel)]="d.label"
+                (ngModelChange)="markDirty()"
+                placeholder="Staging"
+              />
+            </label>
+            <label class="fld span2">
+              <span>Description</span>
+              <input
+                [(ngModel)]="d.description"
+                (ngModelChange)="markDirty()"
+                placeholder="Short description of this environment"
+              />
+            </label>
+          </div>
+
+          <!-- tabs -->
+          <div class="tabs" role="tablist">
+            <button
+              class="tab"
+              [class.sel]="tab() === 'form'"
+              (click)="setTab('form')"
+            >
+              Form
+            </button>
+            <button
+              class="tab"
+              [class.sel]="tab() === 'json'"
+              (click)="setTab('json')"
+            >
+              JSON
+              @if (jsonError()) {
+                <span class="tab__err" title="Invalid JSON">•</span>
+              }
+            </button>
+            <span class="tabs__spacer"></span>
+            @if (envs.varKeys().length) {
+              <span class="muted hint">
+                {{ envs.varKeys().length }} variable(s) available as
+                <code>${{ "{" }}vars.*{{ "}" }}</code>
+              </span>
+            }
+          </div>
+
+          <!-- FORM TAB -->
+          @if (tab() === "form") {
+            <div class="form">
+              <div class="grid2">
+                <label class="fld">
+                  <span>Mode <small class="muted">(optional)</small></span>
+                  <select
+                    [(ngModel)]="d.form.mode"
+                    (ngModelChange)="markDirty()"
+                  >
+                    <option value="">— unset —</option>
+                    <option value="mock">mock</option>
+                    <option value="real">real</option>
+                  </select>
+                </label>
+                <label class="fld">
+                  <span
+                    >Connection budget — total
+                    <small class="muted">(optional)</small></span
+                  >
+                  <input
+                    type="number"
+                    [(ngModel)]="d.form.budgetTotal"
+                    (ngModelChange)="markDirty()"
+                    placeholder="1000"
+                  />
+                </label>
+              </div>
+
+              <div class="adapters">
+                <div class="adapters__head">
+                  <h3>Adapters</h3>
+                  <pp-button
+                    size="sm"
+                    variant="secondary"
+                    icon="plus"
+                    (click)="addAdapter()"
+                  >
+                    Add adapter
+                  </pp-button>
+                </div>
+
+                @for (a of d.form.adapters; track $index) {
+                  <div class="adapter">
+                    <div class="adapter__head">
+                      <label class="fld grow">
+                        <span>Adapter name</span>
+                        <input
+                          class="mono"
+                          [(ngModel)]="a.name"
+                          (ngModelChange)="markDirty()"
+                          placeholder="rest_pay"
+                        />
+                      </label>
+                      <label class="fld budget">
+                        <span>Budget</span>
+                        <input
+                          type="number"
+                          [(ngModel)]="a.budget"
+                          (ngModelChange)="markDirty()"
+                          placeholder="—"
+                        />
+                      </label>
+                      <button
+                        class="iconbtn iconbtn--sm danger"
+                        (click)="removeAdapter($index)"
+                        title="Remove adapter"
+                      >
+                        <pp-icon name="x" [size]="14" />
+                      </button>
+                    </div>
+
+                    <div class="kv">
+                      @for (f of a.fields; track $index) {
+                        <div class="kv__row">
+                          <input
+                            class="mono kv__key"
+                            [(ngModel)]="f.key"
+                            (ngModelChange)="markDirty()"
+                            placeholder="key"
+                          />
+                          <select
+                            class="kv__kind"
+                            [(ngModel)]="f.type"
+                            (ngModelChange)="onParamTypeChange(f); markDirty()"
+                          >
+                            @for (t of paramTypes; track t) {
+                              <option [value]="t">
+                                {{ paramTypeLabels[t] }}
+                              </option>
+                            }
+                          </select>
+                          @switch (f.type) {
+                            @case ("boolean") {
+                              <select
+                                class="kv__val"
+                                [(ngModel)]="f.value"
+                                (ngModelChange)="markDirty()"
+                              >
+                                <option value="true">true</option>
+                                <option value="false">false</option>
+                              </select>
+                            }
+                            @case ("number") {
+                              <input
+                                class="mono kv__val"
+                                type="text"
+                                [(ngModel)]="f.value"
+                                (ngModelChange)="markDirty()"
+                                [attr.list]="'varlist'"
+                                placeholder="value (or ${{ '{' }}vars.NAME{{
+                                  '}'
+                                }})"
+                              />
+                            }
+                            @case ("adapter") {
+                              <select
+                                class="kv__val"
+                                [(ngModel)]="f.value"
+                                (ngModelChange)="markDirty()"
+                              >
+                                <option value="">— pick adapter —</option>
+                                @for (a of adapterKinds; track a) {
+                                  <option [value]="a">{{ a }}</option>
+                                }
+                              </select>
+                            }
+                            @case ("connection") {
+                              <select
+                                class="kv__val"
+                                [(ngModel)]="f.value"
+                                (ngModelChange)="markDirty()"
+                              >
+                                <option value="">— pick connection —</option>
+                                @for (n of connectionNames(); track n) {
+                                  <option [value]="n">{{ n }}</option>
+                                }
+                              </select>
+                            }
+                            @default {
+                              <input
+                                class="mono kv__val"
+                                type="text"
+                                [(ngModel)]="f.value"
+                                (ngModelChange)="markDirty()"
+                                [attr.list]="'varlist'"
+                                placeholder="value (or ${{ '{' }}vars.NAME{{
+                                  '}'
+                                }})"
+                              />
+                            }
+                          }
+                          <button
+                            class="iconbtn iconbtn--sm danger"
+                            (click)="removeField(a, $index)"
+                            title="Remove field"
+                          >
+                            <pp-icon name="x" [size]="14" />
+                          </button>
+                        </div>
+                      }
+                      <button class="btn btn--sm" (click)="addField(a)">
+                        + Add field
+                      </button>
+                      @if (advancedCount(a) > 0) {
+                        <p class="muted adv">
+                          {{ advancedCount(a) }} nested/advanced setting(s)
+                          preserved — edit in the
+                          <button class="linkbtn" (click)="setTab('json')">
+                            JSON
+                          </button>
+                          tab.
+                        </p>
+                      }
+                    </div>
+                  </div>
+                } @empty {
+                  <p class="muted">No adapters yet. Add one above.</p>
+                }
+              </div>
+
+              <div class="adapters">
+                <div class="adapters__head">
+                  <h3>Connection overrides</h3>
+                </div>
+                <p class="muted note">
+                  Override each connection's parameters for this environment
+                  (e.g. <code class="mono">host</code>,
+                  <code class="mono">port</code>). This is the same data the
+                  Connections page edits — saved per connection.
+                </p>
+                @for (c of allConnections(); track c.name) {
+                  <div class="ovr">
+                    <div class="ovr__head">
+                      <strong>{{ c.name }}</strong>
+                      <span class="ovr__actions">
+                        <button
+                          class="linkbtn"
+                          (click)="addConnOverrideRow(c.name)"
+                        >
+                          + parameter
+                        </button>
+                        <button
+                          class="linkbtn"
+                          (click)="saveConnOverride(c.name)"
+                        >
+                          Save
+                        </button>
+                      </span>
+                    </div>
+                    @for (row of rowsForConn(c.name); track $index) {
+                      <div class="ovr__row ovr__row--typed">
+                        <input
+                          type="text"
+                          placeholder="parameter (e.g. host)"
+                          [(ngModel)]="row.key"
+                        />
+                        <select
+                          [(ngModel)]="row.type"
+                          (ngModelChange)="onParamTypeChange(row)"
+                          title="Parameter type"
+                        >
+                          @for (t of paramTypes; track t) {
+                            <option [value]="t">
+                              {{ paramTypeLabels[t] }}
+                            </option>
+                          }
+                        </select>
+                        @switch (row.type) {
+                          @case ("boolean") {
+                            <select [(ngModel)]="row.value">
+                              <option value="true">true</option>
+                              <option value="false">false</option>
+                            </select>
+                          }
+                          @case ("number") {
+                            <input
+                              type="number"
+                              placeholder="value"
+                              [(ngModel)]="row.value"
+                            />
+                          }
+                          @case ("adapter") {
+                            <select [(ngModel)]="row.value">
+                              <option value="">— pick adapter —</option>
+                              @for (a of adapterKinds; track a) {
+                                <option [value]="a">{{ a }}</option>
+                              }
+                            </select>
+                          }
+                          @case ("connection") {
+                            <select [(ngModel)]="row.value">
+                              <option value="">— pick connection —</option>
+                              @for (n of connectionNames(); track n) {
+                                <option [value]="n">{{ n }}</option>
+                              }
+                            </select>
+                          }
+                          @default {
+                            <input
+                              type="text"
+                              placeholder="value"
+                              [(ngModel)]="row.value"
+                            />
+                          }
+                        }
+                        <button
+                          class="linkbtn"
+                          title="Remove"
+                          (click)="removeConnOverrideRow(c.name, $index)"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    } @empty {
+                      <small class="muted"
+                        >No overrides for this environment.</small
+                      >
+                    }
+                    <div class="eff">
+                      <small class="muted">
+                        Effective here — base
+                        <span class="eff__op">⊕</span> override:
+                      </small>
+                      <table class="eff__tbl">
+                        <tbody>
+                          @for (
+                            r of effectiveRowsForConn(c.name);
+                            track r.key
+                          ) {
+                            <tr [class.eff__ovr]="r.overridden">
+                              <td class="eff__k">{{ r.key }}</td>
+                              <td class="eff__base">{{ r.base }}</td>
+                              <td class="eff__arrow">→</td>
+                              <td class="eff__val">
+                                {{ r.effective }}
+                                @if (r.overridden) {
+                                  <span class="eff__tag">override</span>
+                                }
+                              </td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                } @empty {
+                  <p class="muted">
+                    No saved connections yet — add one in Manage → Connections.
+                  </p>
+                }
+              </div>
+
+              @if (extraTopKeys().length) {
+                <p class="muted note">
+                  Advanced top-level keys preserved (<code class="mono">{{
+                    extraTopKeys().join(", ")
+                  }}</code
+                  >) — edit them in the
+                  <button class="linkbtn" (click)="setTab('json')">JSON</button>
+                  tab.
+                </p>
+              }
+            </div>
+          }
+
+          <!-- JSON TAB -->
+          @if (tab() === "json") {
+            <div class="json">
+              <app-code-editor
+                language="json"
+                [value]="d.json"
+                [height]="380"
+                (valueChange)="onJsonChange($event)"
+              />
+              <p class="muted hint">
+                Anything valid in an environment file works here —
+                <code class="mono">adapter_defaults</code>,
+                <code class="mono">correlation</code>,
+                <code class="mono">tls</code>, … Use
+                <code class="mono">${{ "{" }}vars.NAME{{ "}" }}</code> to pull
+                values from global Variables at run time.
+              </p>
+            </div>
+          }
+
+          <div class="actions">
+            <pp-button
+              variant="primary"
+              (click)="save()"
+              [disabled]="!dirty() || (tab() === 'json' && !!jsonError())"
+            >
+              Save
+            </pp-button>
+            <pp-button variant="secondary" (click)="close()">Cancel</pp-button>
+          </div>
+        </div>
+      } @else {
+        <div class="placeholder">
+          <pp-icon name="layers" [size]="28" />
+          <p>Select an environment to edit, or create a new one.</p>
+        </div>
+      }
+    </section>
+  </div>
+
+  <!-- shared ${vars.*} autocomplete for value inputs -->
+  <datalist id="varlist">
+    @for (s of varSuggestions(); track s) {
+      <option [value]="s"></option>
+    }
+  </datalist>
+</div>

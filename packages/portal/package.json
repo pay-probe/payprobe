@@ -1,0 +1,43 @@
+{
+  "name": "payprobe-portal",
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=22.22.3"
+  },
+  "scripts": {
+    "start": "ng serve",
+    "build": "ng build --configuration production",
+    "test": "ng test",
+    "lint": "ng lint",
+    "format:check": "prettier --check \"src/**/*.{ts,html,scss}\"",
+    "generate:api": "openapi-generator-cli generate -i http://localhost:8000/openapi.json -g typescript-angular -o src/app/api",
+    "e2e": "playwright test",
+    "e2e:install": "npm install --no-save @playwright/test@^1.48.0 && playwright install --with-deps chromium"
+  },
+  "dependencies": {
+    "@angular/animations": "^22.0.2",
+    "@angular/cdk": "^22.0.2",
+    "@angular/common": "^22.0.2",
+    "@angular/compiler": "^22.0.2",
+    "@angular/core": "^22.0.2",
+    "@angular/forms": "^22.0.2",
+    "@angular/material": "^22.0.2",
+    "@angular/platform-browser": "^22.0.2",
+    "@angular/platform-browser-dynamic": "^22.0.2",
+    "@angular/router": "^22.0.2",
+    "monaco-editor": "^0.52.2",
+    "rxjs": "^7.8.0",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@angular/build": "^22.0.3",
+    "@angular/cli": "^22.0.3",
+    "@angular/compiler-cli": "^22.0.2",
+    "@openapitools/openapi-generator-cli": "^2.7.0",
+    "@types/node": "^20.0.0",
+    "eslint": "^8.0.0",
+    "istanbul-lib-instrument": "^6.0.3",
+    "prettier": "^3.0.0",
+    "typescript": "~6.0.3"
+  }
+}

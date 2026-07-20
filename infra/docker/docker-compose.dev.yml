@@ -1,0 +1,79 @@
+# PayProbe — DEV overlay.
+#
+# Mounts Python source into the running containers so code changes DON'T need an
+# image rebuild. Without this, the service images bake their source at build time
+# (`pip install .`), so the running container keeps the old code until you
+# `up --build` — which is why a plain `docker restart` never picked up new
+# mcp-server tools.
+#
+# Each service here: bind-mounts its source over the in-image copy, prepends that
+# path via PYTHONPATH (so the mounted source wins over the pip-installed copy in
+# site-packages, regardless of console-script sys.path), and — for the uvicorn
+# services — enables --reload for true hot reload.
+#
+# Usage:
+#   docker compose -f infra/docker/docker-compose.yml \
+#                  -f infra/docker/docker-compose.dev.yml up -d
+#
+# After editing source:
+#   scenario-service / orchestrator : hot-reload automatically (uvicorn --reload).
+#   mcp-server                      : `docker compose ... restart mcp-server`
+#                                     (the MCP process doesn't self-reload, but it
+#                                     now runs the mounted source — no rebuild).
+#
+# This file only ADDS mounts/env to the base compose; it changes nothing about
+# the production images.
+
+name: payprobe
+
+services:
+  scenario-service:
+    environment:
+      PYTHONPATH: /app
+    volumes:
+      - ../../packages/scenario-service/api:/app/api
+      - ../../packages/scenario-service/models:/app/models
+      - ../../packages/payprobe_common:/app/payprobe_common
+    command:
+      ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  orchestrator:
+    environment:
+      PYTHONPATH: /app/packages
+    volumes:
+      - ../../packages/orchestrator/api:/app/packages/orchestrator/api
+      - ../../packages/orchestrator/services:/app/packages/orchestrator/services
+      - ../../packages/orchestrator/models:/app/packages/orchestrator/models
+    command:
+      ["uvicorn", "orchestrator.api.main:app", "--host", "0.0.0.0", "--port", "8100", "--reload"]
+
+  mcp-server:
+    environment:
+      PYTHONPATH: /app
+    volumes:
+      - ../../packages/mcp-server/mcp_server:/app/mcp_server
+
+  # ADR-0006 — trimmed single-node NATS for laptop-constrained dev. OPT-IN via
+  # its profile so it never starts alongside the 3-node cluster from the base
+  # compose. To run single-node instead of the cluster, start only the services
+  # you need and add `--profile nats-single`; point NATS connections at
+  # nats-single:4222. Phase 1 of the adapter is functionally usable against one
+  # node — you just lose the node-loss / replica-failover behaviours the cluster
+  # exists to exercise.
+  nats-single:
+    profiles: ["nats-single"]
+    image: nats:2.11-alpine
+    command: ["--name", "nats-single", "--jetstream", "--store_dir", "/data", "-m", "8222"]
+    volumes:
+      - nats_single_data:/data
+    ports:
+      - "${NATS_1_PORT:-4222}:4222"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  nats_single_data:
