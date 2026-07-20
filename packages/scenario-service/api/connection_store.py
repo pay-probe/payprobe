@@ -98,6 +98,16 @@ class ConnectionDraft(BaseModel):
     #: (enforced by :class:`ConnectionStore`, not here). Metadata, not adapter
     #: config — stripped before the worker-shaped config is built.
     default: bool = False
+    #: Marks a connection that points at **real external infrastructure** — a
+    #: provider sandbox or live API (Stripe test mode, Adyen test, PayPal
+    #: sandbox, …) rather than something PayProbe hosts. External connections
+    #: are refused by the load engine at ``POST /load-runs`` — functional
+    #: runs, the playground and scenarios may use them, but load-testing a
+    #: real provider violates its terms of service, so the registry is the
+    #: bouncer, not the docs (ADR-0009; invariant #6). Deliberately NOT
+    #: stripped from the worker-shaped config: the orchestrator reads it off
+    #: the resolved adapter config to enforce the refusal.
+    external: bool = False
 
     @field_validator("port")
     @classmethod

@@ -88,6 +88,14 @@ def _register_real_adapters():
 
         ADAPTER_MAP["insight"] = InsightAdapter
 
+    def _mcp():
+        # Generic Model Context Protocol *client* connection (ADR-0009): a
+        # scenario step calls a tool on any MCP server. Needs the optional
+        # ``mcp`` SDK; per-call sessions, so nothing to keep alive here.
+        from .mcp_client.adapter import McpAdapter
+
+        ADAPTER_MAP["mcp"] = McpAdapter
+
     _try(_http, "http")
     _try(_hsm, "hsm")
     _try(_tcp, "tcp", "switch", "acquirer", "hsm_tcp")
@@ -95,6 +103,7 @@ def _register_real_adapters():
     _try(_nats, "nats")
     _try(_db_probe, "db_probe_core", "db_probe_switch")
     _try(_insight, "insight")
+    _try(_mcp, "mcp")
 
 
 _register_real_adapters()

@@ -126,6 +126,80 @@ const CYBERSOURCE_TEMPLATE = `{
   "rules": []
 }`;
 
+/** Stripe PaymentIntents PSP simulator (ADR-0009): answers POST
+ *  /v1/payment_intents (+ confirm / capture / cancel), /v1/refunds and
+ *  retrievals with Stripe's status machine, error envelope and the documented
+ *  test-card ladder (4242… succeeds, …0002 declines, …9995 insufficient funds,
+ *  …3155 requires 3DS action) — be Stripe with no real account. Bodies are
+ *  form-encoded with bracket notation, exactly like the real API (JSON is
+ *  tolerated). Functional fidelity, not a byte-exact PaymentIntent. */
+const STRIPE_TEMPLATE = `{
+  "protocol": "stripe",
+  "host": "0.0.0.0",
+  "port": 8085,
+  "stripe": {
+    "require_auth": true,
+    "decline_over": null,
+    "default_currency": "usd"
+  },
+  "webhooks": {
+    "url": "http://127.0.0.1:9101/webhooks/stripe",
+    "secret": "whsec_test",
+    "events": [],
+    "chaos": {"drop_pct": 0, "latency_ms": 0, "malformed_pct": 0}
+  },
+  "rules": []
+}`;
+
+/** Adyen Checkout PSP simulator (ADR-0009): answers POST /payments (+
+ *  /payments/details, /payments/{ref}/refunds) with Adyen's resultCode value
+ *  set, the documented holderName refusal triggers (NOT_ENOUGH_BALANCE,
+ *  CARD_EXPIRED, …), the 3DS2 ChallengeShopper test card and async refund
+ *  accept — be Adyen test with no Customer Area. Webhook notifications are
+ *  HMAC-signed per the documented colon-joined scheme; the template secret is
+ *  the hex of "payprobe-hmac-key", matching the pack's receiver flow. */
+const ADYEN_TEMPLATE = `{
+  "protocol": "adyen",
+  "host": "0.0.0.0",
+  "port": 8086,
+  "adyen": {
+    "require_auth": true,
+    "merchant_account": null,
+    "decline_over": null
+  },
+  "webhooks": {
+    "url": "http://127.0.0.1:9102/webhooks/adyen",
+    "secret": "70617970726f62652d686d61632d6b6579",
+    "events": [],
+    "chaos": {"drop_pct": 0, "latency_ms": 0, "malformed_pct": 0}
+  },
+  "rules": []
+}`;
+
+/** PayPal Orders v2 PSP simulator (ADR-0009): answers /v1/oauth2/token,
+ *  /v2/checkout/orders (+ capture) and /v2/payments/captures/{id}/refund with
+ *  the Orders status machine and the documented negative-testing header
+ *  (PayPal-Mock-Response → INSTRUMENT_DECLINED etc.) — be the PayPal sandbox
+ *  with no developer account. Webhook events carry transmission headers with
+ *  an honestly-labelled HMAC stand-in signature. */
+const PAYPAL_TEMPLATE = `{
+  "protocol": "paypal",
+  "host": "0.0.0.0",
+  "port": 8087,
+  "paypal": {
+    "require_auth": true,
+    "strict_tokens": false,
+    "decline_over": null
+  },
+  "webhooks": {
+    "url": "http://127.0.0.1:9103/webhooks/paypal",
+    "secret": "payprobe-paypal-webhook",
+    "events": [],
+    "chaos": {"drop_pct": 0, "latency_ms": 0, "malformed_pct": 0}
+  },
+  "rules": []
+}`;
+
 /** Transparent TCP proxy / tap: sit between a real client and a real upstream
  *  host, relaying frames byte-for-byte while recording (redacted) every message.
  *  Set `upstream` to the real host; captured traffic can be saved as a scenario.
@@ -296,6 +370,33 @@ interface Breakdown {
                 >
                   <pp-icon name="send" [size]="13" [strokeWidth]="2.5" />
                   CyberSource REST
+                </button>
+                <button
+                  type="button"
+                  class="seg"
+                  [class.seg--on]="preset() === 'stripe'"
+                  (click)="usePreset('stripe')"
+                >
+                  <pp-icon name="send" [size]="13" [strokeWidth]="2.5" />
+                  Stripe PSP
+                </button>
+                <button
+                  type="button"
+                  class="seg"
+                  [class.seg--on]="preset() === 'adyen'"
+                  (click)="usePreset('adyen')"
+                >
+                  <pp-icon name="send" [size]="13" [strokeWidth]="2.5" />
+                  Adyen PSP
+                </button>
+                <button
+                  type="button"
+                  class="seg"
+                  [class.seg--on]="preset() === 'paypal'"
+                  (click)="usePreset('paypal')"
+                >
+                  <pp-icon name="send" [size]="13" [strokeWidth]="2.5" />
+                  PayPal PSP
                 </button>
                 <button
                   type="button"
@@ -1374,7 +1475,16 @@ export class SimulatorsComponent implements OnInit, OnDestroy {
     return rows.slice(-40).reverse();
   });
   readonly preset = signal<
-    "basic" | "chaos" | "hsm" | "visa" | "cybersource" | "nats" | "proxy"
+    | "basic"
+    | "chaos"
+    | "hsm"
+    | "visa"
+    | "cybersource"
+    | "stripe"
+    | "adyen"
+    | "paypal"
+    | "nats"
+    | "proxy"
   >("basic");
 
   readonly pollHealth = new PollHealth();
@@ -1467,6 +1577,9 @@ export class SimulatorsComponent implements OnInit, OnDestroy {
       | "hsm"
       | "visa"
       | "cybersource"
+      | "stripe"
+      | "adyen"
+      | "paypal"
       | "nats"
       | "proxy",
   ) {
@@ -1480,6 +1593,15 @@ export class SimulatorsComponent implements OnInit, OnDestroy {
     } else if (which === "cybersource") {
       this.config = CYBERSOURCE_TEMPLATE;
       if (this.label === "switch-sim") this.label = "cybersource-rest";
+    } else if (which === "stripe") {
+      this.config = STRIPE_TEMPLATE;
+      if (this.label === "switch-sim") this.label = "stripe-psp";
+    } else if (which === "adyen") {
+      this.config = ADYEN_TEMPLATE;
+      if (this.label === "switch-sim") this.label = "adyen-psp";
+    } else if (which === "paypal") {
+      this.config = PAYPAL_TEMPLATE;
+      if (this.label === "switch-sim") this.label = "paypal-psp";
     } else if (which === "nats") {
       this.config = NATS_TEMPLATE;
       if (this.label === "switch-sim") this.label = "nats-responder";

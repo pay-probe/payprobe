@@ -55,6 +55,7 @@ from typing import Any
 from aiohttp import web
 
 from ..tcp.chaos import ChaosEngine
+from .webhooks import WebhookEmitter
 
 log = logging.getLogger(__name__)
 
@@ -131,6 +132,12 @@ class HttpResponder:
 
         self.received: list[dict] = []
 
+        #: simulator->merchant back-channel (ADR-0009 phase 4). Inert unless
+        #: the config carries a ``webhooks`` block with a url; provider sims
+        #: call ``self.webhooks.emit(...)`` on their state transitions.
+        self.webhooks = WebhookEmitter(config.get("webhooks"),
+                                       label=str(self.protocol))
+
         # aiohttp low-level server plumbing
         self._runner: web.ServerRunner | None = None
         self._site: web.TCPSite | None = None
@@ -173,6 +180,9 @@ class HttpResponder:
 
     async def stop(self) -> None:
         self._closed.set()
+        # abandon pending webhook deliveries — stop is the abrupt path;
+        # graceful shutdown drains via ``await self.webhooks.drain()`` first.
+        self.webhooks.cancel()
         if self._runner is not None:
             try:
                 await self._runner.cleanup()
@@ -236,6 +246,7 @@ class HttpResponder:
             "avg_rps": round(total / elapsed, 2),
             "by_mti": dict(self.by_mti),
             "by_response_code": dict(self.by_rc),
+            "webhooks": self.webhooks.stats(),
         }
 
     def _response_code(self, action: dict) -> str:
@@ -280,7 +291,10 @@ class HttpResponder:
             return resp
 
         status = int(action.get("status", 200))
-        self.by_rc[str(status)] = self.by_rc.get(str(status), 0) + 1
+        # bucket via the hook (subclasses bucket by gateway decision) — this
+        # mirrors TcpResponder, which has always routed through _response_code.
+        rc = self._response_code(action)
+        self.by_rc[rc] = self.by_rc.get(rc, 0) + 1
         headers = {"Content-Type": "application/json", **(action.get("headers") or {})}
         body_obj = action.get("json", action.get("body", {}))
         text = body_obj if isinstance(body_obj, str) else json.dumps(body_obj)

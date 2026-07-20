@@ -198,6 +198,114 @@ export const ADAPTERS: AdapterSpec[] = [
     seeAlso: ["http", "tcp"],
   },
 
+
+  // ----------------------------------------------------------------- mcp ----
+  {
+    slug: "mcp",
+    targets: ["mcp"],
+    label: "MCP client (provider control plane)",
+    category: "Intelligence",
+    description:
+      "Generic Model Context Protocol client: call tools on any MCP server — Stripe/PayPal remote, Adyen self-hosted, or any future provider — as scenario steps.",
+    availability: "optional",
+    direction: "outbound",
+    protocols: ["MCP over streamable HTTP", "MCP over stdio"],
+    source: "packages/worker/adapters/mcp_client/adapter.py",
+    overview: [
+      "The control plane of ADR-0009 (phase 3). Every major payment provider now publishes an MCP server; this one adapter reaches all of them — and any future one — with zero per-provider code. PayProbe already serves MCP (packages/mcp-server); this is the symmetric half: PayProbe as MCP client.",
+      "What it is FOR: fixture provisioning and provider-side verification as scenario steps — \"create a test customer before the run\", \"after the capture scenario, search the provider's records and assert the payment exists\". It is not a payment transport: scenarios drive payments through the http data plane (provider packs), and remote provider MCP connections ship external: true so the load engine refuses them.",
+      "Sessions are per call (open → initialize → operate → close), not held across calls: the mcp SDK's transports are anyio task groups bound to the entering task, and the engine may execute steps from different tasks. For a control-plane adapter the extra handshake per step is the honest trade.",
+    ],
+    protocolNotes: [
+      "A tool reply lands in the response as { tool, is_error, content: [...], structured: {...}, text } — `text` joins the text blocks so simple assertions need no indices, while content[0].text / structured.* stay reachable via bracket-index assertion paths.",
+      "A tool-level error (isError) fails the step — that is the point of a verification step.",
+      "The `mcp` SDK is an optional dependency (grpcio/nats-py precedent): the adapter registers only when it is installed.",
+    ],
+    configGroups: [
+      {
+        title: "Transport",
+        keys: [
+          {
+            key: "transport",
+            type: "string",
+            default: "http",
+            desc: "\"http\" (streamable HTTP) or \"stdio\" (spawn a local server process).",
+          },
+          {
+            key: "base_url",
+            type: "string",
+            desc: "MCP server URL for the http transport (e.g. https://mcp.stripe.com).",
+          },
+          {
+            key: "command",
+            type: "string",
+            desc: "Executable for the stdio transport (e.g. npx).",
+          },
+          {
+            key: "args",
+            type: "list",
+            desc: "Arguments for the stdio command (e.g. [\"-y\", \"@stripe/mcp\"]).",
+          },
+          {
+            key: "env",
+            type: "object",
+            desc: "Extra environment for the stdio server process.",
+          },
+        ],
+      },
+      {
+        title: "Auth & limits",
+        keys: [
+          {
+            key: "authentication",
+            type: "object",
+            desc: "{type: \"bearer\", token} or {type: \"header\", headerName, headerValue} — secret-named fields stored encrypted.",
+          },
+          {
+            key: "headers",
+            type: "object",
+            desc: "Extra HTTP headers for the http transport.",
+          },
+          {
+            key: "request_timeout_sec",
+            type: "float",
+            default: "30",
+            desc: "Per-call deadline (handshake + tool call).",
+          },
+          {
+            key: "external",
+            type: "bool",
+            default: "false",
+            desc: "Marks a REAL provider surface: the load engine refuses it (ADR-0009 guardrail; ship it true on remote provider presets).",
+          },
+        ],
+      },
+    ],
+    actions: [
+      {
+        name: "list_tools",
+        summary:
+          "The server's tool inventory: {tools: [{name, description, input_schema}], count}.",
+      },
+      {
+        name: "call_tool",
+        summary:
+          "Explicit form: payload {name, arguments} calls one tool.",
+      },
+      {
+        name: "(any tool name)",
+        summary:
+          "Convenience form: the action IS the tool name and the payload IS its arguments — action: \"create_customer\" just works (mirrors the http adapter's bare-action fallback).",
+      },
+    ],
+    errors: [
+      "The mcp SDK missing → the adapter never registers; install it (pip install mcp) to enable.",
+      "isError tool replies fail the step with the tool's error text.",
+      "Cancel-scope/task-affinity errors are designed out: sessions never span calls.",
+    ],
+    seeAlso: ["http", "insight"],
+  },
+
   // ---------------------------------------------------------------- http ----
   {
     slug: "insight",

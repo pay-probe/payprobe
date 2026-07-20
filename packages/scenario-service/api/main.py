@@ -1800,6 +1800,14 @@ class InstallPackResult(BaseModel):
     project_name: str
     imported: int
     scenario_names: list[str]
+    #: Provider packs (ADR-0009) also install the config their cases need.
+    #: Only *newly created* documents are listed — an existing connection or
+    #: pool with the same name is left untouched (the user's edits win).
+    connection_names: list[str] = []
+    card_pool_names: list[str] = []
+    #: Webhook receiver flows installed by provider packs (ADR-0009 phase 4);
+    #: create-only **by id**, so an edited receiver survives re-install.
+    participant_flow_ids: list[str] = []
 
 
 @router.get("/packs", operation_id="listPacks")
@@ -1822,8 +1830,16 @@ async def get_pack_route(pack_id: str) -> Pack:
 
 @router.post("/packs/{pack_id}/install", response_model=InstallPackResult,
              operation_id="installPack")
-async def install_pack(pack_id: str, store=Depends(get_store)) -> InstallPackResult:
-    """Import a pack's scenarios into a new project so they run as a suite."""
+async def install_pack(
+    pack_id: str, request: Request, store=Depends(get_store)
+) -> InstallPackResult:
+    """Import a pack's scenarios into a new project so they run as a suite.
+
+    Provider packs (ADR-0009) additionally install the connections and card
+    pools their cases run against — **create-only**: a document that already
+    exists under the same name is never overwritten, so re-installing a pack
+    can't clobber a user's edited base URL, credentials or pool.
+    """
     pack = get_pack(pack_id)
     if pack is None:
         raise HTTPException(404, f"no pack '{pack_id}'")
@@ -1836,9 +1852,44 @@ async def install_pack(pack_id: str, store=Depends(get_store)) -> InstallPackRes
         draft = ScenarioDraft(**doc)
         await store.create(draft, project_id=project.id, comment=f"from pack {pack.id}")
         names.append(draft.name)
+
+    conn_store: ConnectionStore = request.app.state.connections
+    conn_names: list[str] = []
+    for doc in pack.connections:
+        doc = dict(doc)
+        cname = doc.pop("name", None)
+        if not cname or conn_store.get(cname) is not None:
+            continue  # create-only
+        conn_store.upsert(cname, ConnectionDraft(**doc))
+        conn_names.append(cname)
+
+    td = request.app.state.test_data
+    pool_names: list[str] = []
+    for pool in pack.card_pools:
+        pool = dict(pool)
+        pname = pool.pop("name", None)
+        if not pname or td.get_card_pool(pname) is not None:
+            continue  # create-only
+        td.upsert_card_pool(pname, CardPoolDraft(**pool))
+        pool_names.append(pname)
+
+    flow_store = request.app.state.participant_flows
+    flow_ids: list[str] = []
+    for flow in pack.participant_flows:
+        flow = dict(flow)
+        fid = flow.pop("id", None)
+        if not fid or flow_store.get(fid) is not None:
+            continue  # create-only by id — the user's edited receiver wins
+        from models.participant_flow import ParticipantFlowDraft
+        flow_store.create(ParticipantFlowDraft(**flow), fid=fid)
+        flow_ids.append(fid)
+
     return InstallPackResult(pack=pack.id, project_id=project.id,
                              project_name=project.name, imported=len(names),
-                             scenario_names=names)
+                             scenario_names=names,
+                             connection_names=conn_names,
+                             card_pool_names=pool_names,
+                             participant_flow_ids=flow_ids)
 
 
 # -- starter flows (one-click pre-wired chains for the editor palette) ---------

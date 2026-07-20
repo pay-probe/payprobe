@@ -1534,6 +1534,69 @@ async def _run_provisioning(env: dict, scenario: dict) -> dict:
     return await engine.run_scenario_batch([scenario], f"provision-{uuid.uuid4()}")
 
 
+def _external_load_targets(
+    env: dict, scenarios: list[dict], conn_index: dict[str, dict]
+) -> list[str]:
+    """Names of ``external: true`` connections a load mix would hammer.
+
+    A connection marked external points at a real provider sandbox/live API
+    (ADR-0009). Checked against every action step's effective target — the
+    env-attached adapter config (single-scenario path), the raw connection doc
+    (mix path, which doesn't attach connections), and group members (a group
+    fanning onto an external member is just as much of a ToS violation).
+    """
+    refused: set[str] = set()
+    adapters = env.get("adapters") or {}
+
+    def _check(name: str | None) -> None:
+        if not name:
+            return
+        cfg = adapters.get(name) or conn_index.get(name) or {}
+        if cfg.get("external"):
+            refused.add(name)
+        for m in cfg.get("members") or []:
+            mcfg = (m or {}).get("config") or {}
+            if mcfg.get("external"):
+                refused.add(f"{name} → {m.get('connection') or 'member'}")
+
+    for sc in scenarios:
+        for step in sc.get("steps", []):
+            if step.get("kind", "action") != "action":
+                continue
+            _check(step.get("target"))
+            _check((step.get("config") or {}).get("connection"))
+    return sorted(refused)
+
+
+async def _refuse_external_load_targets(env: dict, scenarios: list[dict]) -> None:
+    """400 if the load mix targets an external (real provider) connection.
+
+    The guardrail lives here, in the registry/tool layer, not in docs or
+    prompts (invariant #6): scenarios, functional runs and the playground may
+    drive an external connection; a load run may not. The one-shot
+    provisioning pre-run is deliberately not checked — it is a single setup
+    scenario, not sustained traffic.
+    """
+    conn_index: dict[str, dict] = {}
+    try:
+        conns = await _http_get_json(f"{SCENARIO_API_URL}/connections")
+        if isinstance(conns, list):
+            conn_index = {c.get("name"): c for c in conns if isinstance(c, dict)}
+    except Exception:  # noqa: BLE001 — env-attached configs still checked below
+        log.warning("external-target check: could not list connections", exc_info=True)
+    refused = _external_load_targets(env, scenarios, conn_index)
+    if refused:
+        raise HTTPException(
+            400,
+            "load run refused: connection(s) "
+            + ", ".join(f"'{n}'" for n in refused)
+            + " are marked external (real provider endpoints). Load-testing a "
+            "provider's sandbox or live API violates its terms of service — "
+            "point the load at the matching provider simulator instead "
+            "(Simulators → provider presets, e.g. the Stripe simulator).",
+        )
+
+
 @app.post("/load-runs")
 async def create_load_run(req: LoadRunRequest) -> dict:
     try:
@@ -1548,6 +1611,8 @@ async def create_load_run(req: LoadRunRequest) -> dict:
         raise HTTPException(
             502, f"could not resolve transaction for load run: {exc or type(exc).__name__}"
         ) from exc
+    # ADR-0009 guardrail: never point sustained load at a real provider.
+    await _refuse_external_load_targets(env, scenarios)
     scenario = scenarios[0]
     profile = LoadProfile(
         type=req.type, duration_s=req.duration_s, workers=req.workers,
@@ -2173,6 +2238,22 @@ def _responder_for(config: dict) -> TcpResponder:
         # HTTP gateway simulator — not a TcpResponder subclass, but exposes the
         # same duck-typed surface (start/stop/port/protocol/rules/stats/peers).
         cls = CyberSourceSimulator  # type: ignore[assignment]
+    elif kind == "stripe":
+        from worker.adapters.scheme.stripe_sim import StripeSimulator
+
+        # Stripe PaymentIntents PSP simulator (ADR-0009) — same duck-typed
+        # HTTP responder surface as the CyberSource simulator.
+        cls = StripeSimulator  # type: ignore[assignment]
+    elif kind == "adyen":
+        from worker.adapters.scheme.adyen_sim import AdyenCheckoutSimulator
+
+        # Adyen Checkout PSP simulator (ADR-0009) — same duck-typed surface.
+        cls = AdyenCheckoutSimulator  # type: ignore[assignment]
+    elif kind == "paypal":
+        from worker.adapters.scheme.paypal_sim import PayPalOrdersSimulator
+
+        # PayPal v2 Orders PSP simulator (ADR-0009) — same duck-typed surface.
+        cls = PayPalOrdersSimulator  # type: ignore[assignment]
     elif kind == "nats":
         from worker.adapters.nats.responder import NatsResponder
 
@@ -5371,7 +5452,7 @@ def _playground_user(request: Request) -> str:
 
 class PlaygroundTarget(BaseModel):
     """A reference to something callable right now (see /playground/targets)."""
-    #: connection | group | simulator | participant | raw | function
+    #: connection | group | simulator | participant | raw | function | insight
     kind: str
     #: connection name / group name-or-id / simulator id / participant id.
     id: str | None = None
@@ -5571,12 +5652,29 @@ async def _resolve_playground_target(
         return name, cfg, {"kind": kind, "adapter": adapter,
                            "host": cfg.get("host"), "port": cfg.get("port")}
 
+    if kind == "insight":
+        # The advisory insight service (ADR-0005) through its existing
+        # scenario-step adapter (worker.adapters.insight) — model inference is
+        # a first-class playground element, not a raw endpoint the caller must
+        # know the address of. The adapter owns auth (static token or
+        # AUTH_JWT_SECRET mint) and the friendly unreachable message.
+        cfg: dict[str, Any] = {"adapter": "insight"}
+        if INSIGHT_API_URL:
+            cfg["base_url"] = INSIGHT_API_URL
+        for k in ("base_url", "token", "response_timeout_sec"):
+            if (t.config or {}).get(k) not in (None, ""):
+                cfg[k] = t.config[k]
+        base = cfg.get("base_url") or os.environ.get(
+            "INSIGHT_API_URL", "http://localhost:8500")
+        return "insight", cfg, {"kind": kind, "adapter": "insight",
+                                "base_url": base}
+
     raise HTTPException(
         400,
         f"unsupported target kind '{t.kind}' — one of: connection, group, "
-        "simulator, participant, raw, function. (Code/http nodes stay on "
-        "/nodes/execute — the Playground executes adapter actions and "
-        "functions, it is not a second node runner.)")
+        "simulator, participant, raw, function, insight. (Code/http nodes "
+        "stay on /nodes/execute — the Playground executes adapter actions "
+        "and functions, it is not a second node runner.)")
 
 
 async def _playground_fire(req: PlaygroundExecuteRequest, user: str) -> dict:
@@ -5662,7 +5760,8 @@ async def playground_targets() -> dict:
     existing registries (read-only aggregation — nothing here starts anything):
     registered connections (× their override-matrix environments), running
     simulators, network participants (incl. fleet instances and port-less NATS
-    subjects), participant groups, and the local function families."""
+    subjects), participant groups, the local function families, and the
+    advisory insight service's model actions (ADR-0005)."""
     try:
         conns = await _http_get_json(f"{SCENARIO_API_URL}/connections")
     except Exception:  # noqa: BLE001 — scenario-service down ≠ no playground
@@ -5716,6 +5815,7 @@ async def playground_targets() -> dict:
                     "sample_family": "iso8583",
                 })
 
+    from worker.adapters.insight.adapter import ACTIONS as _INSIGHT_ACTIONS
     from worker.engine.crypto_tools import OPERATIONS as _CRYPTO_OPS
 
     from .playground_samples import samples_catalog
@@ -5727,6 +5827,13 @@ async def playground_targets() -> dict:
         "participants": participants,
         "groups": groups,
         "functions": {"crypto": sorted(_CRYPTO_OPS)},
+        #: the advisory insight service (ADR-0005) as a fixed target — the
+        #: adapter's action set, addressed as {"kind": "insight"}. Always
+        #: listed (like functions): reachability is an execute-time fact and
+        #: the adapter reports it in a friendly way.
+        "insight": {"actions": list(_INSIGHT_ACTIONS),
+                    "base_url": INSIGHT_API_URL or "http://localhost:8500",
+                    "sample_family": "insight"},
         #: raw host/port targets stay allowed (parity with /hsm/command).
         "raw": {"adapters": sorted(_HOST_PORT_ADAPTERS | {"http", "nats"})},
         #: ready-made example interactions per element family: pick

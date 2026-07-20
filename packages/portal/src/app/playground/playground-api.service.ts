@@ -12,7 +12,8 @@ export interface PlaygroundTargetRef {
     | "simulator"
     | "participant"
     | "raw"
-    | "function";
+    | "function"
+    | "insight";
   id?: string;
   environment?: string | null;
   // raw targets only (parity with /hsm/command's hand-typed endpoint):
@@ -87,6 +88,12 @@ export interface PlaygroundTargets {
   participants: PlaygroundParticipant[];
   groups: PlaygroundGroup[];
   functions: { crypto: string[] };
+  /** The advisory insight service (ADR-0005) as a fixed target. */
+  insight?: {
+    actions: string[];
+    base_url?: string;
+    sample_family?: string | null;
+  };
   raw: { adapters: string[] };
   samples?: PlaygroundSamples;
 }

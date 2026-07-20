@@ -3,7 +3,8 @@
 One sample set per *element family* the Playground can address. The family key
 is the target's ``protocol`` when it has one (``iso8583``, ``visa``,
 ``header_echo``, ``payshield``, ``cybersource``, ``nats``) falling back to its
-``adapter`` (``http``, ``grpc``, ``tcp``→``iso8583``) — the same fact every
+``adapter`` (``http``, ``grpc``, ``insight``, ``tcp``→``iso8583``) — the same
+fact every
 target row in ``GET /playground/targets`` already carries, so a client picks
 ``samples.wire[protocol or adapter]`` for the selected target. Function
 (crypto) samples are keyed by operation name and cover **every** entry in
@@ -151,6 +152,39 @@ WIRE_SAMPLES: dict[str, list[dict]] = {
          "payload": {},
          "notes": "Reflection discovery — lists services/methods so you can "
                   "call one as Service/Method next."},
+    ],
+    # the advisory insight service (ADR-0005) via its scenario-step adapter —
+    # the fixed {"kind": "insight"} target and any adapter:"insight" connection.
+    "insight": [
+        {"name": "Model status",
+         "action": "model_status",
+         "payload": {},
+         "notes": "Which models are live: corpus size, custom/cluster "
+                  "categorizer, learned predictor — the same pre-flight the "
+                  "scenario predict step asserts on."},
+        {"name": "Categorize error",
+         "action": "categorize",
+         "payload": {"text": "connection reset by peer during 0100 auth"},
+         "notes": "→ category / confidence / novel. Optional context keys "
+                  "(target, action, response_code, environment, duration_ms) "
+                  "feed the feature channels training saw; model_id pins one "
+                  "registered model."},
+        {"name": "Explain error",
+         "action": "explain",
+         "payload": {"text": "HSM verify failed: PVV mismatch"},
+         "notes": "Categorize plus a human-readable rationale of the match."},
+        {"name": "Predict outcome",
+         "action": "predict_outcome",
+         "payload": {"scenario_id": "<scenario id>"},
+         "notes": "→ p_fail_next / p_flaky / basis for one scenario; an "
+                  "optional environment narrows the history it reasons over. "
+                  "Replace <scenario id> with a real id."},
+        {"name": "Train / refit",
+         "action": "train",
+         "payload": {},
+         "notes": "Ingests new runs and refits the models — MUTATES model "
+                  "state (the post-data-load pipeline step). Advisory only: "
+                  "output never feeds report gates or sign-off."},
     ],
 }
 

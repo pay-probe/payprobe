@@ -1114,7 +1114,9 @@ def playground_targets() -> dict:
     """Everything callable ad-hoc right now, merged from the live registries:
     registered connections (× their override-matrix environments), running
     simulators, network participants (incl. port-less NATS subjects),
-    participant groups, and local function families (crypto ops). Also carries
+    participant groups, local function families (crypto ops), and the advisory
+    insight service's model actions (``insight.actions``, addressed as
+    ``{"kind": "insight"}``). Also carries
     ``samples``: ready-made example interactions per element family
     (``samples.wire[protocol-or-adapter]`` for wire targets,
     ``samples.functions.crypto`` per operation) — start from one instead of
@@ -1128,7 +1130,10 @@ def playground_execute(target: dict, action: str, payload: dict | None = None,
                        label: str | None = None) -> dict:
     """Fire ONE ad-hoc message/command at a target BY REFERENCE — no scenario
     authoring needed. ``target`` is ``{kind: connection|group|simulator|
-    participant|raw|function, id, environment?, host?, port?, protocol?}``. The
+    participant|raw|function|insight, id, environment?, host?, port?,
+    protocol?}`` (``insight`` = the advisory model service: categorize /
+    explain / predict_outcome / model_status / train — note ``train``
+    MUTATES model state). The
     orchestrator resolves the reference server-side (connection ⊕ override
     matrix — secrets never leave the server) and delegates to the worker
     engine; echoed request/response payloads come back MASKED.

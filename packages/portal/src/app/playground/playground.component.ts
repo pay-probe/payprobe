@@ -53,6 +53,7 @@ const KIND_COLOR: Record<string, string> = {
   participant: "#8b5cf6", // violet — flows
   group: "#f59e0b", // amber — fleets
   function: "#a855f7", // purple — crypto
+  insight: "#f0883e", // orange — Intelligence (the catalog's insight accent)
   raw: "#64748b", // slate — hand-typed
 };
 const KIND_ICON: Record<string, string> = {
@@ -61,6 +62,7 @@ const KIND_ICON: Record<string, string> = {
   participant: "flow",
   group: "group",
   function: "key",
+  insight: "sparkles",
   raw: "terminal",
 };
 
@@ -87,7 +89,8 @@ const ISO_SAMPLE = JSON.stringify(
  * Playground (ADR-0007) — one place to act on ANY addressable resource
  * interactively: fire a message through a registered connection (resolved
  * server-side, secrets never round-trip), at a running simulator or network
- * participant, through a group, at a raw host/port, or run a crypto function.
+ * participant, through a group, at a raw host/port, run a crypto function, or
+ * ask the advisory insight service (ADR-0005) for a model opinion.
  * Echoed payloads arrive masked; explorations promote to scenarios.
  */
 @Component({
@@ -184,7 +187,8 @@ const ISO_SAMPLE = JSON.stringify(
               /></span>
               <p>
                 Pick a target on the left — a connection, a running simulator or
-                participant, a group, a crypto function, or a raw endpoint.
+                participant, a group, a crypto function, the insight model, or
+                a raw endpoint.
               </p>
             </div>
           } @else {
@@ -1052,6 +1056,9 @@ export class PlaygroundComponent implements OnInit {
   readonly familyKey = computed<string | null>(() => {
     const sel = this.selected();
     if (!sel || sel.kind === "function") return null;
+    // the insight target maps 1:1 onto the catalog's `insight` TargetSpec —
+    // the composer offers the SAME actions the scenario predict step has.
+    if (sel.kind === "insight") return "insight";
     const adapter = (
       sel.kind === "raw" ? this.rawProtocol : (sel.adapter ?? "")
     ).toLowerCase();
@@ -1263,6 +1270,24 @@ export class PlaygroundComponent implements OnInit {
           })),
         ),
       },
+      {
+        title: "Model Insight",
+        color: KIND_COLOR["insight"],
+        icon: KIND_ICON["insight"],
+        rows: rows(
+          t.insight?.actions?.length
+            ? [
+                {
+                  kind: "insight" as const,
+                  id: "insight",
+                  label: "Model Insight",
+                  detail: "advisory (ADR-0005)",
+                  sampleFamily: t.insight.sample_family ?? "insight",
+                },
+              ]
+            : [],
+        ),
+      },
     ];
   });
 
@@ -1467,6 +1492,7 @@ export class PlaygroundComponent implements OnInit {
       };
     }
     if (sel.kind === "function") return { kind: "function" };
+    if (sel.kind === "insight") return { kind: "insight" };
     const ref: PlaygroundTargetRef = { kind: sel.kind, id: sel.id };
     if (sel.kind === "connection" && this.environment()) {
       ref.environment = this.environment();
@@ -1597,6 +1623,7 @@ export class PlaygroundComponent implements OnInit {
     const env = t["environment"] ? `@${t["environment"]}` : "";
     if (kind === "raw") return `${t["host"] ?? "?"}:${t["port"] ?? "?"}`;
     if (kind === "function") return "local function";
+    if (kind === "insight") return "model insight";
     return `${id}${env}` || kind;
   }
 

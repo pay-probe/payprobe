@@ -72,6 +72,21 @@ def test_sample_family_folds_aliases():
     assert sample_family(protocol="header_echo") == "header_echo"
 
 
+def test_sample_family_insight_is_adapter_named():
+    # the insight adapter names its own family — and the ConnectionDraft's
+    # defaulted protocol="iso8583" must not shadow it (the NATS bug's rule).
+    assert sample_family(adapter="insight") == "insight"
+    assert sample_family(protocol="iso8583", adapter="insight") == "insight"
+
+
+def test_insight_samples_cover_every_adapter_action():
+    # one chip per insight action — the set must track the adapter's ACTIONS
+    # tuple so a new action can't ship without a runnable example.
+    from worker.adapters.insight.adapter import ACTIONS
+
+    assert {s["action"] for s in WIRE_SAMPLES["insight"]} == set(ACTIONS)
+
+
 def test_sample_family_none_when_unknown():
     # honest: no chips rather than wrong chips for an unmapped shape.
     assert sample_family(protocol="smtp", adapter="carrier-pigeon") is None

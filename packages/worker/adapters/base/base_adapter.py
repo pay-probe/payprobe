@@ -69,12 +69,25 @@ class BaseAdapter(ABC):
         return results
 
     def _extract_field(self, data: dict, path: str) -> Any:
-        current = data
+        """Dotted-path lookup with list indices: ``body.details[0].issue``
+        digs into lists the way provider payloads nest them (ADR-0009 —
+        Stripe/PayPal/MCP responses put the interesting field inside an
+        array). A missing key, out-of-range index or type mismatch is
+        ``None``, never an exception — an assertion on it just fails."""
+        current: Any = data
         for part in path.split("."):
-            if isinstance(current, dict):
-                current = current.get(part)
-            else:
-                return None
+            name, _, rest = part.partition("[")
+            if name:
+                if not isinstance(current, dict):
+                    return None
+                current = current.get(name)
+            while rest:
+                idx, _, rest = rest.partition("]")
+                rest = rest.lstrip("[")
+                try:
+                    current = current[int(idx)]
+                except (TypeError, ValueError, IndexError, KeyError):
+                    return None
         return current
 
     def _evaluate(self, actual: Any, operator: str, expected: Any) -> bool:

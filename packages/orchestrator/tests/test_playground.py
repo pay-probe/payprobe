@@ -247,6 +247,95 @@ async def test_execute_refuses_code_kind(client):
     assert "/nodes/execute" in resp.json()["detail"]
 
 
+# -- execute: the insight service by reference (kind=insight) --------------------
+
+async def test_resolve_insight_target(monkeypatch):
+    """kind=insight resolves to the worker's InsightAdapter config — the
+    orchestrator's INSIGHT_API_URL lands in it, secrets/token stay optional."""
+    monkeypatch.setattr(m, "INSIGHT_API_URL", "http://insight:8500")
+    name, cfg, summary = await m._resolve_playground_target(
+        m.PlaygroundTarget(kind="insight"))
+    assert name == "insight"
+    assert cfg == {"adapter": "insight", "base_url": "http://insight:8500"}
+    assert summary == {"kind": "insight", "adapter": "insight",
+                       "base_url": "http://insight:8500"}
+
+
+async def test_execute_insight_model_status_round_trip(aclient, monkeypatch):
+    """Fired by reference, the insight target reaches a live (stub) insight
+    service through the existing adapter and echoes the model summary."""
+    import http.server
+    import json as _json
+    import threading
+
+    class _Stub(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler API
+            body = _json.dumps({
+                "corpus_size": 7,
+                "categorizer": {"custom": {"name": "cm-1"}},
+                "predictor": {"learned": True},
+                "sklearn_available": False,
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):  # noqa: A002 — silence test output
+            return None
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _Stub)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setattr(
+            m, "INSIGHT_API_URL", f"http://127.0.0.1:{srv.server_port}")
+        resp = await aclient.post("/playground/execute", json={
+            "target": {"kind": "insight"}, "action": "model_status",
+            "payload": {}})
+        body = resp.json()
+        assert resp.status_code == 200
+        assert body["ok"] is True, body
+        assert body["response"]["corpus_size"] == 7
+        assert body["response"]["custom_model_active"] is True
+        assert body["target"] == {"kind": "insight", "adapter": "insight",
+                                  "base_url": m.INSIGHT_API_URL}
+        assert body["history_seq"] == 1
+    finally:
+        srv.shutdown()
+
+
+async def test_execute_insight_unreachable_is_a_result(aclient, monkeypatch):
+    """An insight service that is down is a normal {ok:false} result with the
+    adapter's friendly optional-deployment message — never a 5xx."""
+    monkeypatch.setattr(m, "INSIGHT_API_URL", "http://127.0.0.1:1")
+    resp = await aclient.post("/playground/execute", json={
+        "target": {"kind": "insight"}, "action": "model_status",
+        "payload": {}})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["ok"] is False
+    assert "insight service unreachable" in body["error"]
+
+
+async def test_targets_carry_insight_block(client, monkeypatch):
+    """The fixed insight target: the adapter's action set + its sample family,
+    always listed (reachability is an execute-time fact)."""
+    async def fake_get(url):
+        return []
+
+    monkeypatch.setattr(m, "_http_get_json", fake_get)
+    monkeypatch.setattr(m, "_load_groups_index", _empty_groups)
+    body = client.get("/playground/targets").json()
+    from worker.adapters.insight.adapter import ACTIONS
+
+    assert body["insight"]["actions"] == list(ACTIONS)
+    assert body["insight"]["sample_family"] == "insight"
+    # one sample chip per action — the composer promise
+    assert ({s["action"] for s in body["samples"]["wire"]["insight"]}
+            == set(ACTIONS))
+
+
 # -- execute: simulator by reference + provenance tag ----------------------------
 
 async def test_execute_simulator_by_reference_tags_stats(aclient, responder):
