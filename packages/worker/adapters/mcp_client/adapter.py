@@ -59,7 +59,6 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from typing import Any
 
 from ..base.base_adapter import BaseAdapter, StepResult
 
