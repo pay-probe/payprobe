@@ -1,8 +1,53 @@
 # ADR-0009: Payment-provider integration — PSP packs, sandbox driving, provider simulators, and an MCP control-plane adapter
 
-**Status:** Proposed
+**Status:** Accepted — implemented (phases 0–5, 2026-07-20 → 2026-07-21)
 **Date:** 2026-07-20
 **Deciders:** PayProbe maintainers (David + reviewers)
+
+> **Implementation summary (2026-07-21).** All five phases landed; backend +
+> tests green per-package in the sandbox (worker / orchestrator /
+> scenario-service / mcp-server / assistant). Host `make test` and a portal
+> `npm run build` are still owed (the Angular app can't be compiled in an AI
+> sandbox — the PSP simulator presets, the adapter-catalog `mcp` entry and the
+> preset `webhooks` blocks are written to pattern, not claimed as verified).
+> Deviations and additions discovered while building, recorded honestly:
+>
+> - **`accept_statuses` on http actions** — a provider *decline* (Stripe 402,
+>   PayPal 422) is the outcome under test, not a transport failure; an action
+>   may declare accepted non-2xx statuses so assertions decide the verdict.
+> - **Per-action `headers`** (merge over connection headers) — carries a
+>   provider's negative-testing header (PayPal's `PayPal-Mock-Response`).
+> - **`health_any_status` / `health_path` on http connections** — a provider
+>   API root answers 401/404 anonymously (which *proves reachable*); the strict
+>   default is unchanged.
+> - **Assertion field extraction learned list indices** (`details[0].issue`) —
+>   provider payloads are list-shaped; `_extract_field` now matches the bracket
+>   syntax `${...}` interpolation already supported.
+> - **`headervalue` joined the encrypted secret-named fields** — header-style
+>   auth (Adyen's `X-API-Key`) encrypts at rest like `token`/`client_secret`.
+> - **`HttpResponder._response_code` was defined but never wired** (TCP always
+>   called it) — now live, so every HTTP simulator's by-decision stats buckets
+>   work (CyberSource included).
+> - **Webhook emission** (phase 4) lives in the HttpResponder base
+>   (fire-and-forget so the reply path is never delayed; chaos on the emission
+>   leg incl. corrupt-after-signing; `stats()["webhooks"]`), with
+>   provider-correct signatures (Stripe `t=…,v1=HMAC`; Adyen's colon-joined
+>   notification HMAC + the `[accepted]` contract; PayPal transmission headers
+>   with an honestly-labelled HMAC stand-in — the real scheme is cert-based).
+> - **The `mcp` client adapter** (phase 3) uses per-call sessions to respect
+>   anyio task affinity; `mcp` joined `_ALLOWED_ADAPTERS`.
+> - **Diagnostics `providers` layer** (phase 5) reports each provider
+>   connection: credential-set → token-obtainable (oauth2) / reachable (http,
+>   remote MCP); stdio MCP is reported "manual" (never spawned).
+> - **Assistant / MCP-server exposure** (phase 5 decision): **no new tools.**
+>   The MCP server already exposes `list_packs` / `install_pack` /
+>   `diagnose_platform` / `playground_*`, which give an AI client the whole
+>   provider on-ramp (install a pack → the providers layer diagnoses it → fire
+>   playground traffic) — `diagnose_platform` surfaces the new layer for free.
+>   Assistant→provider-MCP *passthrough* stays deferred: the `mcp` adapter is
+>   unproven in scenario use and no need has been shown (invariant #3 — a tool
+>   ships when a real need does, not before). Scenarios call `mcp` connections
+>   as ordinary adapter actions; prove it there first.
 
 ## Context
 
@@ -313,29 +358,49 @@ Each phase lands green before the next starts; per-package tests with
 are opt-in (skip without credentials/reachability), matching the NATS
 integration-test precedent.
 
-1. [ ] **Phase 0 — auth strategy + guardrail.** `oauth2_client_credentials`
-   in the shared http runner (token URL, cache, refresh, SecretBox-backed
-   creds; unit tests with a fake token endpoint). `external: true` on
-   ConnectionDraft; `start_load_run` refusal + test. No provider content yet.
-2. [ ] **Phase 1 — Stripe end-to-end.** Stripe pack (connections/actions,
-   starter flows, scenarios, test-card pool, webhook-receiver flow) +
-   `StripeSimulator` (+ tests mirroring the CyberSource suite) + opt-in
-   sandbox smoke (gated on `STRIPE_TEST_KEY`). Proves both data and offline
-   planes on one provider before widening.
-3. [ ] **Phase 2 — Adyen + PayPal.** Packs + sims; Adyen `X-API-Key` +
-   live-prefix matrix override; PayPal exercises the oauth2 strategy.
-   Divergences between the three feed back into pack conventions before more
-   providers are added.
-4. [ ] **Phase 3 — `mcp` adapter family.** `adapters/mcp_client/` (streamable
-   HTTP + stdio, `list_tools`/`call_tool`, secrets-backed auth), lazy
-   registration, tests against an in-process MCP server (we ship one — reuse
-   it as the test double); opt-in live checks against `mcp.stripe.com`.
-   Adapter-catalog entry + connection editor fields (portal: host build
-   caveat as usual).
-5. [ ] **Phase 4 — webhook emission.** Simulator `webhooks` option with
-   provider-correct signatures (Stripe HMAC first), chaos applied to the
-   emission leg, stats/trace attribution, canvas example in the Stripe pack.
-6. [ ] **Phase 5 — surfaces + docs.** Diagnostics layer (provider sandbox
-   reachable / token obtainable), CLAUDE.md + ATLAS + ROADMAP updates, pack
-   authoring guide, MCP/assistant exposure decision revisited with evidence,
-   `gen_catalog.py` if toolkit changed, ADR status flipped truthfully.
+1. [x] **Phase 0 — auth strategy + guardrail.** `oauth2_client_credentials` +
+   `form` bracket encoding in the shared http runner (token cache keyed by
+   (url, client, scope), refresh 60 s before expiry; basic/body credential
+   styles); `external: true` on ConnectionDraft (not stripped from worker
+   configs); `POST /load-runs` refusal covering env configs, registry docs
+   (the mix path) and group members. `test_http_oauth_form.py`,
+   `test_load_external_guardrail.py`.
+2. [x] **Phase 1 — Stripe end-to-end.** `StripeSimulator` (kind `stripe`;
+   form-body decode, test-card ladder, PaymentIntent status machine, refund
+   ledger) + `stripe_provider` pack (4 cases; `stripe_simulator` /
+   `stripe_sandbox` connections, `stripe_test_cards` pool; create-only
+   install) with a live-simulator baseline; opt-in sandbox smoke on
+   `STRIPE_TEST_KEY`. (Webhook-receiver flow moved to phase 4; starter flows
+   dropped — `FlowStep` carries no payload.)
+3. [x] **Phase 2 — Adyen + PayPal.** `AdyenCheckoutSimulator` (kind `adyen`;
+   documented holderName / acquirer-code refusal triggers, 3DS2 challenge →
+   `/payments/details`, async-accepted refunds) + `PayPalOrdersSimulator`
+   (kind `paypal`; serves its own `/v1/oauth2/token`, INSTRUMENT_DECLINED via
+   the real negative-testing header) + both provider packs with live-sim
+   baselines incl. a strict-token oauth2 end-to-end. Confirmed the convention
+   set: Stripe = form+bearer, Adyen = JSON+header, PayPal = JSON+oauth2.
+4. [x] **Phase 3 — `mcp` adapter family.** `adapters/mcp_client/` (streamable
+   HTTP + stdio, per-call sessions, `list_tools`/`call_tool` + named-tool
+   convenience, bearer/header auth, health = initialize+list_tools), lazy
+   registration + `_ALLOWED_ADAPTERS` entry, tests against an in-process
+   FastMCP double over both transports + opt-in `mcp.stripe.com` check;
+   `stripe_mcp` / `adyen_mcp` / `paypal_mcp` pack presets (`external: true`);
+   adapter-catalog entry (host-build caveat; typed connection-editor fields
+   still owed — the JSON editor covers it meanwhile).
+5. [x] **Phase 4 — webhook emission.** `WebhookEmitter` in the HttpResponder
+   base (fire-and-forget, events filter, chaos on the leg, sent/failed/dropped
+   in `stats()`), provider-correct signatures, emission wired into all three
+   sims' state transitions, pack `participant_flows[]` +
+   `merchant_webhooks_<provider>` inbound connections + receiver flows,
+   preset `webhooks` blocks (unverified), an 11-test emission suite + the
+   offline sim→receiver-flow loop test. Trace hops for the emission leg
+   deferred (needs in-band correlation — ADR-0007 precedent).
+6. [x] **Phase 5 — surfaces + docs.** Diagnostics **providers layer**
+   (`/diagnostics`: credential-set → token-obtainable / reachable; stdio MCP
+   reported manual; 8 tests) — also fixed the stale doctor skill (the `nats`
+   layer was undocumented). Pack authoring guide
+   ([docs/authoring-a-provider-pack.md](../authoring-a-provider-pack.md));
+   CLAUDE.md + ATLAS + ROADMAP + operator-skills swept. MCP/assistant exposure
+   decided: no new tools (existing `install_pack` / `diagnose_platform` /
+   `playground_*` suffice; passthrough deferred) — so no `gen_catalog.py`
+   run needed (registry.py / prompts.py untouched). ADR status flipped.

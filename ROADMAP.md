@@ -17,16 +17,25 @@ tracing, AI assistants, an MCP server, and an advisory ML insight service.
 Decisions and status are recorded honestly in [docs/adr/](docs/adr/) and
 [docs/ATLAS.md](docs/ATLAS.md).
 
+## Recently landed
+
+- [x] **Payment-provider integration (ADR-0009, phases 0–5, 2026-07-21).**
+      Stripe / Adyen / PayPal simulators + provider packs over the generic
+      `http` adapter (+ an oauth2 auth strategy, form encoding, the `external`
+      load-run guardrail); signed webhook emission with merchant receiver
+      flows; a generic `mcp` client adapter for the provider control plane;
+      and a `/diagnostics` providers layer. Backend + tests green in the
+      sandbox; portal presets + host `make test` still owed. Next providers
+      (Square, Razorpay, Mollie, …) are config-only — see
+      [docs/authoring-a-provider-pack.md](docs/authoring-a-provider-pack.md).
+
 ## Next
 
 - [ ] Verification pass on the newest portal pages (Playground incl. sample
-      chips — backend + page landed per ADR-0007; needs a host build +
+      chips — backend + page landed per ADR-0007; plus the ADR-0009 PSP
+      simulator presets + adapter-catalog `mcp` entry; needs a host build +
       click-through)
 - [ ] Proxy tap TLS termination (ADR-0008, the deferred half of ADR-0002)
-- [ ] Payment-provider integration (ADR-0009, proposed): provider packs over
-      the generic http adapter (+ oauth2 auth strategy), provider simulators
-      with webhook emission, and a generic MCP client adapter — Stripe first,
-      then Adyen + PayPal
 - [ ] Spec-exact VISA (Phase 2), then further schemes (Mastercard next)
 - [ ] Consolidated canvas overlays for the network map surfaces (additive —
       see ATLAS §12)

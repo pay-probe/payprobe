@@ -11,7 +11,8 @@ recorded reason for not existing.
 
 PayProbe is a payment-systems testing platform: a visual scenario constructor,
 protocol simulators (ISO 8583, payShield HSM, VISA Base I, CyberSource REST,
-NATS messaging), canvas-authored **networks** of listening participants,
+NATS messaging, and the Stripe / Adyen / PayPal PSP simulators of ADR-0009),
+canvas-authored **networks** of listening participants,
 distributed load
 generation, chaos/resilience certification, and Go/No-Go run sign-off. It is
 becoming a *digital twin of a payment network*. Source-available under
@@ -123,6 +124,15 @@ in `docs/adr/`.
 - The dashboard has TWO health panels: "Endpoints" (client-side probes from
   RuntimeConfig) and "System health" (orchestrator `/status` services map).
   A new service must be added to both, plus Settings→Endpoints.
+- **Provider connections marked `external: true`** (the real Stripe/Adyen/PayPal
+  sandboxes a provider pack installs) are **refused by load runs by design**
+  (ADR-0009 — load-testing a provider's sandbox violates its ToS). Don't "fix"
+  the 400; point the load at the provider simulator (saved-simulator `kind`
+  `stripe`/`adyen`/`paypal`). The `/diagnostics` **providers layer** reports
+  each one as credential-set / token-obtainable / reachable. Provider specifics
+  live in the pack's *data*, never in a per-provider adapter class — the `http`
+  adapter (+ oauth2/form) and the generic `mcp` adapter cover them. See
+  [docs/authoring-a-provider-pack.md](docs/authoring-a-provider-pack.md).
 
 ## Where knowledge lives
 
@@ -132,10 +142,10 @@ in `docs/adr/`.
   are fully implemented, 0002 (proxy tap/intercept/stub) through stage 2 with
   only TLS deferred (now specced as 0008, proposed), 0005 (insight service)
   built as advise-only, 0007 (playground) backend built, portal page written
-  2026-07-16 but still owed a host build + click-through, 0009
-  (payment-provider integration: PSP packs + provider simulators + generic
-  MCP client adapter) proposed 2026-07-20; statuses in the files
-  are kept truthful.
+  2026-07-16 but still owed a host build + click-through, 0009 (payment-provider
+  integration — PSP simulators/packs + generic `mcp` client adapter + signed
+  webhook emission) implemented, portal presets owed a host build; statuses in
+  the files are kept truthful.
 - `.claude/skills/payprobe-run-and-operate` and `payprobe-config-and-flags`
   — operator-grade API/env-flag reference, kept current.
 - `docs/history/` — finished build specs, plans and working notes (accurate at

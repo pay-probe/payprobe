@@ -2247,12 +2247,13 @@ def _responder_for(config: dict) -> TcpResponder:
     elif kind == "adyen":
         from worker.adapters.scheme.adyen_sim import AdyenCheckoutSimulator
 
-        # Adyen Checkout PSP simulator (ADR-0009) — same duck-typed surface.
+        # Adyen Checkout PSP simulator (ADR-0009 phase 2).
         cls = AdyenCheckoutSimulator  # type: ignore[assignment]
     elif kind == "paypal":
         from worker.adapters.scheme.paypal_sim import PayPalOrdersSimulator
 
-        # PayPal v2 Orders PSP simulator (ADR-0009) — same duck-typed surface.
+        # PayPal v2 Orders PSP simulator incl. OAuth2 token endpoint
+        # (ADR-0009 phase 2).
         cls = PayPalOrdersSimulator  # type: ignore[assignment]
     elif kind == "nats":
         from worker.adapters.nats.responder import NatsResponder
@@ -6296,6 +6297,20 @@ async def diagnostics(
 
         return await nats_admin.cluster_health(servers, monitoring, _nats_fetch)
 
+    async def _obtain_oauth_token(auth: dict) -> dict:
+        # ADR-0009 providers layer: "is a token obtainable?" — attempt the
+        # client-credentials exchange via the shared http runner, report only
+        # ok/error (never leak the token). A fresh cache read each call so a
+        # rotated secret is exercised, not a stale cached token.
+        from worker.engine.http_runner import _oauth2_token, clear_oauth_token_cache
+
+        try:
+            clear_oauth_token_cache()
+            await _oauth2_token(auth, {})
+            return {"ok": True}
+        except Exception as exc:  # noqa: BLE001 — the failure IS the result
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
     ctx = DiagContext(
         http_get_json=_http_get_json,
         scenario_api_url=SCENARIO_API_URL,
@@ -6308,6 +6323,7 @@ async def diagnostics(
         probe_connection=_probe,
         connection_effective=_connection_effective,
         nats_health=_nats_health,
+        obtain_oauth_token=_obtain_oauth_token,
         capture_state=lambda: {
             "capturing": _CAPTURE_ENABLED,
             "buffered": sum(

@@ -44,6 +44,7 @@ def make_ctx(
     run_store: RunStore | None = None,
     capture_state: dict | None = None,
     nats_health=None,
+    obtain_oauth_token=None,
 ) -> DiagContext:
     probes = probe_results or {}
 
@@ -70,6 +71,7 @@ def make_ctx(
         connection_effective=_connection_effective,
         capture_state=(lambda: capture_state) if capture_state is not None else None,
         nats_health=nats_health,
+        obtain_oauth_token=obtain_oauth_token,
     )
 
 
@@ -454,7 +456,7 @@ async def test_layer_scoping_and_summary_counts():
 async def test_unknown_layer_falls_back_to_all():
     report = await run_diagnostics(make_ctx(), layers=["bogus"])
     assert report["layers"] == [
-        "services", "connections", "nats", "listeners", "runs"]
+        "services", "connections", "providers", "nats", "listeners", "runs"]
 
 
 # -- nats layer (ADR-0006) ------------------------------------------------------
@@ -519,3 +521,131 @@ async def test_nats_layer_no_targets_skips():
         make_ctx(routes=_nats_routes([]), nats_health=lambda *a: None),
         layers=["nats"])
     assert by_id(report)["nats.none"]["status"] == "skip"
+
+
+# -- providers layer (ADR-0009) ---------------------------------------------------
+
+def _prov_routes(conns):
+    return {"/health": {"status": "ok"}, "/connections": conns,
+            "/participant-groups": []}
+
+
+def _stripe_sandbox(token=""):
+    return {"name": "stripe_sandbox", "adapter": "http", "external": True,
+            "host": "api.stripe.com", "port": 443,
+            "base_url": "https://api.stripe.com/v1",
+            "authentication": {"type": "bearer", "token": token}}
+
+
+def _paypal_sandbox(cid="", secret=""):
+    return {"name": "paypal_sandbox", "adapter": "http", "external": True,
+            "base_url": "https://api-m.sandbox.paypal.com",
+            "authentication": {"type": "oauth2_client_credentials",
+                               "client_id": cid, "client_secret": secret,
+                               "token_url": "https://api-m.sandbox.paypal.com/v1/oauth2/token"}}
+
+
+async def test_provider_unconfigured_credential_warns():
+    # freshly-installed pack: empty key -> a helpful warn, no live probe
+    report = await run_diagnostics(
+        make_ctx(routes=_prov_routes([_stripe_sandbox("")])), layers=["providers"])
+    c = by_id(report)["prov.stripe_sandbox"]
+    assert c["status"] == "warn"
+    assert "no API key" in c["detail"]
+    assert "encrypted" in c["hint"]
+
+
+async def test_provider_configured_reachable_ok():
+    report = await run_diagnostics(
+        make_ctx(routes=_prov_routes([_stripe_sandbox("sk_test_live")]),
+                 probe_results={"api.stripe.com:443": {"ok": True, "latency_ms": 12}}),
+        layers=["providers"])
+    c = by_id(report)["prov.stripe_sandbox"]
+    assert c["status"] == "ok"
+    assert "credential accepted" in c["detail"]
+
+
+async def test_provider_oauth_token_obtainable():
+    async def token(auth):
+        assert auth["client_id"] == "id1"
+        return {"ok": True}
+
+    report = await run_diagnostics(
+        make_ctx(routes=_prov_routes([_paypal_sandbox("id1", "shh")]),
+                 obtain_oauth_token=token),
+        layers=["providers"])
+    c = by_id(report)["prov.paypal_sandbox"]
+    assert c["status"] == "ok"
+    assert "token obtained" in c["detail"]
+
+
+async def test_provider_oauth_token_failure_fails():
+    async def token(auth):
+        return {"ok": False, "error": "HTTP 401"}
+
+    report = await run_diagnostics(
+        make_ctx(routes=_prov_routes([_paypal_sandbox("id1", "bad")]),
+                 obtain_oauth_token=token),
+        layers=["providers"])
+    c = by_id(report)["prov.paypal_sandbox"]
+    assert c["status"] == "fail"
+    assert "401" in c["error"]
+
+
+async def test_provider_stdio_mcp_reported_manual_not_probed():
+    probed = []
+
+    async def _probe(cfg):
+        probed.append(cfg)
+        return {"ok": True}
+
+    ctx = make_ctx(routes=_prov_routes([{
+        "name": "adyen_mcp", "adapter": "mcp", "transport": "stdio",
+        "external": True, "command": "npx",
+        "args": ["-y", "@adyen/mcp", "--adyenApiKey=", "--env=TEST"]}]))
+    ctx.probe_connection = _probe
+    report = await run_diagnostics(ctx, layers=["providers"])
+    c = by_id(report)["prov.adyen_mcp"]
+    assert c["status"] == "skip"
+    assert "stdio" in c["detail"]
+    assert probed == []  # never spawns the subprocess
+
+
+async def test_provider_remote_mcp_probed_reachable():
+    report = await run_diagnostics(
+        make_ctx(routes=_prov_routes([{
+            "name": "stripe_mcp", "adapter": "mcp", "transport": "http",
+            "external": True, "base_url": "https://mcp.stripe.com",
+            "authentication": {"type": "bearer", "token": "sk_test_x"}}]),
+            probe_results={"None:None": {"ok": True, "latency_ms": 20}}),
+        layers=["providers"])
+    c = by_id(report)["prov.stripe_mcp"]
+    assert c["status"] == "ok"
+    assert "MCP server reachable" in c["detail"]
+
+
+async def test_provider_connections_excluded_from_connections_layer():
+    # a provider connection must be diagnosed once (providers), not double-probed
+    conns = [_stripe_sandbox("sk_test_x"),
+             {"name": "local_sim", "adapter": "http", "host": "127.0.0.1",
+              "port": 8085, "base_url": "http://127.0.0.1:8085/v1"}]
+    report = await run_diagnostics(
+        make_ctx(routes=_prov_routes(conns),
+                 probe_results={"127.0.0.1:8085": {"ok": True, "latency_ms": 1},
+                                "api.stripe.com:443": {"ok": True}}),
+        layers=["connections", "providers"])
+    ids = by_id(report)
+    # stripe_sandbox appears only under the providers layer
+    assert ids["prov.stripe_sandbox"]["status"] == "ok"
+    assert not any(cid.startswith("conn.stripe_sandbox") for cid in ids)
+    # the local sim connection is still handled by the connections layer
+    assert ids["conn.local_sim.probe"]["status"] == "ok"
+
+
+async def test_provider_layer_no_providers_skips():
+    report = await run_diagnostics(
+        make_ctx(routes=_prov_routes([
+            {"name": "local_sim", "adapter": "http", "host": "127.0.0.1",
+             "port": 8085, "base_url": "http://127.0.0.1:8085"}])),
+        layers=["providers"])
+    assert by_id(report)["prov.none"]["status"] == "skip"

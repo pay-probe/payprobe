@@ -45,7 +45,7 @@ from urllib.parse import urlparse
 
 from report_service.diagnose import _CATEGORY_HELP, classify_error
 
-LAYERS = ("services", "connections", "nats", "listeners", "runs")
+LAYERS = ("services", "connections", "providers", "nats", "listeners", "runs")
 
 #: cap concurrent live probes so a doctor pass can't stampede the platform
 _MAX_CONCURRENCY = 8
@@ -176,6 +176,11 @@ class DiagContext:
     #: nats_admin.cluster_health dict. Optional — when absent the nats layer is
     #: skipped, so existing callers/tests keep working unchanged.
     nats_health: Callable[[list[str], list[str] | None], Awaitable[dict]] | None = None
+    #: OAuth2 client-credentials token probe (ADR-0009): an authentication
+    #: block -> {ok, error}. Used by the providers layer to answer "is a token
+    #: obtainable?" for oauth2 provider connections (PayPal). Optional — when
+    #: absent, oauth2 provider connections report config-completeness only.
+    obtain_oauth_token: Callable[[dict], Awaitable[dict]] | None = None
 
 
 # -- small probes ----------------------------------------------------------------
@@ -477,6 +482,18 @@ async def _connection_checks(
             detail="no saved connections",
         )]
 
+    # Provider connections (external real APIs, and MCP control-plane servers)
+    # are owned by the dedicated 'providers' layer (ADR-0009): it does
+    # credential-completeness + token-obtainable checks the generic reachability
+    # probe here can't, and MCP stdio connections have no host/port for this
+    # layer to dial. Defer them so they're diagnosed once, correctly.
+    docs = [d for d in docs if not _is_provider_conn(d)]
+    if not docs:
+        return [_check(
+            "conn.none", "connections", "connections", "skip",
+            detail="only provider connections saved (see the providers layer)",
+        )]
+
     sem = asyncio.Semaphore(_MAX_CONCURRENCY)
 
     async def _guarded(doc: dict) -> list[dict]:
@@ -515,6 +532,163 @@ async def _connection_checks(
     except Exception:  # noqa: BLE001 — groups are optional signal
         pass
     return out
+
+
+# -- providers layer (ADR-0009) ---------------------------------------------------
+
+#: adapter families that are provider control-plane servers (never a wire hop)
+_MCP_ADAPTERS = {"mcp"}
+
+
+def _is_provider_conn(doc: dict) -> bool:
+    """A provider connection: a real external API (``external: true`` — the
+    load-guardrail marker) or an MCP control-plane server."""
+    adapter = str(doc.get("adapter") or doc.get("type") or "").lower()
+    return bool(doc.get("external")) or adapter in _MCP_ADAPTERS
+
+
+def _provider_credential(cfg: dict) -> tuple[bool, str]:
+    """(credential present?, human name of what's missing) for a provider
+    connection's auth block. The provider packs ship these EMPTY on purpose —
+    reporting "installed but not configured" is the single most useful provider
+    diagnostic, and nothing else surfaces it (a live probe with an empty key
+    just returns a generic 401)."""
+    auth = cfg.get("authentication") or {}
+    kind = str(auth.get("type") or "none")
+    if kind == "bearer":
+        return bool(str(auth.get("token") or "").strip()), "API key / bearer token"
+    if kind == "header":
+        return bool(str(auth.get("headerValue") or "").strip()), \
+            f"{auth.get('headerName') or 'API key'} header value"
+    if kind == "oauth2_client_credentials":
+        ok = bool(str(auth.get("client_id") or "").strip()) and \
+            bool(str(auth.get("client_secret") or "").strip())
+        return ok, "OAuth2 client_id / client_secret"
+    if kind == "basic":
+        ok = bool(str(auth.get("username") or "").strip()) and \
+            bool(str(auth.get("password") or "").strip())
+        return ok, "basic username / password"
+    # no auth block, or a scheme we don't gate on — nothing to check
+    return True, ""
+
+
+_PROVIDER_UNCONFIGURED_HINT = (
+    "This provider connection was installed by a pack but has no credential set "
+    "yet. Open it in Manage → Connections and fill in the key/secret (stored "
+    "encrypted). Until then, scenarios and the playground can't reach the real "
+    "provider — the offline provider simulator needs no credential."
+)
+
+
+async def _one_provider(ctx: DiagContext, doc: dict, env_name: str | None) -> list[dict]:
+    name = str(doc.get("name") or doc.get("id") or "?")
+    if doc.get("disabled"):
+        return [_check(f"prov.{name}", "providers", name, "skip",
+                       detail="connection is disabled")]
+
+    cfg = ctx.connection_effective(doc, env_name)
+    adapter = str(cfg.get("adapter") or cfg.get("type") or "").lower()
+    is_mcp = adapter in _MCP_ADAPTERS
+    transport = str(cfg.get("transport") or ("stdio" if cfg.get("command") else "http")).lower()
+    auth = cfg.get("authentication") or {}
+    kind = str(auth.get("type") or "none")
+    label = f"{name} ({'MCP ' + transport if is_mcp else 'external'})"
+
+    # A self-hosted (stdio) MCP server is a local subprocess the worker spawns
+    # at run time — the doctor must NOT spawn provider processes, so report it
+    # as manual rather than live-probing it.
+    if is_mcp and transport == "stdio":
+        cmd = " ".join([str(cfg.get("command") or "")] + [str(a) for a in cfg.get("args") or []])
+        return [_check(
+            f"prov.{name}", "providers", label, "skip",
+            target=cmd.strip(),
+            detail="self-hosted MCP (stdio) — started as a local subprocess at "
+                   "run time",
+            hint="Can't probe a stdio MCP server from here (it isn't running "
+                 "yet). Verify the command runs locally and its key/token is set "
+                 "(in the args/env), then use it from a scenario step.",
+        )]
+
+    # credential completeness (pure, no network) — short-circuit if missing
+    present, missing = _provider_credential(cfg)
+    if not present:
+        return [_check(
+            f"prov.{name}", "providers", label, "warn",
+            detail=f"no {missing} configured",
+            hint=_PROVIDER_UNCONFIGURED_HINT,
+        )]
+
+    # token-obtainable (oauth2): actually attempt the client-credentials
+    # exchange — reachability alone doesn't prove a token comes back.
+    if kind == "oauth2_client_credentials" and ctx.obtain_oauth_token is not None:
+        try:
+            res, ms = await _timed(asyncio.wait_for(
+                ctx.obtain_oauth_token(auth), timeout=_CHECK_TIMEOUT_SEC))
+        except Exception as exc:  # noqa: BLE001 — the failure IS the result
+            res, ms = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}, None
+        if res.get("ok"):
+            return [_check(
+                f"prov.{name}", "providers", label, "ok", latency_ms=ms,
+                target=str(auth.get("token_url") or ""),
+                detail="OAuth2 token obtained")]
+        err = res.get("error") or "token request failed"
+        return [_check(
+            f"prov.{name}", "providers", label, "fail", latency_ms=ms,
+            target=str(auth.get("token_url") or ""), error=err,
+            hint=_PROBE_HINTS.get(classify_error(err), "")
+            or "The credential is set but no token came back — check the "
+               "client_id/secret and token_url.")]
+
+    # reachable + authorized (http provider APIs, remote MCP servers): reuse the
+    # shared live probe (the http adapter's health_any_status treats a provider
+    # API root's 401/404 as reachable; MCP does initialize + list_tools).
+    try:
+        result = await asyncio.wait_for(
+            ctx.probe_connection(cfg), timeout=_CHECK_TIMEOUT_SEC + 2)
+    except Exception as exc:  # noqa: BLE001
+        result = {"ok": False, "latency_ms": None,
+                  "error": f"{type(exc).__name__}: {exc}"}
+    if result.get("ok"):
+        return [_check(
+            f"prov.{name}", "providers", label, "ok",
+            latency_ms=result.get("latency_ms"),
+            detail="MCP server reachable (list_tools ok)" if is_mcp
+            else "provider reachable + credential accepted")]
+    err = result.get("error") or "probe failed"
+    return [_check(
+        f"prov.{name}", "providers", label, "fail",
+        latency_ms=result.get("latency_ms"), error=err,
+        hint=_PROBE_HINTS.get(classify_error(err), ""))]
+
+
+async def _provider_checks(
+    ctx: DiagContext, env_name: str | None, only: str | None,
+) -> list[dict]:
+    try:
+        docs = await ctx.http_get_json(
+            ctx.scenario_api_url.rstrip("/") + "/connections")
+    except Exception as exc:  # noqa: BLE001 — surfaced by the services layer too
+        return [_check(
+            "prov.registry", "providers", "provider registry", "fail",
+            error=f"{type(exc).__name__}: {exc}",
+            hint="Can't list connections while scenario-service is down.")]
+    docs = [d for d in docs or [] if isinstance(d, dict) and _is_provider_conn(d)]
+    if only:
+        docs = [d for d in docs if str(d.get("name")) == only]
+    if not docs:
+        return [_check(
+            "prov.none", "providers", "providers", "skip",
+            detail="no provider connections (install a provider pack — Stripe / "
+                   "Adyen / PayPal — to add them)")]
+
+    sem = asyncio.Semaphore(_MAX_CONCURRENCY)
+
+    async def _guarded(doc: dict) -> list[dict]:
+        async with sem:
+            return await _one_provider(ctx, doc, env_name)
+
+    grouped = await asyncio.gather(*(_guarded(d) for d in docs))
+    return [c for group in grouped for c in group]
 
 
 # -- listeners layer ---------------------------------------------------------------
@@ -789,6 +963,8 @@ async def run_diagnostics(
         conn_checks = await _connection_checks(
             ctx, environment, connection, bound_ports)
         checks += conn_checks
+    if "providers" in want:
+        checks += await _provider_checks(ctx, environment, connection)
     if "nats" in want:
         checks += await _nats_checks(ctx)
     if "listeners" in want:

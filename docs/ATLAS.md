@@ -304,24 +304,31 @@ full thesis (spin up, stress, verdict) in one command. 9. Proxy-tap stage 2 (int
 unlocks testing _against_ real endpoints with selective stubbing. 10. Spec-exact VISA (Phase 2) and further schemes (Mastercard is the obvious
 next), leaning on the pack/certification machinery. 11. **Consolidate the topology-map surfaces — see §12.**
 
-Also (proposed 2026-07-20): **Payment-provider integration** (ADR-0009,
-proposed — not built). The mechanism analysis for integrating commercial PSPs
-(Stripe, Adyen, PayPal first; the full MCP-landscape table is in the ADR).
-Decision proposed: three planes on existing machinery — **provider packs**
-over the generic `http` adapter for driving real sandboxes (one bounded code
-change: an `oauth2_client_credentials` auth strategy in the shared http
-runner, PayPal's requirement), **provider simulators** (`HttpResponder`
-subclasses per the CyberSource precedent, plus a new webhook-emission option
-so the simulated PSP calls the merchant participant back, chaos included),
-and one **generic `mcp` client adapter family** (streamable HTTP + stdio) for
-fixture provisioning and provider-side assertions as scenario steps — MCP as
-control plane, explicitly rejected as transport. Guardrail: pack presets
-pointing at real providers carry `external: true` and the load engine refuses
-them (invariant #6 applied to other people's infrastructure). Per-provider
-SDK adapters rejected (the TestPay lesson, §10); proxy-tap record-and-replay
-noted as a post-ADR-0008 complement. Phasing: auth strategy + guardrail →
-Stripe end-to-end → Adyen + PayPal → mcp adapter → webhook emission →
-surfaces/docs.
+Also (added 2026-07-21): **Payment-provider integration** (ADR-0009 — all five
+phases landed 2026-07-20 → 07-21). PayProbe couldn't model a *merchant ↔ PSP*
+network; now it can. Three planes, each on existing machinery, no per-provider
+adapter class (the TestPay lesson, §10): **provider packs** over the generic
+`http` adapter drive the data plane (one bounded code change — an
+`oauth2_client_credentials` strategy + `form` bracket encoding in the shared
+http runner; `external: true` connections are refused by the load engine so
+nobody hammers a real sandbox); **provider simulators** (`StripeSimulator` /
+`AdyenCheckoutSimulator` / `PayPalOrdersSimulator`, `HttpResponder` subclasses
+per the CyberSource precedent, with documented test triggers and **webhook
+emission** — a `WebhookEmitter` in the responder base that calls the merchant
+back with provider-correct signatures, fire-and-forget, chaos on the emission
+leg) hold the offline plane; and one generic **`mcp` client adapter**
+(streamable HTTP + stdio, per-call sessions) is the control plane — MCP as
+operations surface, explicitly rejected as payment transport. The three packs
+proved the convention set (Stripe = form+bearer, Adyen = JSON+header, PayPal =
+JSON+oauth2), so further providers (Square, Razorpay, Mollie, Paddle, …) are
+config-only — [docs/authoring-a-provider-pack.md](authoring-a-provider-pack.md)
+is the recipe. A `/diagnostics` **providers layer** answers "why doesn't my
+provider connection work?" (credential-set → token-obtainable / reachable).
+Assistant/MCP-server passthrough to provider MCPs was weighed and deferred
+(invariant #3 — the existing `install_pack` / `diagnose_platform` /
+`playground_*` tools already give an AI client the on-ramp; the `mcp` adapter
+earns passthrough only once scenarios prove it). Owed: a host portal build
+(PSP simulator presets, adapter-catalog `mcp` entry) + `make test`.
 
 Also (added 2026-07-16): **Playground — ad-hoc execution by reference**
 (ADR-0007) — backend landed (phases 1–3): `GET /playground/targets` (read-only
@@ -449,9 +456,10 @@ deferred), 0003 report gates/provenance/sign-off (implemented), 0004 networks
 unification (implemented, incl. alias removal), 0005 insight service (built,
 advise-only), 0006 NATS (implemented), 0007 playground (backend + portal page
 built; host-build verify owed), 0008 proxy-tap TLS (proposed — closes 0002's
-deferred half), 0009 payment-provider integration (proposed — PSP packs +
-provider simulators + generic MCP client adapter; Stripe/Adyen/PayPal
-first). The finished build specs of the major
+deferred half), 0009 payment-provider integration (implemented, phases 0–5 —
+Stripe/Adyen/PayPal simulators + packs + the generic `mcp` client adapter +
+signed webhook emission + a diagnostics providers layer; portal presets owed a
+host build). The finished build specs of the major
 subsystems live in `docs/history/`, in the order they landed;
 `docs/history/PROGRESS.md` and `docs/history/project-review.md` capture the
 mid-project hardening pass. The
