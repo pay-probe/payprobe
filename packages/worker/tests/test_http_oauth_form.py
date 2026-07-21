@@ -178,10 +178,7 @@ def test_assertion_extract_field_supports_list_indices():
         }
     }
     assert adapter._extract_field(data, "body.details[0].issue") == "INSTRUMENT_DECLINED"
-    assert (
-        adapter._extract_field(data, "body.purchase_units[0].payments.captures[0].id")
-        == "CAP1"
-    )
+    assert adapter._extract_field(data, "body.purchase_units[0].payments.captures[0].id") == "CAP1"
     assert adapter._extract_field(data, "body.details[3].issue") is None
     assert adapter._extract_field(data, "body.details[0].nope") is None
     assert adapter._extract_field(data, "body.missing[0]") is None

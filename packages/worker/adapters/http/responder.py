@@ -135,8 +135,7 @@ class HttpResponder:
         #: simulator->merchant back-channel (ADR-0009 phase 4). Inert unless
         #: the config carries a ``webhooks`` block with a url; provider sims
         #: call ``self.webhooks.emit(...)`` on their state transitions.
-        self.webhooks = WebhookEmitter(config.get("webhooks"),
-                                       label=str(self.protocol))
+        self.webhooks = WebhookEmitter(config.get("webhooks"), label=str(self.protocol))
 
         # aiohttp low-level server plumbing
         self._runner: web.ServerRunner | None = None

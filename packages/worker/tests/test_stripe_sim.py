@@ -98,9 +98,7 @@ async def test_manual_capture_flow():
     sim, base = await _sim()
     try:
         doc = (
-            await _post(
-                base, "/v1/payment_intents", _intent_form(capture_method="manual")
-            )
+            await _post(base, "/v1/payment_intents", _intent_form(capture_method="manual"))
         ).json()
         assert doc["status"] == "requires_capture"
         assert doc["amount_received"] == 0
@@ -143,9 +141,7 @@ async def test_insufficient_funds_and_expired_and_cvc():
             ("4000000000000069", "expired_card", None),
             ("4000000000000127", "incorrect_cvc", None),
         ]:
-            err = (await _post(base, "/v1/payment_intents", _intent_form(pan=pan))).json()[
-                "error"
-            ]
+            err = (await _post(base, "/v1/payment_intents", _intent_form(pan=pan))).json()["error"]
             assert err["code"] == code
             assert err.get("decline_code") == decline
     finally:
@@ -226,9 +222,7 @@ async def test_refund_of_uncaptured_intent_refused():
     sim, base = await _sim()
     try:
         pid = (
-            await _post(
-                base, "/v1/payment_intents", _intent_form(capture_method="manual")
-            )
+            await _post(base, "/v1/payment_intents", _intent_form(capture_method="manual"))
         ).json()["id"]
         resp = await _post(base, "/v1/refunds", {"payment_intent": pid})
         assert resp.status_code == 400
@@ -318,8 +312,11 @@ async def test_rules_override_gateway_logic():
         {
             "rules": [
                 {
-                    "when": {"method": "POST", "path": {"prefix": "/v1/payment_intents"},
-                             "body": {"amount": {"eq": "13"}}},
+                    "when": {
+                        "method": "POST",
+                        "path": {"prefix": "/v1/payment_intents"},
+                        "body": {"amount": {"eq": "13"}},
+                    },
                     "respond": {"status": 503, "json": {"error": {"type": "api_error"}}},
                 }
             ]
@@ -369,9 +366,7 @@ async def test_end_to_end_via_http_adapter_form_encoding():
         body = sr.response_payload["body"]
         assert body["status"] == "succeeded"
 
-        sr2 = await adapter.execute(
-            "create_refund", {"payment_intent": body["id"], "amount": 500}
-        )
+        sr2 = await adapter.execute("create_refund", {"payment_intent": body["id"], "amount": 500})
         assert sr2.success
         assert sr2.response_payload["body"]["amount"] == 500
 

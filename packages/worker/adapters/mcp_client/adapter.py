@@ -102,9 +102,7 @@ class McpAdapter(BaseAdapter):
             if not self.command:
                 raise ValueError("mcp connection (stdio transport) needs a 'command'")
         else:
-            raise ValueError(
-                f"unknown mcp transport {self.transport!r} — use 'http' or 'stdio'"
-            )
+            raise ValueError(f"unknown mcp transport {self.transport!r} — use 'http' or 'stdio'")
 
     # -- session (per call — see module docstring) -----------------------------
 

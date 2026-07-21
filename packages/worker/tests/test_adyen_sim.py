@@ -125,8 +125,9 @@ async def test_challenge_card_then_details_completes():
         token = action["paymentData"]
 
         done = (
-            await _post(base, "/payments/details",
-                        {"paymentData": token, "details": {"threeDSResult": "Y"}})
+            await _post(
+                base, "/payments/details", {"paymentData": token, "details": {"threeDSResult": "Y"}}
+            )
         ).json()
         assert done["resultCode"] == "Authorised"
         assert done["merchantReference"] == "ORDER-42"
@@ -147,9 +148,9 @@ async def test_refund_received_and_unknown_reference():
     try:
         ref = (await _post(base, "/payments", _payment())).json()["pspReference"]
         resp = await _post(
-            base, f"/payments/{ref}/refunds",
-            {"merchantAccount": "PayProbeECOM",
-             "amount": {"currency": "EUR", "value": 400}},
+            base,
+            f"/payments/{ref}/refunds",
+            {"merchantAccount": "PayProbeECOM", "amount": {"currency": "EUR", "value": 400}},
         )
         assert resp.status_code == 201
         doc = resp.json()
@@ -158,9 +159,7 @@ async def test_refund_received_and_unknown_reference():
         assert doc["pspReference"] != ref
         assert doc["amount"] == {"currency": "EUR", "value": 400}
 
-        missing = await _post(
-            base, "/payments/NOPE/refunds", {"merchantAccount": "PayProbeECOM"}
-        )
+        missing = await _post(base, "/payments/NOPE/refunds", {"merchantAccount": "PayProbeECOM"})
         assert missing.status_code == 422
         assert missing.json()["errorCode"] == "731"
     finally:
@@ -221,9 +220,14 @@ async def test_rules_override_and_decision_buckets():
     sim, base = await _sim(
         {
             "rules": [
-                {"when": {"method": "POST", "path": {"prefix": "/payments"},
-                          "body": {"reference": {"eq": "CHAOS"}}},
-                 "respond": {"status": 503, "json": {"errorCode": "api_down"}}}
+                {
+                    "when": {
+                        "method": "POST",
+                        "path": {"prefix": "/payments"},
+                        "body": {"reference": {"eq": "CHAOS"}},
+                    },
+                    "respond": {"status": 503, "json": {"errorCode": "api_down"}},
+                }
             ]
         }
     )

@@ -38,21 +38,23 @@ ADYEN_HMAC_HEX = binascii.hexlify(b"payprobe-hmac-key").decode()
 
 
 async def _receiver():
-    r = HttpResponder({"host": "127.0.0.1", "port": 0,
-                       "default": {"status": 200, "json": {"received": True}}})
+    r = HttpResponder(
+        {"host": "127.0.0.1", "port": 0, "default": {"status": 200, "json": {"received": True}}}
+    )
     port = await r.start()
     return r, f"http://127.0.0.1:{port}"
 
 
 async def _post(base, path, *, json_body=None, data=None, headers=None):
     async with httpx.AsyncClient() as client:
-        return await client.post(f"{base}{path}", json=json_body, data=data,
-                                 headers=headers or {})
+        return await client.post(f"{base}{path}", json=json_body, data=data, headers=headers or {})
 
 
 def _stripe_form(amount=1999, pan="4242424242424242", **extra):
     d = {
-        "amount": str(amount), "currency": "usd", "confirm": "true",
+        "amount": str(amount),
+        "currency": "usd",
+        "confirm": "true",
         "payment_method_data[card][number]": pan,
     }
     d.update(extra)
@@ -64,13 +66,18 @@ def _stripe_form(amount=1999, pan="4242424242424242", **extra):
 
 async def test_stripe_succeeded_event_with_valid_signature():
     receiver, hook_url = await _receiver()
-    sim = StripeSimulator({"host": "127.0.0.1", "port": 0,
-                           "webhooks": {"url": f"{hook_url}/webhooks/stripe",
-                                        "secret": "whsec_test"}})
+    sim = StripeSimulator(
+        {
+            "host": "127.0.0.1",
+            "port": 0,
+            "webhooks": {"url": f"{hook_url}/webhooks/stripe", "secret": "whsec_test"},
+        }
+    )
     port = await sim.start()
     try:
-        resp = await _post(f"http://127.0.0.1:{port}", "/v1/payment_intents",
-                           data=_stripe_form(), headers=AUTH)
+        resp = await _post(
+            f"http://127.0.0.1:{port}", "/v1/payment_intents", data=_stripe_form(), headers=AUTH
+        )
         assert resp.json()["status"] == "succeeded"
         await sim.webhooks.drain()
 
@@ -86,8 +93,9 @@ async def test_stripe_succeeded_event_with_valid_signature():
         sig = hook["headers"]["stripe-signature"]
         t = int(sig.split(",")[0].split("=")[1])
         v1 = sig.split("v1=")[1]
-        expected = hmac.new(b"whsec_test", f"{t}.{hook['raw']}".encode(),
-                            hashlib.sha256).hexdigest()
+        expected = hmac.new(
+            b"whsec_test", f"{t}.{hook['raw']}".encode(), hashlib.sha256
+        ).hexdigest()
         assert v1 == expected
         assert abs(time.time() - t) < 30
 
@@ -99,22 +107,30 @@ async def test_stripe_succeeded_event_with_valid_signature():
 
 async def test_stripe_lifecycle_event_types():
     receiver, hook_url = await _receiver()
-    sim = StripeSimulator({"host": "127.0.0.1", "port": 0,
-                           "webhooks": {"url": hook_url, "secret": "s"}})
+    sim = StripeSimulator(
+        {"host": "127.0.0.1", "port": 0, "webhooks": {"url": hook_url, "secret": "s"}}
+    )
     port = await sim.start()
     base = f"http://127.0.0.1:{port}"
     try:
         # decline -> payment_failed
-        await _post(base, "/v1/payment_intents",
-                    data=_stripe_form(pan="4000000000009995"), headers=AUTH)
+        await _post(
+            base, "/v1/payment_intents", data=_stripe_form(pan="4000000000009995"), headers=AUTH
+        )
         # manual capture -> amount_capturable_updated, then succeeded
-        pid = (await _post(base, "/v1/payment_intents",
-                           data=_stripe_form(capture_method="manual"),
-                           headers=AUTH)).json()["id"]
+        pid = (
+            await _post(
+                base,
+                "/v1/payment_intents",
+                data=_stripe_form(capture_method="manual"),
+                headers=AUTH,
+            )
+        ).json()["id"]
         await _post(base, f"/v1/payment_intents/{pid}/capture", data={}, headers=AUTH)
         # refund -> refund.created
-        await _post(base, "/v1/refunds",
-                    data={"payment_intent": pid, "amount": "100"}, headers=AUTH)
+        await _post(
+            base, "/v1/refunds", data={"payment_intent": pid, "amount": "100"}, headers=AUTH
+        )
         await sim.webhooks.drain()
 
         types = [r["body"]["type"] for r in receiver.received]
@@ -134,50 +150,62 @@ async def test_stripe_lifecycle_event_types():
 
 async def test_adyen_notification_with_valid_hmac():
     receiver, hook_url = await _receiver()
-    sim = AdyenCheckoutSimulator({"host": "127.0.0.1", "port": 0,
-                                  "webhooks": {"url": hook_url,
-                                               "secret": ADYEN_HMAC_HEX}})
+    sim = AdyenCheckoutSimulator(
+        {"host": "127.0.0.1", "port": 0, "webhooks": {"url": hook_url, "secret": ADYEN_HMAC_HEX}}
+    )
     port = await sim.start()
     base = f"http://127.0.0.1:{port}"
     payment = {
         "amount": {"currency": "EUR", "value": 1000},
-        "reference": "ORDER-7", "merchantAccount": "PayProbeECOM",
-        "paymentMethod": {"type": "scheme", "number": "4111111111111111",
-                          "holderName": "J. Smith"},
+        "reference": "ORDER-7",
+        "merchantAccount": "PayProbeECOM",
+        "paymentMethod": {"type": "scheme", "number": "4111111111111111", "holderName": "J. Smith"},
     }
     try:
-        ref = (await _post(base, "/payments", json_body=payment,
-                           headers=ADYEN_KEY)).json()["pspReference"]
-        await _post(base, f"/payments/{ref}/refunds",
-                    json_body={"merchantAccount": "PayProbeECOM",
-                               "amount": {"currency": "EUR", "value": 300}},
-                    headers=ADYEN_KEY)
+        ref = (await _post(base, "/payments", json_body=payment, headers=ADYEN_KEY)).json()[
+            "pspReference"
+        ]
+        await _post(
+            base,
+            f"/payments/{ref}/refunds",
+            json_body={
+                "merchantAccount": "PayProbeECOM",
+                "amount": {"currency": "EUR", "value": 300},
+            },
+            headers=ADYEN_KEY,
+        )
         await sim.webhooks.drain()
 
         assert len(receiver.received) == 2
-        auth_item = receiver.received[0]["body"]["notificationItems"][0][
-            "NotificationRequestItem"]
+        auth_item = receiver.received[0]["body"]["notificationItems"][0]["NotificationRequestItem"]
         assert auth_item["eventCode"] == "AUTHORISATION"
         assert auth_item["success"] == "true"
         assert auth_item["pspReference"] == ref
         assert auth_item["merchantAccountCode"] == "PayProbeECOM"
 
         # recompute the documented colon-joined HMAC (hex key, base64 digest)
-        payload = ":".join([
-            auth_item["pspReference"], auth_item["originalReference"],
-            auth_item["merchantAccountCode"], auth_item["merchantReference"],
-            "1000", "EUR", "AUTHORISATION", "true",
-        ])
+        payload = ":".join(
+            [
+                auth_item["pspReference"],
+                auth_item["originalReference"],
+                auth_item["merchantAccountCode"],
+                auth_item["merchantReference"],
+                "1000",
+                "EUR",
+                "AUTHORISATION",
+                "true",
+            ]
+        )
         expected = base64.b64encode(
-            hmac.new(binascii.unhexlify(ADYEN_HMAC_HEX), payload.encode(),
-                     hashlib.sha256).digest()
+            hmac.new(binascii.unhexlify(ADYEN_HMAC_HEX), payload.encode(), hashlib.sha256).digest()
         ).decode()
         assert auth_item["additionalData"]["hmacSignature"] == expected
         # helper agrees with the hand-rolled computation
         assert adyen_hmac_signature(ADYEN_HMAC_HEX, auth_item) == expected
 
         refund_item = receiver.received[1]["body"]["notificationItems"][0][
-            "NotificationRequestItem"]
+            "NotificationRequestItem"
+        ]
         assert refund_item["eventCode"] == "REFUND"
         assert refund_item["originalReference"] == ref
         assert refund_item["amount"] == {"currency": "EUR", "value": 300}
@@ -188,20 +216,28 @@ async def test_adyen_notification_with_valid_hmac():
 
 async def test_adyen_refusal_notification_carries_reason():
     receiver, hook_url = await _receiver()
-    sim = AdyenCheckoutSimulator({"host": "127.0.0.1", "port": 0,
-                                  "webhooks": {"url": hook_url,
-                                               "secret": ADYEN_HMAC_HEX}})
+    sim = AdyenCheckoutSimulator(
+        {"host": "127.0.0.1", "port": 0, "webhooks": {"url": hook_url, "secret": ADYEN_HMAC_HEX}}
+    )
     port = await sim.start()
     try:
-        await _post(f"http://127.0.0.1:{port}", "/payments", json_body={
-            "amount": {"currency": "EUR", "value": 1000},
-            "reference": "R1", "merchantAccount": "PayProbeECOM",
-            "paymentMethod": {"type": "scheme", "number": "4111111111111111",
-                              "holderName": "NOT_ENOUGH_BALANCE"},
-        }, headers=ADYEN_KEY)
+        await _post(
+            f"http://127.0.0.1:{port}",
+            "/payments",
+            json_body={
+                "amount": {"currency": "EUR", "value": 1000},
+                "reference": "R1",
+                "merchantAccount": "PayProbeECOM",
+                "paymentMethod": {
+                    "type": "scheme",
+                    "number": "4111111111111111",
+                    "holderName": "NOT_ENOUGH_BALANCE",
+                },
+            },
+            headers=ADYEN_KEY,
+        )
         await sim.webhooks.drain()
-        item = receiver.received[0]["body"]["notificationItems"][0][
-            "NotificationRequestItem"]
+        item = receiver.received[0]["body"]["notificationItems"][0]["NotificationRequestItem"]
         assert item["success"] == "false"
         assert item["reason"] == "Not enough balance"
     finally:
@@ -214,22 +250,25 @@ async def test_adyen_refusal_notification_carries_reason():
 
 async def test_paypal_capture_and_refund_events_with_transmission_headers():
     receiver, hook_url = await _receiver()
-    sim = PayPalOrdersSimulator({"host": "127.0.0.1", "port": 0,
-                                 "webhooks": {"url": hook_url, "secret": "pp"}})
+    sim = PayPalOrdersSimulator(
+        {"host": "127.0.0.1", "port": 0, "webhooks": {"url": hook_url, "secret": "pp"}}
+    )
     port = await sim.start()
     base = f"http://127.0.0.1:{port}"
     bearer = {"Authorization": "Bearer A21.t"}
-    order = {"intent": "CAPTURE",
-             "purchase_units": [{"amount": {"currency_code": "USD",
-                                            "value": "42.00"}}]}
+    order = {
+        "intent": "CAPTURE",
+        "purchase_units": [{"amount": {"currency_code": "USD", "value": "42.00"}}],
+    }
     try:
-        oid = (await _post(base, "/v2/checkout/orders", json_body=order,
-                           headers=bearer)).json()["id"]
-        cap = (await _post(base, f"/v2/checkout/orders/{oid}/capture",
-                           json_body={}, headers=bearer)).json()
+        oid = (await _post(base, "/v2/checkout/orders", json_body=order, headers=bearer)).json()[
+            "id"
+        ]
+        cap = (
+            await _post(base, f"/v2/checkout/orders/{oid}/capture", json_body={}, headers=bearer)
+        ).json()
         cap_id = cap["purchase_units"][0]["payments"]["captures"][0]["id"]
-        await _post(base, f"/v2/payments/captures/{cap_id}/refund",
-                    json_body={}, headers=bearer)
+        await _post(base, f"/v2/payments/captures/{cap_id}/refund", json_body={}, headers=bearer)
         await sim.webhooks.drain()
 
         assert len(receiver.received) == 2
@@ -241,8 +280,10 @@ async def test_paypal_capture_and_refund_events_with_transmission_headers():
 
         heads = completed["headers"]
         assert heads["paypal-auth-algo"] == "HMAC-SHA256"  # honest stand-in label
-        signed = (f"{heads['paypal-transmission-id']}|"
-                  f"{heads['paypal-transmission-time']}|{completed['raw']}")
+        signed = (
+            f"{heads['paypal-transmission-id']}|"
+            f"{heads['paypal-transmission-time']}|{completed['raw']}"
+        )
         expected = hmac.new(b"pp", signed.encode(), hashlib.sha256).hexdigest()
         assert heads["paypal-transmission-sig"] == expected
 
@@ -257,16 +298,20 @@ async def test_paypal_capture_and_refund_events_with_transmission_headers():
 
 async def test_events_filter():
     receiver, hook_url = await _receiver()
-    sim = StripeSimulator({"host": "127.0.0.1", "port": 0,
-                           "webhooks": {"url": hook_url, "secret": "s",
-                                        "events": ["refund.created"]}})
+    sim = StripeSimulator(
+        {
+            "host": "127.0.0.1",
+            "port": 0,
+            "webhooks": {"url": hook_url, "secret": "s", "events": ["refund.created"]},
+        }
+    )
     port = await sim.start()
     base = f"http://127.0.0.1:{port}"
     try:
-        pid = (await _post(base, "/v1/payment_intents", data=_stripe_form(),
-                           headers=AUTH)).json()["id"]
-        await _post(base, "/v1/refunds", data={"payment_intent": pid},
-                    headers=AUTH)
+        pid = (await _post(base, "/v1/payment_intents", data=_stripe_form(), headers=AUTH)).json()[
+            "id"
+        ]
+        await _post(base, "/v1/refunds", data={"payment_intent": pid}, headers=AUTH)
         await sim.webhooks.drain()
         assert [r["body"]["type"] for r in receiver.received] == ["refund.created"]
     finally:
@@ -276,13 +321,18 @@ async def test_events_filter():
 
 async def test_chaos_drop_on_the_emission_leg():
     receiver, hook_url = await _receiver()
-    sim = StripeSimulator({"host": "127.0.0.1", "port": 0,
-                           "webhooks": {"url": hook_url, "secret": "s",
-                                        "chaos": {"drop_pct": 100}}})
+    sim = StripeSimulator(
+        {
+            "host": "127.0.0.1",
+            "port": 0,
+            "webhooks": {"url": hook_url, "secret": "s", "chaos": {"drop_pct": 100}},
+        }
+    )
     port = await sim.start()
     try:
-        resp = await _post(f"http://127.0.0.1:{port}", "/v1/payment_intents",
-                           data=_stripe_form(), headers=AUTH)
+        resp = await _post(
+            f"http://127.0.0.1:{port}", "/v1/payment_intents", data=_stripe_form(), headers=AUTH
+        )
         assert resp.status_code == 200  # the reply path is untouched
         await sim.webhooks.drain()
         assert receiver.received == []
@@ -297,20 +347,24 @@ async def test_chaos_drop_on_the_emission_leg():
 
 async def test_chaos_malformed_breaks_the_signature_after_signing():
     receiver, hook_url = await _receiver()
-    sim = StripeSimulator({"host": "127.0.0.1", "port": 0,
-                           "webhooks": {"url": hook_url, "secret": "whsec_x",
-                                        "chaos": {"malformed_pct": 100}}})
+    sim = StripeSimulator(
+        {
+            "host": "127.0.0.1",
+            "port": 0,
+            "webhooks": {"url": hook_url, "secret": "whsec_x", "chaos": {"malformed_pct": 100}},
+        }
+    )
     port = await sim.start()
     try:
-        await _post(f"http://127.0.0.1:{port}", "/v1/payment_intents",
-                    data=_stripe_form(), headers=AUTH)
+        await _post(
+            f"http://127.0.0.1:{port}", "/v1/payment_intents", data=_stripe_form(), headers=AUTH
+        )
         await sim.webhooks.drain()
         hook = receiver.received[0]
         sig = hook["headers"]["stripe-signature"]
         t = int(sig.split(",")[0].split("=")[1])
         v1 = sig.split("v1=")[1]
-        recomputed = hmac.new(b"whsec_x", f"{t}.{hook['raw']}".encode(),
-                              hashlib.sha256).hexdigest()
+        recomputed = hmac.new(b"whsec_x", f"{t}.{hook['raw']}".encode(), hashlib.sha256).hexdigest()
         assert v1 != recomputed  # wire corruption -> a verifying receiver rejects
     finally:
         await sim.stop()
@@ -318,14 +372,19 @@ async def test_chaos_malformed_breaks_the_signature_after_signing():
 
 
 async def test_dead_endpoint_counts_failed_and_never_delays_replies():
-    sim = StripeSimulator({"host": "127.0.0.1", "port": 0,
-                           "webhooks": {"url": "http://127.0.0.1:1", "secret": "s",
-                                        "timeout_sec": 1}})
+    sim = StripeSimulator(
+        {
+            "host": "127.0.0.1",
+            "port": 0,
+            "webhooks": {"url": "http://127.0.0.1:1", "secret": "s", "timeout_sec": 1},
+        }
+    )
     port = await sim.start()
     try:
         start = time.monotonic()
-        resp = await _post(f"http://127.0.0.1:{port}", "/v1/payment_intents",
-                           data=_stripe_form(), headers=AUTH)
+        resp = await _post(
+            f"http://127.0.0.1:{port}", "/v1/payment_intents", data=_stripe_form(), headers=AUTH
+        )
         elapsed = time.monotonic() - start
         assert resp.status_code == 200
         assert elapsed < 0.9  # fire-and-forget: reply not held for the delivery
@@ -338,8 +397,9 @@ async def test_dead_endpoint_counts_failed_and_never_delays_replies():
 
 
 async def test_emitter_receiver_4xx_counts_failed():
-    receiver = HttpResponder({"host": "127.0.0.1", "port": 0,
-                              "default": {"status": 500, "json": {}}})
+    receiver = HttpResponder(
+        {"host": "127.0.0.1", "port": 0, "default": {"status": 500, "json": {}}}
+    )
     port = await receiver.start()
     emitter = WebhookEmitter({"url": f"http://127.0.0.1:{port}", "secret": "s"})
     try:
@@ -354,10 +414,18 @@ async def test_emitter_receiver_4xx_counts_failed():
 
 def test_signature_helpers_are_deterministic():
     assert stripe_signature("k", "{}", 123) == stripe_signature("k", "{}", 123)
-    item = {"pspReference": "A", "originalReference": "", "merchantAccountCode": "M",
-            "merchantReference": "r:1", "amount": {"value": 5, "currency": "EUR"},
-            "eventCode": "AUTHORISATION", "success": "true"}
+    item = {
+        "pspReference": "A",
+        "originalReference": "",
+        "merchantAccountCode": "M",
+        "merchantReference": "r:1",
+        "amount": {"value": 5, "currency": "EUR"},
+        "eventCode": "AUTHORISATION",
+        "success": "true",
+    }
     sig = adyen_hmac_signature("6b6579", item)  # hex for b"key"
     payload = "A::M:r\\:1:5:EUR:AUTHORISATION:true"  # ':' escaped per the docs
-    assert sig == base64.b64encode(
-        hmac.new(b"key", payload.encode(), hashlib.sha256).digest()).decode()
+    assert (
+        sig
+        == base64.b64encode(hmac.new(b"key", payload.encode(), hashlib.sha256).digest()).decode()
+    )

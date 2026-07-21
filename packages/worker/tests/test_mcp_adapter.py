@@ -145,17 +145,22 @@ async def test_health_check_up_and_down(http_base):
 
 async def test_bearer_and_header_auth_shape_headers():
     a = McpAdapter(
-        {"adapter": "mcp", "base_url": "http://x",
-         "authentication": {"type": "bearer", "token": "sk_test_1"}}
+        {
+            "adapter": "mcp",
+            "base_url": "http://x",
+            "authentication": {"type": "bearer", "token": "sk_test_1"},
+        }
     )
     await a.connect()
     assert a.headers["Authorization"] == "Bearer sk_test_1"
 
     b = McpAdapter(
-        {"adapter": "mcp", "base_url": "http://x",
-         "authentication": {"type": "header", "headerName": "X-API-Key",
-                            "headerValue": "k1"},
-         "headers": {"X-Extra": "1"}}
+        {
+            "adapter": "mcp",
+            "base_url": "http://x",
+            "authentication": {"type": "header", "headerName": "X-API-Key", "headerValue": "k1"},
+            "headers": {"X-Extra": "1"},
+        }
     )
     await b.connect()
     assert b.headers["X-API-Key"] == "k1"
@@ -178,8 +183,7 @@ async def test_config_validation():
 
 async def test_stdio_transport_end_to_end(tmp_path):
     script = tmp_path / "stdio_server.py"
-    script.write_text(textwrap.dedent(
-        """
+    script.write_text(textwrap.dedent("""
         from mcp.server.fastmcp import FastMCP
 
         srv = FastMCP("payprobe-stdio-test")
@@ -189,11 +193,9 @@ async def test_stdio_transport_end_to_end(tmp_path):
             return "echo:" + text
 
         srv.run("stdio")
-        """
-    ))
+        """))
     a = McpAdapter(
-        {"adapter": "mcp", "transport": "stdio",
-         "command": sys.executable, "args": [str(script)]}
+        {"adapter": "mcp", "transport": "stdio", "command": sys.executable, "args": [str(script)]}
     )
     await a.connect()
     sr = await a.execute("echo", {"text": "over-stdio"})
@@ -211,9 +213,11 @@ async def test_stdio_transport_end_to_end(tmp_path):
 )
 async def test_live_stripe_mcp_list_tools():
     a = McpAdapter(
-        {"adapter": "mcp", "base_url": "https://mcp.stripe.com",
-         "authentication": {"type": "bearer",
-                            "token": os.environ["STRIPE_TEST_KEY"]}}
+        {
+            "adapter": "mcp",
+            "base_url": "https://mcp.stripe.com",
+            "authentication": {"type": "bearer", "token": os.environ["STRIPE_TEST_KEY"]},
+        }
     )
     await a.connect()
     sr = await a.execute("list_tools", {})

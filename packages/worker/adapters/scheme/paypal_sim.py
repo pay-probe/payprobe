@@ -138,7 +138,7 @@ class PayPalOrdersSimulator(HttpResponder):
                     "json": {
                         "name": "AUTHENTICATION_FAILURE",
                         "message": "Authentication failed due to invalid authentication "
-                                   "credentials or a missing Authorization header.",
+                        "credentials or a missing Authorization header.",
                     },
                 }
 
@@ -160,19 +160,28 @@ class PayPalOrdersSimulator(HttpResponder):
                 if mock_issue:
                     return self._mock_error(mock_issue)
                 return self._capture(oid)
-            return self._err(405, "METHOD_NOT_SUPPORTED", "The server does not "
-                             "implement the requested HTTP method.")
+            return self._err(
+                405,
+                "METHOD_NOT_SUPPORTED",
+                "The server does not " "implement the requested HTTP method.",
+            )
         m = _REFUND_RE.match(path)
         if m:
             if method != "POST":
-                return self._err(405, "METHOD_NOT_SUPPORTED", "The server does not "
-                                 "implement the requested HTTP method.")
+                return self._err(
+                    405,
+                    "METHOD_NOT_SUPPORTED",
+                    "The server does not " "implement the requested HTTP method.",
+                )
             if mock_issue:
                 return self._mock_error(mock_issue)
             return self._refund(m.group("id"), body)
-        return self._err(404, "RESOURCE_NOT_FOUND", "The specified resource "
-                         "does not exist.", issue="INVALID_RESOURCE_ID")
-
+        return self._err(
+            404,
+            "RESOURCE_NOT_FOUND",
+            "The specified resource " "does not exist.",
+            issue="INVALID_RESOURCE_ID",
+        )
 
     # -- webhook emission (ADR-0009 phase 4) -----------------------------------
 
@@ -204,20 +213,23 @@ class PayPalOrdersSimulator(HttpResponder):
 
     def _token(self, method: str, parsed: dict) -> dict:
         if method != "POST":
-            return self._err(405, "METHOD_NOT_SUPPORTED",
-                             "The server does not implement the requested HTTP method.")
+            return self._err(
+                405,
+                "METHOD_NOT_SUPPORTED",
+                "The server does not implement the requested HTTP method.",
+            )
         headers = parsed.get("headers") or {}
         raw = str(parsed.get("raw") or "")
         body = parsed.get("body")
         has_basic = str(headers.get("authorization") or "").startswith("Basic ")
-        has_body_creds = "client_id=" in raw or (
-            isinstance(body, dict) and body.get("client_id")
-        )
+        has_body_creds = "client_id=" in raw or (isinstance(body, dict) and body.get("client_id"))
         if not (has_basic or has_body_creds):
             return {
                 "status": 401,
-                "json": {"error": "invalid_client",
-                         "error_description": "Client Authentication failed"},
+                "json": {
+                    "error": "invalid_client",
+                    "error_description": "Client Authentication failed",
+                },
             }
         token = f"A21.{_gen_id(40)}"
         self._tokens.add(token)
@@ -239,9 +251,9 @@ class PayPalOrdersSimulator(HttpResponder):
         units = body.get("purchase_units")
         if not isinstance(units, list) or not units or _money(units[0].get("amount")) is None:
             return self._err(
-                400, "INVALID_REQUEST",
-                "Request is not well-formed, syntactically incorrect, or "
-                "violates schema.",
+                400,
+                "INVALID_REQUEST",
+                "Request is not well-formed, syntactically incorrect, or " "violates schema.",
                 issue="MISSING_REQUIRED_PARAMETER",
                 field="/purchase_units/@reference_id=='default'/amount",
             )
@@ -264,7 +276,8 @@ class PayPalOrdersSimulator(HttpResponder):
             return self._not_found()
         if order["status"] == ST_COMPLETED:
             return self._err(
-                422, "UNPROCESSABLE_ENTITY",
+                422,
+                "UNPROCESSABLE_ENTITY",
                 "The requested action could not be performed, semantically "
                 "incorrect, or failed business validation.",
                 issue="ORDER_ALREADY_CAPTURED",
@@ -277,13 +290,14 @@ class PayPalOrdersSimulator(HttpResponder):
             and value >= float(self.decline_over)
         ):
             return self._err(
-                422, "UNPROCESSABLE_ENTITY",
+                422,
+                "UNPROCESSABLE_ENTITY",
                 "The requested action could not be performed, semantically "
                 "incorrect, or failed business validation.",
                 issue="INSTRUMENT_DECLINED",
                 description="The instrument presented was either declined by "
-                            "the processor or bank, or it can't be used for "
-                            "this payment.",
+                "the processor or bank, or it can't be used for "
+                "this payment.",
             )
         order["status"] = ST_COMPLETED
         cap_id = _gen_id()
@@ -293,31 +307,42 @@ class PayPalOrdersSimulator(HttpResponder):
             "refunded": 0.0,
         }
         order["capture_id"] = cap_id
-        self._emit_event("PAYMENT.CAPTURE.COMPLETED", {
-            "id": cap_id,
-            "status": ST_COMPLETED,
-            "amount": {"currency_code": self._captures[cap_id]["currency"],
-                       "value": f"{self._captures[cap_id]['value']:.2f}"},
-            "final_capture": True,
-        })
+        self._emit_event(
+            "PAYMENT.CAPTURE.COMPLETED",
+            {
+                "id": cap_id,
+                "status": ST_COMPLETED,
+                "amount": {
+                    "currency_code": self._captures[cap_id]["currency"],
+                    "value": f"{self._captures[cap_id]['value']:.2f}",
+                },
+                "final_capture": True,
+            },
+        )
         return {"status": 201, "json": self._order_doc(oid)}
 
     def _order_doc(self, oid: str) -> dict:
         order = self._orders[oid]
         units = []
         for i, u in enumerate(order["purchase_units"]):
-            unit = {"reference_id": (u or {}).get("reference_id", "default"),
-                    "amount": (u or {}).get("amount")}
+            unit = {
+                "reference_id": (u or {}).get("reference_id", "default"),
+                "amount": (u or {}).get("amount"),
+            }
             if order["status"] == ST_COMPLETED and i == 0 and order.get("capture_id"):
                 cap = self._captures[order["capture_id"]]
                 unit["payments"] = {
-                    "captures": [{
-                        "id": order["capture_id"],
-                        "status": ST_COMPLETED,
-                        "amount": {"currency_code": cap["currency"],
-                                   "value": f"{cap['value']:.2f}"},
-                        "final_capture": True,
-                    }]
+                    "captures": [
+                        {
+                            "id": order["capture_id"],
+                            "status": ST_COMPLETED,
+                            "amount": {
+                                "currency_code": cap["currency"],
+                                "value": f"{cap['value']:.2f}",
+                            },
+                            "final_capture": True,
+                        }
+                    ]
                 }
             units.append(unit)
         base = f"/v2/checkout/orders/{oid}"
@@ -341,7 +366,8 @@ class PayPalOrdersSimulator(HttpResponder):
         remaining = round(cap["value"] - cap["refunded"], 2)
         if remaining <= 0:
             return self._err(
-                422, "UNPROCESSABLE_ENTITY",
+                422,
+                "UNPROCESSABLE_ENTITY",
                 "The requested action could not be performed, semantically "
                 "incorrect, or failed business validation.",
                 issue="CAPTURE_FULLY_REFUNDED",
@@ -349,7 +375,8 @@ class PayPalOrdersSimulator(HttpResponder):
         amount = _money(body.get("amount")) if body.get("amount") else remaining
         if amount is None or amount <= 0 or round(amount, 2) > remaining:
             return self._err(
-                422, "UNPROCESSABLE_ENTITY",
+                422,
+                "UNPROCESSABLE_ENTITY",
                 "The requested action could not be performed, semantically "
                 "incorrect, or failed business validation.",
                 issue="REFUND_AMOUNT_EXCEEDED",
@@ -359,8 +386,7 @@ class PayPalOrdersSimulator(HttpResponder):
             "id": _gen_id(),
             "status": ST_COMPLETED,
             "amount": {"currency_code": cap["currency"], "value": f"{amount:.2f}"},
-            "links": [{"href": f"/v2/payments/captures/{cap_id}", "rel": "up",
-                       "method": "GET"}],
+            "links": [{"href": f"/v2/payments/captures/{cap_id}", "rel": "up", "method": "GET"}],
         }
         self._refunds[doc["id"]] = doc
         self._emit_event("PAYMENT.CAPTURE.REFUNDED", doc)
@@ -382,19 +408,25 @@ class PayPalOrdersSimulator(HttpResponder):
     def _mock_error(self, issue: str) -> dict:
         description = None
         if issue == "INSTRUMENT_DECLINED":
-            description = ("The instrument presented was either declined by the "
-                           "processor or bank, or it can't be used for this payment.")
+            description = (
+                "The instrument presented was either declined by the "
+                "processor or bank, or it can't be used for this payment."
+            )
         return self._err(
-            422, "UNPROCESSABLE_ENTITY",
+            422,
+            "UNPROCESSABLE_ENTITY",
             "The requested action could not be performed, semantically "
             "incorrect, or failed business validation.",
-            issue=issue, description=description,
+            issue=issue,
+            description=description,
         )
 
     def _not_found(self) -> dict:
         return self._err(
-            404, "RESOURCE_NOT_FOUND", "The specified resource does not exist "
-            "or cannot be found.", issue="INVALID_RESOURCE_ID",
+            404,
+            "RESOURCE_NOT_FOUND",
+            "The specified resource does not exist " "or cannot be found.",
+            issue="INVALID_RESOURCE_ID",
         )
 
     @staticmethod
@@ -406,8 +438,7 @@ class PayPalOrdersSimulator(HttpResponder):
         description: str | None = None,
         field: str | None = None,
     ) -> dict:
-        body: dict[str, Any] = {"name": name, "message": message,
-                                "debug_id": _gen_id(12).lower()}
+        body: dict[str, Any] = {"name": name, "message": message, "debug_id": _gen_id(12).lower()}
         if issue:
             detail: dict[str, Any] = {"issue": issue}
             if description:

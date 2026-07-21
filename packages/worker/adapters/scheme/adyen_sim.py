@@ -138,7 +138,8 @@ class AdyenCheckoutSimulator(HttpResponder):
         headers = parsed.get("headers") or {}
         if self.require_auth and not headers.get("x-api-key"):
             return self._error(
-                401, "000",
+                401,
+                "000",
                 "HTTP Status Response - Unauthorized: Payment Request not authorised",
                 "security",
             )
@@ -158,7 +159,6 @@ class AdyenCheckoutSimulator(HttpResponder):
             return self._refund(m.group("ref"), body)
         return self._error(404, "000", "Unknown resource", "validation")
 
-
     # -- webhook emission (ADR-0009 phase 4) -----------------------------------
 
     def _emit_notification(self, item: dict) -> None:
@@ -171,15 +171,16 @@ class AdyenCheckoutSimulator(HttpResponder):
         item = dict(item)
         item.setdefault("originalReference", "")
         item.setdefault("merchantReference", "")
-        item.setdefault("eventDate",
-                        time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()))
+        item.setdefault("eventDate", time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()))
         item["additionalData"] = {
             "hmacSignature": adyen_hmac_signature(self.webhooks.secret, item),
         }
-        body = json.dumps({
-            "live": "false",
-            "notificationItems": [{"NotificationRequestItem": item}],
-        })
+        body = json.dumps(
+            {
+                "live": "false",
+                "notificationItems": [{"NotificationRequestItem": item}],
+            }
+        )
         self.webhooks.emit(str(item.get("eventCode") or ""), body, {})
 
     # -- /payments -------------------------------------------------------------
@@ -202,10 +203,7 @@ class AdyenCheckoutSimulator(HttpResponder):
             reason, reason_code = trigger
             return self._refused(body, reason, reason_code)
 
-        if (
-            self.decline_over is not None
-            and value >= float(self.decline_over)
-        ):
+        if self.decline_over is not None and value >= float(self.decline_over):
             return self._refused(body, "Not enough balance", "12")
 
         pan = str(_dig(body, "paymentMethod.number") or "")
@@ -241,14 +239,16 @@ class AdyenCheckoutSimulator(HttpResponder):
         }
         if _dig(body, "reference") is not None:
             doc["merchantReference"] = _dig(body, "reference")
-        self._emit_notification({
-            "pspReference": ref,
-            "merchantAccountCode": str(_dig(body, "merchantAccount") or ""),
-            "merchantReference": str(_dig(body, "reference") or ""),
-            "amount": amount,
-            "eventCode": "AUTHORISATION",
-            "success": "true",
-        })
+        self._emit_notification(
+            {
+                "pspReference": ref,
+                "merchantAccountCode": str(_dig(body, "merchantAccount") or ""),
+                "merchantReference": str(_dig(body, "reference") or ""),
+                "amount": amount,
+                "eventCode": "AUTHORISATION",
+                "success": "true",
+            }
+        )
         return {"status": 200, "json": doc}
 
     def _refused(self, body: dict, reason: str, reason_code: str) -> dict:
@@ -260,15 +260,17 @@ class AdyenCheckoutSimulator(HttpResponder):
         }
         if _dig(body, "reference") is not None:
             doc["merchantReference"] = _dig(body, "reference")
-        self._emit_notification({
-            "pspReference": doc["pspReference"],
-            "merchantAccountCode": str(_dig(body, "merchantAccount") or ""),
-            "merchantReference": str(_dig(body, "reference") or ""),
-            "amount": _dig(body, "amount") or {},
-            "eventCode": "AUTHORISATION",
-            "success": "false",
-            "reason": reason,
-        })
+        self._emit_notification(
+            {
+                "pspReference": doc["pspReference"],
+                "merchantAccountCode": str(_dig(body, "merchantAccount") or ""),
+                "merchantReference": str(_dig(body, "reference") or ""),
+                "amount": _dig(body, "amount") or {},
+                "eventCode": "AUTHORISATION",
+                "success": "false",
+                "reason": reason,
+            }
+        )
         # Adyen answers a refusal with HTTP 200 — the verdict is resultCode.
         return {"status": 200, "json": doc}
 
@@ -296,15 +298,17 @@ class AdyenCheckoutSimulator(HttpResponder):
         # (even over-refunds; those fail later via webhook), so the sim does too.
         refund_ref = _psp_ref()
         amount = _dig(body, "amount") or parent.get("amount")
-        self._emit_notification({
-            "pspReference": refund_ref,
-            "originalReference": ref,
-            "merchantAccountCode": str(merchant or ""),
-            "merchantReference": str(parent.get("merchantReference") or ""),
-            "amount": amount,
-            "eventCode": "REFUND",
-            "success": "true",
-        })
+        self._emit_notification(
+            {
+                "pspReference": refund_ref,
+                "originalReference": ref,
+                "merchantAccountCode": str(merchant or ""),
+                "merchantReference": str(parent.get("merchantReference") or ""),
+                "amount": amount,
+                "eventCode": "REFUND",
+                "success": "true",
+            }
+        )
         return {
             "status": 201,
             "json": {

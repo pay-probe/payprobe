@@ -247,7 +247,6 @@ class StripeSimulator(HttpResponder):
             return self._create_refund(body)
         return self._err(400, "invalid_request_error", "Unsupported request")
 
-
     # -- webhook emission (ADR-0009 phase 4) -----------------------------------
 
     def _emit_event(self, event_type: str, obj: dict) -> None:
@@ -265,7 +264,8 @@ class StripeSimulator(HttpResponder):
         }
         body = json.dumps(event)
         self.webhooks.emit(
-            event_type, body,
+            event_type,
+            body,
             {"Stripe-Signature": stripe_signature(self.webhooks.secret, body)},
         )
 
@@ -275,7 +275,10 @@ class StripeSimulator(HttpResponder):
         amount = _to_int(_dig(body, "amount"))
         if amount is None or amount <= 0:
             return self._err(
-                400, "invalid_request_error", "Missing required param: amount.", code="parameter_missing"
+                400,
+                "invalid_request_error",
+                "Missing required param: amount.",
+                code="parameter_missing",
             )
         state = {
             "id": _gen_id("pi"),
@@ -316,11 +319,7 @@ class StripeSimulator(HttpResponder):
 
         verdict = _CARD_LADDER.get(pan, "ok")
         amount = state["amount"]
-        if (
-            verdict == "ok"
-            and self.decline_over is not None
-            and amount >= int(self.decline_over)
-        ):
+        if verdict == "ok" and self.decline_over is not None and amount >= int(self.decline_over):
             verdict = (
                 "card_declined",
                 "insufficient_funds",
@@ -342,8 +341,7 @@ class StripeSimulator(HttpResponder):
                 **({"decline_code": decline_code} if decline_code else {}),
                 "message": message,
             }
-            self._emit_event("payment_intent.payment_failed",
-                             self._intent_doc(state))
+            self._emit_event("payment_intent.payment_failed", self._intent_doc(state))
             # Stripe answers a declined confirm with HTTP 402 and the intent
             # embedded in the error, so the merchant can inspect its state.
             return self._err(
@@ -359,8 +357,7 @@ class StripeSimulator(HttpResponder):
         state["latest_charge"] = state["latest_charge"] or _gen_id("ch")
         if state["capture_method"] == "manual":
             state["status"] = ST_REQUIRES_CAPTURE
-            self._emit_event("payment_intent.amount_capturable_updated",
-                             self._intent_doc(state))
+            self._emit_event("payment_intent.amount_capturable_updated", self._intent_doc(state))
         else:
             state["status"] = ST_SUCCEEDED
             state["amount_received"] = amount

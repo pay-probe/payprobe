@@ -122,8 +122,7 @@ class WebhookEmitter:
                 resp = await client.post(
                     self.url,
                     content=text.encode("utf-8"),
-                    headers={"Content-Type": "application/json",
-                             **self.headers, **headers},
+                    headers={"Content-Type": "application/json", **self.headers, **headers},
                 )
             status: Any = resp.status_code
             if resp.status_code < 400:

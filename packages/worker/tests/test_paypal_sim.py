@@ -41,8 +41,7 @@ def _order(value="100.00", currency="USD"):
 
 async def _post(base, path, json=None, headers=AUTH, data=None, auth=None):
     async with httpx.AsyncClient() as client:
-        return await client.post(f"{base}{path}", json=json, headers=headers,
-                                 data=data, auth=auth)
+        return await client.post(f"{base}{path}", json=json, headers=headers, data=data, auth=auth)
 
 
 async def _get(base, path, headers=AUTH):
@@ -57,8 +56,11 @@ async def test_token_endpoint_issues_bearer():
     sim, base = await _sim()
     try:
         resp = await _post(
-            base, "/v1/oauth2/token", headers={},
-            data={"grant_type": "client_credentials"}, auth=("cid", "shh"),
+            base,
+            "/v1/oauth2/token",
+            headers={},
+            data={"grant_type": "client_credentials"},
+            auth=("cid", "shh"),
         )
         assert resp.status_code == 200
         tok = resp.json()
@@ -72,8 +74,9 @@ async def test_token_endpoint_issues_bearer():
 async def test_token_endpoint_requires_credentials():
     sim, base = await _sim()
     try:
-        resp = await _post(base, "/v1/oauth2/token", headers={},
-                           data={"grant_type": "client_credentials"})
+        resp = await _post(
+            base, "/v1/oauth2/token", headers={}, data={"grant_type": "client_credentials"}
+        )
         assert resp.status_code == 401
         assert resp.json()["error"] == "invalid_client"
     finally:
@@ -140,10 +143,13 @@ async def test_mock_response_header_forces_issue():
     try:
         oid = (await _post(base, "/v2/checkout/orders", _order())).json()["id"]
         declined = await _post(
-            base, f"/v2/checkout/orders/{oid}/capture", {},
-            headers={**AUTH,
-                     "PayPal-Mock-Response":
-                         '{"mock_application_codes": "INSTRUMENT_DECLINED"}'},
+            base,
+            f"/v2/checkout/orders/{oid}/capture",
+            {},
+            headers={
+                **AUTH,
+                "PayPal-Mock-Response": '{"mock_application_codes": "INSTRUMENT_DECLINED"}',
+            },
         )
         assert declined.status_code == 422
         assert declined.json()["details"][0]["issue"] == "INSTRUMENT_DECLINED"
@@ -179,7 +185,8 @@ async def test_refund_partial_full_and_exceeded():
         cap_id = doc["purchase_units"][0]["payments"]["captures"][0]["id"]
 
         part = await _post(
-            base, f"/v2/payments/captures/{cap_id}/refund",
+            base,
+            f"/v2/payments/captures/{cap_id}/refund",
             {"amount": {"currency_code": "USD", "value": "20.00"}},
         )
         assert part.status_code == 201
@@ -187,7 +194,8 @@ async def test_refund_partial_full_and_exceeded():
         assert part.json()["amount"]["value"] == "20.00"
 
         over = await _post(
-            base, f"/v2/payments/captures/{cap_id}/refund",
+            base,
+            f"/v2/payments/captures/{cap_id}/refund",
             {"amount": {"currency_code": "USD", "value": "30.01"}},
         )
         assert over.status_code == 422
@@ -224,11 +232,17 @@ async def test_strict_tokens_only_accepts_issued_ones():
         assert resp.status_code == 401
         # a token from the sim's own endpoint passes
         tok = (
-            await _post(base, "/v1/oauth2/token", headers={},
-                        data={"grant_type": "client_credentials"}, auth=("cid", "shh"))
+            await _post(
+                base,
+                "/v1/oauth2/token",
+                headers={},
+                data={"grant_type": "client_credentials"},
+                auth=("cid", "shh"),
+            )
         ).json()["access_token"]
-        ok = await _post(base, "/v2/checkout/orders", _order(),
-                         headers={"Authorization": f"Bearer {tok}"})
+        ok = await _post(
+            base, "/v2/checkout/orders", _order(), headers={"Authorization": f"Bearer {tok}"}
+        )
         assert ok.status_code == 201
     finally:
         await sim.stop()
