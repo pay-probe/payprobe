@@ -187,8 +187,8 @@ const ISO_SAMPLE = JSON.stringify(
               /></span>
               <p>
                 Pick a target on the left — a connection, a running simulator or
-                participant, a group, a crypto function, the insight model, or
-                a raw endpoint.
+                participant, a group, a crypto function, the insight model, or a
+                raw endpoint.
               </p>
             </div>
           } @else {

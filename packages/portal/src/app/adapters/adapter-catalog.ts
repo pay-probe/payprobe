@@ -198,7 +198,6 @@ export const ADAPTERS: AdapterSpec[] = [
     seeAlso: ["http", "tcp"],
   },
 
-
   // ----------------------------------------------------------------- mcp ----
   {
     slug: "mcp",
@@ -213,7 +212,7 @@ export const ADAPTERS: AdapterSpec[] = [
     source: "packages/worker/adapters/mcp_client/adapter.py",
     overview: [
       "The control plane of ADR-0009 (phase 3). Every major payment provider now publishes an MCP server; this one adapter reaches all of them — and any future one — with zero per-provider code. PayProbe already serves MCP (packages/mcp-server); this is the symmetric half: PayProbe as MCP client.",
-      "What it is FOR: fixture provisioning and provider-side verification as scenario steps — \"create a test customer before the run\", \"after the capture scenario, search the provider's records and assert the payment exists\". It is not a payment transport: scenarios drive payments through the http data plane (provider packs), and remote provider MCP connections ship external: true so the load engine refuses them.",
+      'What it is FOR: fixture provisioning and provider-side verification as scenario steps — "create a test customer before the run", "after the capture scenario, search the provider\'s records and assert the payment exists". It is not a payment transport: scenarios drive payments through the http data plane (provider packs), and remote provider MCP connections ship external: true so the load engine refuses them.',
       "Sessions are per call (open → initialize → operate → close), not held across calls: the mcp SDK's transports are anyio task groups bound to the entering task, and the engine may execute steps from different tasks. For a control-plane adapter the extra handshake per step is the honest trade.",
     ],
     protocolNotes: [
@@ -229,7 +228,7 @@ export const ADAPTERS: AdapterSpec[] = [
             key: "transport",
             type: "string",
             default: "http",
-            desc: "\"http\" (streamable HTTP) or \"stdio\" (spawn a local server process).",
+            desc: '"http" (streamable HTTP) or "stdio" (spawn a local server process).',
           },
           {
             key: "base_url",
@@ -244,7 +243,7 @@ export const ADAPTERS: AdapterSpec[] = [
           {
             key: "args",
             type: "list",
-            desc: "Arguments for the stdio command (e.g. [\"-y\", \"@stripe/mcp\"]).",
+            desc: 'Arguments for the stdio command (e.g. ["-y", "@stripe/mcp"]).',
           },
           {
             key: "env",
@@ -259,7 +258,7 @@ export const ADAPTERS: AdapterSpec[] = [
           {
             key: "authentication",
             type: "object",
-            desc: "{type: \"bearer\", token} or {type: \"header\", headerName, headerValue} — secret-named fields stored encrypted.",
+            desc: '{type: "bearer", token} or {type: "header", headerName, headerValue} — secret-named fields stored encrypted.',
           },
           {
             key: "headers",
@@ -289,13 +288,12 @@ export const ADAPTERS: AdapterSpec[] = [
       },
       {
         name: "call_tool",
-        summary:
-          "Explicit form: payload {name, arguments} calls one tool.",
+        summary: "Explicit form: payload {name, arguments} calls one tool.",
       },
       {
         name: "(any tool name)",
         summary:
-          "Convenience form: the action IS the tool name and the payload IS its arguments — action: \"create_customer\" just works (mirrors the http adapter's bare-action fallback).",
+          'Convenience form: the action IS the tool name and the payload IS its arguments — action: "create_customer" just works (mirrors the http adapter\'s bare-action fallback).',
       },
     ],
     errors: [
