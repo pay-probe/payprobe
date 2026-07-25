@@ -258,6 +258,14 @@ class StoresBackend:
     def list_load_runs(self) -> list[dict]:
         return _run_api_get("/load-runs")
 
+    def get_load_run(self, run_id: str) -> dict | None:
+        import urllib.parse
+        return _run_api_get(
+            f"/load-runs/{urllib.parse.quote(run_id, safe='')}")
+
+    def start_load_run(self, spec: dict) -> dict:
+        return _run_api_post("/load-runs", spec)
+
     # -- model insights (insight-service, ADR-0005; read-only + advisory) ------
 
     def get_run_insights(self, run_id: str) -> dict | None:

@@ -185,6 +185,14 @@ class RestBackend:
     def list_load_runs(self) -> list[dict]:
         return rest.request("GET", rest.r("/load-runs"))
 
+    def get_load_run(self, run_id: str) -> dict | None:
+        import urllib.parse
+        return _get_or_none(
+            rest.r(f"/load-runs/{urllib.parse.quote(run_id, safe='')}"))
+
+    def start_load_run(self, spec: dict) -> dict:
+        return rest.request("POST", rest.r("/load-runs"), spec)
+
     # -- model insights (insight-service, ADR-0005; read-only + advisory) ------
 
     def get_run_insights(self, run_id: str) -> dict | None:

@@ -338,12 +338,14 @@ def test_playground_tools_tiering():
     """playground_execute is EXECUTE tier: not a read (it fires traffic), not a
     journalled write (nothing to restore) — and advisor mode never sees it."""
     exec_names = {t.name for t in tools_for(("execute",))}
-    assert exec_names == {"playground_execute"}
+    assert exec_names == {"playground_execute", "start_load_run"}
     assert "playground_targets" in {t.name for t in tools_for(("read",))}
     assert "playground_execute" not in {s["name"] for s in schemas_for(("read",))}
     assert "playground_execute" not in {s["name"] for s in schemas_for(("read", "write"))}
+    assert "start_load_run" not in {s["name"] for s in schemas_for(("read", "write"))}
     # the default surface includes all three tiers
     assert "playground_execute" in {s["name"] for s in schemas_for()}
+    assert "start_load_run" in {s["name"] for s in schemas_for()}
 
 
 def test_playground_execute_refused_outside_allowed_tiers():
@@ -385,3 +387,44 @@ def test_playground_tools_bridge_to_orchestrator(monkeypatch):
     assert posted["body"]["target"]["id"] == "switch_visa"
     assert posted["body"]["message_format_id"] == "visa-base1"
     assert ctx.journal.entries() == []           # execute tier: never journalled
+
+
+def test_start_load_run_bridges_to_orchestrator(monkeypatch):
+    """start_load_run is EXECUTE tier: builds the profile body, POSTs to
+    /load-runs, never journals; get_load_run reads one run's metrics."""
+    from api import agent_tools
+
+    posted = {}
+
+    def fake_post(path, body):
+        posted["path"], posted["body"] = path, body
+        return {"run_id": "lr-1", "status": "running"}
+
+    def fake_get(path):
+        assert path == "/load-runs/lr-1"
+        return {"status": "completed", "tps": 50.0,
+                "latency_ms": {"p95": 21.5}}
+
+    monkeypatch.setattr(agent_tools, "_run_api_post", fake_post)
+    monkeypatch.setattr(agent_tools, "_run_api_get", fake_get)
+    ctx = _ctx()
+
+    out = dispatch(ctx, "start_load_run", {
+        "scenario_ids": ["scn-abc"], "profile_type": "steady",
+        "target_tps": 50, "workers": 2, "duration_s": 30,
+        "label": "smoke"})
+    assert out["ok"] is True and out["tier"] == "execute"
+    assert out["result"]["run_id"] == "lr-1"
+    assert posted["path"] == "/load-runs"
+    assert posted["body"]["type"] == "steady"
+    assert posted["body"]["scenario_ids"] == ["scn-abc"]
+    assert posted["body"]["workers"] == 2
+    assert ctx.journal.entries() == []           # execute tier: never journalled
+
+    got = dispatch(ctx, "get_load_run", {"run_id": "lr-1"})
+    assert got["ok"] is True and got["tier"] == "read"
+    assert got["result"]["status"] == "completed"
+
+    # a scenario-less start is refused before any HTTP call
+    bad = dispatch(_ctx(), "start_load_run", {"target_tps": 10})
+    assert bad["ok"] is False and "scenario" in bad["error"]

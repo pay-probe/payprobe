@@ -111,6 +111,11 @@ class Backend(Protocol):
     def list_running_participants(self) -> list[dict]: ...
     def list_running_simulators(self) -> list[dict]: ...
     def list_load_runs(self) -> list[dict]: ...
+    def get_load_run(self, run_id: str) -> dict | None: ...
+    # load runs are the one runtime START the assistant may perform: ad-hoc
+    # traffic (like the playground), not a config mutation — so `execute` tier,
+    # unjournalled. The operator stops it (or it drains on duration).
+    def start_load_run(self, spec: dict) -> dict: ...
     # model insights (insight-service, ADR-0005; read-only + advisory —
     # get_* maps a 404 to None like every other resource)
     def get_run_insights(self, run_id: str) -> dict | None: ...
@@ -581,6 +586,19 @@ def _list_load_runs(ctx: ToolContext, args: dict) -> Any:
     return rows[:limit]
 
 
+@_tool("get_load_run", "read",
+       "Live or persisted detail for ONE load run: achieved tps, "
+       "sent/received/errors, latency percentiles (p50/p95/p99), saturation and "
+       "worker count. Poll this after start_load_run until `status` is "
+       "'completed' to report the final metrics.",
+       _obj({"run_id": _STR}, ["run_id"]))
+def _get_load_run(ctx: ToolContext, args: dict) -> Any:
+    out = ctx.backend.get_load_run(args["run_id"])
+    if out is None:
+        raise ToolError(f"no load run '{args['run_id']}'")
+    return out
+
+
 # -- model insights (insight-service, ADR-0005 — advisory, read-only) ----------
 
 @_tool("get_run_insights", "read",
@@ -837,3 +855,45 @@ def _playground_execute(ctx: ToolContext, args: dict) -> Any:
     return ctx.backend.playground_execute(
         args.get("target") or {}, args["action"], args.get("payload") or {},
         args.get("message_format_id"), args.get("label"))
+
+
+@_tool("start_load_run", "execute",
+       "Start a distributed load test and return its `run_id` (status "
+       "'running'). Resolve the transaction like a normal run — `scenario_ids` "
+       "(saved) or inline `scenarios`, plus `environment_name` — then drive it "
+       "across `workers` processes under a `profile_type`: steady | ramp | "
+       "spike | soak. `target_tps` is the steady rate; ramp/spike/soak knobs "
+       "(start_tps, end_tps, ramp_s, spike_tps, connections, …) go in `extra`. "
+       "This fires REAL traffic at the resolved endpoints; it is not journalled "
+       "(nothing to restore — the run drains on `duration_s` or stops from the "
+       "portal). Provider connections marked external are refused by design. "
+       "Poll get_load_run(run_id) until status is 'completed' for the metrics.",
+       _obj({"scenario_ids": {"type": "array", "items": _STR},
+             "scenarios": {"type": "array", "items": {"type": "object"}},
+             "environment_name": _STR,
+             "profile_type": _STR,
+             "duration_s": {"type": "number"},
+             "workers": {"type": "integer"},
+             "target_tps": {"type": "number"},
+             "label": _STR,
+             "extra": {"type": "object"}}))
+def _start_load_run(ctx: ToolContext, args: dict) -> Any:
+    if not args.get("scenario_ids") and not args.get("scenarios"):
+        raise ToolError("start_load_run needs scenario_ids or inline scenarios")
+    body: dict = {
+        "type": args.get("profile_type") or "steady",
+        "duration_s": float(args.get("duration_s") or 60.0),
+        "workers": int(args.get("workers") or 1),
+        "target_tps": float(args.get("target_tps") or 0.0),
+    }
+    if args.get("scenario_ids"):
+        body["scenario_ids"] = args["scenario_ids"]
+    if args.get("scenarios"):
+        body["scenarios"] = args["scenarios"]
+    if args.get("environment_name"):
+        body["environment_name"] = args["environment_name"]
+    if args.get("label"):
+        body["label"] = args["label"]
+    if args.get("extra"):
+        body.update(args["extra"])
+    return ctx.backend.start_load_run(body)
