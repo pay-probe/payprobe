@@ -10,6 +10,12 @@
 
 FROM python:3.12-slim
 
+# Apply Debian security updates so base-layer CVEs (e.g. perl-base
+# CVE-2026-8376 / CVE-2026-42496 / CVE-2026-13221, fixed in
+# 5.40.1-6+deb13u1) don't ship in the image.
+RUN apt-get update && apt-get -y upgrade \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # uvloop for the event loop; httpx powers `http` nodes; pycryptodome powers
