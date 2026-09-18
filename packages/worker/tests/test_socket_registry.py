@@ -15,10 +15,10 @@ from worker.adapters.tcp.adapter import TcpAdapter
 @pytest.fixture(autouse=True)
 def _clean_registry():
     # tests share the process-global registry — start and end empty
-    for row in list(socket_registry._socks):  # noqa: SLF001 — test reset
+    for row in list(socket_registry._socks):
         socket_registry._socks.pop(row, None)
     yield
-    for row in list(socket_registry._socks):  # noqa: SLF001 — test reset
+    for row in list(socket_registry._socks):
         socket_registry._socks.pop(row, None)
 
 
@@ -70,7 +70,7 @@ async def test_drop_unregisters_then_reconnect_reregisters():
         assert len(socket_registry.snapshot()) == 1
 
         # sever the socket server-side; the drop must unregister…
-        adapter._writer.close()  # noqa: SLF001 — simulate a peer drop
+        adapter._writer.close()
         for _ in range(50):
             if not socket_registry.snapshot():
                 break

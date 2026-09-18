@@ -206,7 +206,7 @@ class TcpProxy(TcpResponder):
             for task in pending:
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
-        except (asyncio.TimeoutError, OSError) as exc:
+        except (TimeoutError, OSError) as exc:
             # Upstream unreachable / refused / reset: drop the client too.
             log.warning("proxy: upstream connect/relay failed: %s", exc)
         except Exception as exc:  # noqa: BLE001

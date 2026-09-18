@@ -135,7 +135,7 @@ async def test_group_recovers_after_member_restart():
     for _ in range(4):
         try:
             await group.execute("send_0200", {})
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - deliberate catch-all
             pass
     assert state["m1"]["ok"] >= 3  # survivor kept serving
     assert state["m2"]["ok"] == 1  # down member took nothing more

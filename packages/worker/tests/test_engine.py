@@ -9,16 +9,16 @@ import asyncio
 import pytest
 
 from worker.engine import (
-    WorkerEngine,
-    InMemorySink,
-    PASSED,
-    FAILED,
     BLOCKED,
-    STEP_RESULT,
+    FAILED,
+    PASSED,
     PHASE_UPDATE,
     RUN_COMPLETED,
-    resolve_value,
+    STEP_RESULT,
+    InMemorySink,
     UnresolvedReferenceError,
+    WorkerEngine,
+    resolve_value,
 )
 
 MOCK_ENV = {
@@ -908,10 +908,10 @@ async def test_code_node_error_fails_scenario():
 @pytest.fixture()
 def http_server(monkeypatch):
     """A tiny localhost JSON server; proxies disabled so httpx hits it directly."""
-    import json as _json
-    import threading
     import http.server
+    import json as _json
     import socketserver
+    import threading
 
     for var in ("ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
         monkeypatch.delenv(var, raising=False)

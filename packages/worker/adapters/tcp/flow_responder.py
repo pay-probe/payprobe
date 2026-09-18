@@ -25,8 +25,8 @@ participant responder; this class only binds it to the TCP wire.
 
 from __future__ import annotations
 
-from .responder import TcpResponder
 from ..flow_mixin import FlowTraceMixin
+from .responder import TcpResponder
 
 
 class FlowResponder(FlowTraceMixin, TcpResponder):
@@ -48,7 +48,7 @@ class FlowResponder(FlowTraceMixin, TcpResponder):
         await super().stop()
         try:
             await self._registry.disconnect_all()
-        except Exception:  # noqa: BLE001 — best-effort teardown
+        except Exception:  # noqa: S110, BLE001 — best-effort teardown
             pass
 
     def _request_view(self, parsed: dict) -> dict:  # pragma: no cover - hook

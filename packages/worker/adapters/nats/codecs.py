@@ -107,7 +107,7 @@ def _encode_iso8583(payload: Any, config: dict | None) -> bytes:
     from ..tcp.iso8583 import iso_pack
 
     if not isinstance(payload, dict):
-        raise ValueError("iso8583 codec needs a {mti, de:{…}} payload")
+        raise ValueError("iso8583 codec needs a {mti, de:{…}} payload")  # noqa: TRY004
     mti = str(payload.get("mti") or payload.get("command") or "")
     if not mti:
         raise ValueError("iso8583 codec payload has no 'mti'")

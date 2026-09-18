@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import random
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 #: Reserved leading tokens that route a ``${...}`` reference to a generator
@@ -224,7 +224,7 @@ class GeneratorContext:
         if fname == "epoch":
             return int(time.time())
         if fname == "iso":
-            return datetime.now(timezone.utc).isoformat()
+            return datetime.now(UTC).isoformat()
         if fname == "rrn":
             return self._rrn()
         raise GeneratorError(expr)
@@ -290,19 +290,18 @@ class GeneratorContext:
     # -- primitives ----------------------------------------------------------
 
     def _uuid(self) -> str:
-        return "%032x" % self._rng.getrandbits(128)
+        return f"{self._rng.getrandbits(128):032x}"
 
     def _pan(self, bin_: str, length: int) -> str:
         bin_ = "".join(c for c in str(bin_) if c.isdigit())
         if not bin_:
             raise GeneratorError("rand.pan: a numeric BIN is required")
-        if length < len(bin_) + 1:
-            length = len(bin_) + 1
+        length = max(length, len(bin_) + 1)
         body = bin_ + "".join(str(self._rng.randint(0, 9)) for _ in range(length - len(bin_) - 1))
         return body + luhn_check_digit(body)
 
     def _rrn(self) -> str:
         """A 12-digit RRN: yDDDHHMM time prefix + a 4-digit random trace."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         prefix = f"{now.year % 10}{now.timetuple().tm_yday:03d}{now.hour:02d}{now.minute:02d}"
         return prefix + "".join(str(self._rng.randint(0, 9)) for _ in range(4))

@@ -3,7 +3,7 @@ reusing the shared GraphExecutor core (trigger → logic → reply)."""
 
 import pytest
 
-from worker.engine import FlowRunner, NullSink, PASSED
+from worker.engine import PASSED, FlowRunner, NullSink
 
 
 def _flow():

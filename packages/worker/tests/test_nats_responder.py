@@ -10,8 +10,8 @@ import pytest
 pytest.importorskip("nats")
 
 import worker.adapters.nats.responder as nats_responder
-from worker.adapters.nats.responder import NatsResponder
 from worker.adapters.nats import codecs
+from worker.adapters.nats.responder import NatsResponder
 
 
 class FakeSub:

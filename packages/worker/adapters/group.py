@@ -13,7 +13,7 @@ The orchestrator inlines each member's resolved config into the group's
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from .base.base_adapter import BaseAdapter, StepResult
 from .selection import EndpointSelector
@@ -58,7 +58,7 @@ class GroupAdapter(BaseAdapter):
             try:
                 child = await self._child(index, member)
                 result = await child.execute(action, payload)
-            except Exception as exc:  # noqa: BLE001 — connect/transport blew up
+            except Exception as exc:
                 last_exc = exc
                 await self._evict(index)  # rebuild next time so a restart recovers
                 if not failover:
@@ -88,7 +88,7 @@ class GroupAdapter(BaseAdapter):
         if child is not None:
             try:
                 await child.disconnect()
-            except Exception:  # noqa: BLE001 — best-effort teardown
+            except Exception:  # noqa: S110, BLE001 — best-effort teardown
                 pass
 
     async def health_check(self) -> bool:
@@ -104,6 +104,6 @@ class GroupAdapter(BaseAdapter):
         for child in self._children.values():
             try:
                 await child.disconnect()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: S110, BLE001
                 pass
         self._children.clear()

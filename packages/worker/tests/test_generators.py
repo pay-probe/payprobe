@@ -3,7 +3,7 @@
 import pytest
 
 from worker.engine.generators import GeneratorContext, GeneratorError, luhn_check_digit
-from worker.engine.variables import resolve_value, UnresolvedReferenceError, GEN_KEY
+from worker.engine.variables import GEN_KEY, UnresolvedReferenceError, resolve_value
 
 
 def _luhn_ok(pan: str) -> bool:

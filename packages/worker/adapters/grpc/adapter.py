@@ -83,7 +83,7 @@ class GrpcAdapter(BaseAdapter):
         if tls.get("enabled"):
             root = None
             if tls.get("root_certs_path"):
-                with open(tls["root_certs_path"], "rb") as fh:
+                with open(tls["root_certs_path"], "rb") as fh:  # noqa: ASYNC230 - startup read
                     root = fh.read()
             creds = grpc.ssl_channel_credentials(root_certificates=root)
             self.channel = grpc.aio.secure_channel(self.target, creds)

@@ -2,6 +2,8 @@
 client. Same wire as TcpResponder, but the reply is computed by a flow graph
 (trigger -> if -> reply) instead of static rules."""
 
+from typing import ClassVar
+
 from worker.adapters.tcp.adapter import TcpAdapter
 from worker.adapters.tcp.flow_responder import FlowResponder
 from worker.adapters.tcp.responder import TcpResponder
@@ -176,9 +178,9 @@ async def test_resolve_records_downstream_call_and_propagates_cid():
 
     class _SR:
         success = True
-        assertions: list = []
-        request_payload: dict = {}
-        response_payload = {"response_code": "07"}
+        assertions: ClassVar[list] = []
+        request_payload: ClassVar[dict] = {}
+        response_payload: ClassVar[dict] = {"response_code": "07"}
         duration_ms = 3
         error = None
         raw_log = ""
@@ -223,8 +225,8 @@ async def test_successful_hop_records_payloads_and_ok():
 
     class _SR:
         success = True
-        request_payload = {"mti": "0200", "de": {"4": "000000000500"}}
-        response_payload = {"response_code": "07", "mti": "0210"}
+        request_payload: ClassVar[dict] = {"mti": "0200", "de": {"4": "000000000500"}}
+        response_payload: ClassVar[dict] = {"response_code": "07", "mti": "0210"}
         duration_ms = 4
         error = None
 

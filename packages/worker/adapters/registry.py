@@ -1,6 +1,7 @@
 """AdapterRegistry — resolves target name to adapter instance."""
 
 import logging
+
 from .base.base_adapter import BaseAdapter
 from .mock.adapter import MockAdapter
 
@@ -265,7 +266,7 @@ class AdapterRegistry:
         for target, task in tasks.items():
             try:
                 results[target] = await task
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - deliberate catch-all
                 log.warning(f"Health check failed for {target}: {e}")
                 results[target] = False
         # adapters that never connected during warmup are unhealthy
@@ -298,6 +299,6 @@ class AdapterRegistry:
         for target, adapter in self._instances.items():
             try:
                 await adapter.disconnect()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - deliberate catch-all
                 log.warning(f"Disconnect error for {target}: {e}")
         self._instances.clear()

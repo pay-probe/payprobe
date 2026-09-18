@@ -17,8 +17,8 @@ key *material* is random and key tokens only round-trip within this simulator
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from ...engine import crypto_tools as ct
 from .lmk import TestLmk, kcv6, read_key_field, variant_for_keytype

@@ -20,11 +20,11 @@ from typing import Any
 
 from .generators import GeneratorContext
 from .runner import (
+    PASSED,
+    REPLY_KEY,
     GraphExecutor,
     ScenarioResult,
     StepOutcome,
-    REPLY_KEY,
-    PASSED,
 )
 from .variables import GEN_KEY
 

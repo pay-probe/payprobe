@@ -21,9 +21,10 @@ protobuf-only (no grpcio import here) so it is unit-testable on its own.
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from google.protobuf import descriptor_pb2, descriptor_pool, json_format, message_factory
 
@@ -154,13 +155,13 @@ class ProtoRegistry:
 
     # -- loading -------------------------------------------------------------
 
-    def add_descriptor_set(self, descriptor_set: bytes) -> "ProtoRegistry":
+    def add_descriptor_set(self, descriptor_set: bytes) -> ProtoRegistry:
         fds = descriptor_pb2.FileDescriptorSet()
         fds.ParseFromString(descriptor_set)
         self.add_file_protos(fds.file)
         return self
 
-    def add_file_protos(self, file_protos: Iterable[Any]) -> "ProtoRegistry":
+    def add_file_protos(self, file_protos: Iterable[Any]) -> ProtoRegistry:
         for f in file_protos:
             self._files.setdefault(f.name, f)
         for name in list(self._files):

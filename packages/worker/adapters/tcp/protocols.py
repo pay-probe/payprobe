@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from . import iso8583
@@ -223,7 +223,7 @@ class Iso8583Protocol(TcpProtocol):
         them (DE7/DE12 YYYYMMDDhhmmss). Pick the format from each field's declared
         length so the stamp is valid whatever dialect is bound."""
         fields = fields if fields is not None else self.fields
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         full = now.strftime("%Y%m%d%H%M%S")  # 14: YYYYMMDDhhmmss
         by_len = {
             14: full,

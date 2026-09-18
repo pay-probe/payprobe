@@ -22,18 +22,19 @@ import random
 import socket
 import time
 import uuid
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 try:  # uvloop is a ~2x event-loop win; optional for dev
     import uvloop
 
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-except Exception:  # noqa: BLE001
+except Exception:  # noqa: BLE001, S110
     pass
 
-from .engine import WorkerEngine, NullSink, ScenarioRunner
+from .engine import NullSink, ScenarioRunner, WorkerEngine
 from .engine.generators import GeneratorContext
-from .engine.load import LoadDriver, Shard, RedisLoadBus, SOAK
+from .engine.load import SOAK, LoadDriver, RedisLoadBus, Shard
 
 log = logging.getLogger("payprobe.load_worker")
 

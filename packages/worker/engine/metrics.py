@@ -30,9 +30,9 @@ from __future__ import annotations
 
 import math
 import threading
-from typing import Iterable
+from collections.abc import Iterable
 
-_REGISTRY: list["_Metric"] = []
+_REGISTRY: list[_Metric] = []
 _REG_LOCK = threading.Lock()
 
 DEFAULT_BUCKETS = (

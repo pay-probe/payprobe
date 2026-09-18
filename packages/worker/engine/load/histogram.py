@@ -45,7 +45,7 @@ class LatencyHistogram:
     """Bucketed latency counts in milliseconds. Thread-safety is the caller's
     job (the driver only touches it from its own event loop)."""
 
-    __slots__ = ("counts", "_count", "_min", "_max", "_sum")
+    __slots__ = ("_count", "_max", "_min", "_sum", "counts")
 
     def __init__(self) -> None:
         self.counts = [0] * _N
@@ -63,10 +63,8 @@ class LatencyHistogram:
         self.counts[idx] += 1
         self._count += 1
         self._sum += latency_ms
-        if latency_ms < self._min:
-            self._min = latency_ms
-        if latency_ms > self._max:
-            self._max = latency_ms
+        self._min = min(self._min, latency_ms)
+        self._max = max(self._max, latency_ms)
 
     # -- merge ---------------------------------------------------------------
     def merge_counts(
@@ -80,8 +78,7 @@ class LatencyHistogram:
         self._sum += total
         if samples and lo < self._min:
             self._min = lo
-        if hi > self._max:
-            self._max = hi
+        self._max = max(self._max, hi)
 
     # -- reads ---------------------------------------------------------------
     @property
@@ -138,8 +135,7 @@ class LatencyHistogram:
         hi = float(snap.get("max", 0.0))
         if s and lo < self._min:
             self._min = lo
-        if hi > self._max:
-            self._max = hi
+        self._max = max(self._max, hi)
 
 
 @dataclass

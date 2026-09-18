@@ -29,7 +29,7 @@ def _bitmap(des: set[int], width: int) -> str:
     n = 0
     for d in des:
         n |= 1 << (width - d)
-    return format(n, "0%dX" % (width // 4))
+    return format(n, f"0{width // 4}X")
 
 
 def iso_unpack(msg: str, fields: dict[str, dict]) -> dict[str, Any]:

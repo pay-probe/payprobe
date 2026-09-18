@@ -15,13 +15,13 @@ import asyncio
 import pytest
 
 from worker.engine.load import (
-    LoadProfile,
+    SOAK,
+    STEADY,
+    InMemoryLoadBus,
     LatencyHistogram,
     LoadDriver,
-    InMemoryLoadBus,
+    LoadProfile,
     merge_samples,
-    STEADY,
-    SOAK,
 )
 
 # -- histogram ---------------------------------------------------------------
@@ -229,11 +229,12 @@ async def test_soak_driver_opens_clients_and_reconnects():
 
 
 async def test_coordinator_aggregates_inproc_workers():
-    import sys
     import pathlib
+    import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "orchestrator"))
     from api.load_coordinator import LoadCoordinator
+
     from worker.engine import InMemoryStreamBackbone
 
     bus = InMemoryLoadBus()
@@ -286,12 +287,13 @@ async def test_coordinator_exports_worker_rss_gauge():
     """Workers ship rss_bytes in their samples; the coordinator surfaces it as a
     per-worker Prometheus gauge (the soak/leak-trend series) while the run is
     live, then drops the series when the run finishes."""
-    import sys
     import pathlib
+    import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "orchestrator"))
     from api.load_coordinator import LoadCoordinator
     from api.observability import LOAD_WORKER_RSS
+
     from worker.engine import InMemoryStreamBackbone
 
     bus = InMemoryLoadBus()
@@ -346,11 +348,12 @@ async def test_coordinator_exports_worker_rss_gauge():
 async def test_coordinator_registers_and_unregisters_with_run_control():
     """A load run must be registered with run_control so any replica can stop
     it, and unregistered when it finishes."""
-    import sys
     import pathlib
+    import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "orchestrator"))
     from api.load_coordinator import LoadCoordinator
+
     from worker.engine import InMemoryStreamBackbone
 
     events: list[tuple[str, str]] = []
@@ -406,11 +409,12 @@ async def test_coordinator_waits_for_drain_before_finalizing():
     backlog before it's finalized — the final summary reconciles (pending == 0,
     everything sent is received), not a truncated roll-up that drops outstanding
     transactions the moment the send window closes."""
-    import sys
     import pathlib
+    import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "orchestrator"))
     from api.load_coordinator import LoadCoordinator
+
     from worker.engine import InMemoryStreamBackbone
 
     bus = InMemoryLoadBus()
@@ -482,11 +486,12 @@ async def test_coordinator_waits_for_drain_before_finalizing():
 async def test_drain_budget_is_a_max_not_a_fixed_wait():
     """``drain_s`` is a maximum: a healthy run with nothing outstanding finalizes
     immediately after the send window, it does NOT sit for the whole budget."""
-    import sys
     import pathlib
+    import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "orchestrator"))
     from api.load_coordinator import LoadCoordinator
+
     from worker.engine import InMemoryStreamBackbone
 
     bus = InMemoryLoadBus()
@@ -531,11 +536,12 @@ async def test_duration_clock_starts_when_fleet_is_driving():
     """Worker startup latency must not eat the run's send window. A worker that
     takes a while to provision/warm up should still drive for the FULL duration —
     the coordinator starts the duration clock at first sample, not run creation."""
-    import sys
     import pathlib
+    import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "orchestrator"))
     from api.load_coordinator import LoadCoordinator
+
     from worker.engine import InMemoryStreamBackbone
 
     bus = InMemoryLoadBus()
@@ -594,11 +600,12 @@ async def test_await_ready_waits_through_transient_notice():
     gate waits for a real sample. Only a terminal ``startup_failed`` bails early.
     (Regression: a slow provision that briefly reports 'short' used to reset the
     clock and cut the run to a few seconds.)"""
-    import sys
     import pathlib
+    import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "orchestrator"))
     from api.load_coordinator import LoadCoordinator, LoadRun
+
     from worker.engine import InMemoryStreamBackbone
 
     coord = LoadCoordinator(
@@ -625,11 +632,12 @@ async def test_await_ready_waits_through_transient_notice():
 async def test_await_ready_bails_on_terminal_failure():
     """When no worker will ever start (``startup_failed``), the gate returns at
     once instead of blocking the whole startup timeout."""
-    import sys
     import pathlib
+    import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "orchestrator"))
     from api.load_coordinator import LoadCoordinator, LoadRun
+
     from worker.engine import InMemoryStreamBackbone
 
     coord = LoadCoordinator(
@@ -680,11 +688,12 @@ class _NonInMemBus:
 
 
 def _coord(bus, **kw):
-    import sys
     import pathlib
+    import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "orchestrator"))
     from api.load_coordinator import LoadCoordinator
+
     from worker.engine import InMemoryStreamBackbone
 
     async def worker(b, run_id):
@@ -820,7 +829,7 @@ async def test_weighted_run_once_single_scenario_is_passthrough():
     eng = WorkerEngine({})
     sc = {"id": "noop", "steps": []}
     fn = make_weighted_run_once(eng, [sc], [1.0])
-    ok, latency, err = await fn()
+    ok, _latency, err = await fn()
     assert ok and err is None
 
 
@@ -1035,11 +1044,12 @@ async def test_bus_retune_round_trip():
 
 
 async def test_coordinator_retune_signals_bus_and_updates_profile():
-    import sys
     import pathlib
+    import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "orchestrator"))
     from api.load_coordinator import LoadCoordinator, LoadRun
+
     from worker.engine import InMemoryStreamBackbone
 
     bus = InMemoryLoadBus()

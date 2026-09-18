@@ -79,7 +79,7 @@ async def reflect_descriptor_set(channel, *, metadata=None, timeout: float = 30.
 
         try:
             return await _run(method)
-        except Exception:  # noqa: BLE001 - try the legacy service before giving up
+        except Exception:
             if fallback is _V1ALPHA_FALLBACK:
                 return await _run(_V1ALPHA_METHOD)
             raise

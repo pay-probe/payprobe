@@ -15,8 +15,8 @@ import pytest
 pytest.importorskip("nats")
 
 import worker.adapters.nats.adapter as nats_adapter
-from worker.adapters.nats.adapter import NatsAdapter
 from worker.adapters.nats import codecs
+from worker.adapters.nats.adapter import NatsAdapter
 
 
 class FakeMsg:

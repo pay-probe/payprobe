@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field, asdict
-from typing import Any, AsyncIterator, Iterable, Protocol
+from collections.abc import AsyncIterator, Iterable
+from dataclasses import asdict, dataclass, field
+from typing import Any, Protocol
 
 # -- event types -------------------------------------------------------------
 
@@ -63,7 +64,7 @@ class InMemorySink:
 class NullSink:
     """Discards everything. Default when no sink is supplied."""
 
-    async def publish(self, event: RunEvent) -> None:  # noqa: D401
+    async def publish(self, event: RunEvent) -> None:
         return None
 
 

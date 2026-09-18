@@ -64,7 +64,7 @@ import logging
 import random
 import re
 import string
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..http.responder import HttpResponder, _dig
@@ -101,7 +101,7 @@ _PATH_RE = re.compile(
 
 
 def _now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _gen_id() -> str:
@@ -461,5 +461,5 @@ class CyberSourceSimulator(HttpResponder):
             y, m = int(yr), int(mo)
         except (TypeError, ValueError):
             return False
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return (y, m) < (now.year, now.month)

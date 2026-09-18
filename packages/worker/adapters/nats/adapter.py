@@ -47,7 +47,7 @@ from . import codecs
 async def _nats_connect(servers: list[str], **opts: Any):
     """Open a NATS connection. Isolated in one function so ``nats-py`` is imported
     lazily (optional dep) and tests can monkeypatch the whole connect."""
-    import nats  # noqa: PLC0415 — lazy: keep nats-py optional
+    import nats
 
     return await nats.connect(servers=servers, **opts)
 
@@ -75,7 +75,7 @@ def _stream_limits(js_cfg: dict) -> dict:
     ret = js_cfg.get("retention")
     if ret:
         try:  # map the string to the nats-py enum when the lib is present
-            from nats.js.api import RetentionPolicy  # noqa: PLC0415
+            from nats.js.api import RetentionPolicy
 
             out["retention"] = RetentionPolicy(str(ret).lower())
         except Exception:  # noqa: BLE001 — pass the raw value (fakes/older libs)
@@ -166,7 +166,7 @@ class NatsAdapter(BaseAdapter):
             try:
                 await js.consumer_info(stream, durable)  # exists → not ours
             except Exception:  # noqa: BLE001 — create the durable consumer
-                from nats.js.api import ConsumerConfig  # noqa: PLC0415 — lazy
+                from nats.js.api import ConsumerConfig
 
                 cc = ConsumerConfig(
                     durable_name=durable,
@@ -194,13 +194,13 @@ class NatsAdapter(BaseAdapter):
             stream, durable = self._created_consumer
             try:
                 await js.delete_consumer(stream, durable)
-            except Exception:  # noqa: BLE001 — best-effort teardown
+            except Exception:  # noqa: S110, BLE001 — best-effort teardown
                 pass
             self._created_consumer = None
         if self._created_stream and self._js_cfg.get("delete_on_stop"):
             try:
                 await js.delete_stream(self._created_stream)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: S110, BLE001
                 pass
             self._created_stream = None
 
@@ -302,7 +302,7 @@ class NatsAdapter(BaseAdapter):
         except Exception:  # noqa: BLE001 — best-effort; fall back to hard close
             try:
                 await nc.close()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: S110, BLE001
                 pass
         self._nc = None
         self._js = None

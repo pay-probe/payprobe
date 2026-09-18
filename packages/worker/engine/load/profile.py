@@ -13,7 +13,7 @@ pacing loop in the driver with no separate controller threads.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 # -- profile types -----------------------------------------------------------
@@ -143,7 +143,7 @@ class Shard:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "Shard":
+    def from_dict(cls, d: dict[str, Any]) -> Shard:
         fields = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         return cls(**{k: v for k, v in d.items() if k in fields})
 
@@ -237,6 +237,6 @@ class LoadProfile:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "LoadProfile":
+    def from_dict(cls, d: dict[str, Any]) -> LoadProfile:
         fields = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         return cls(**{k: v for k, v in d.items() if k in fields})

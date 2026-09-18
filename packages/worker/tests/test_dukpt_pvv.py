@@ -12,8 +12,8 @@ import pytest
 pytest.importorskip("Crypto")  # pycryptodome
 
 from worker.engine.crypto_tools import (
-    dukpt_ipek,
     dukpt_derive_key,
+    dukpt_ipek,
     dukpt_pin_block,
     pin_block_decode,
     pvv,

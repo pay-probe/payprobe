@@ -81,9 +81,7 @@ def _match_condition(value: Any, cond: Any) -> bool:
                 return False
         if "gte" in cond and not _num_ge(value, cond["gte"]):
             return False
-        if "lte" in cond and not _num_le(value, cond["lte"]):
-            return False
-        return True
+        return not ("lte" in cond and not _num_le(value, cond["lte"]))
     return sval == str(cond)
 
 

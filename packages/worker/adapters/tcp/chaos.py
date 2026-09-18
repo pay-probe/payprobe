@@ -164,7 +164,7 @@ class ChaosEngine:
 
     # -- helpers -------------------------------------------------------------
 
-    def _hit(self, pct: float | int | None, flag: bool | None) -> bool:
+    def _hit(self, pct: float | None, flag: bool | None) -> bool:
         if flag:
             return True
         if pct is None:
@@ -179,7 +179,7 @@ class ChaosEngine:
             return True
         return self.rng.random() * 100.0 < p
 
-    def _latency(self, spec: int | float | dict | None) -> float:
+    def _latency(self, spec: float | dict | None) -> float:
         if spec is None:
             return 0.0
         if isinstance(spec, dict):

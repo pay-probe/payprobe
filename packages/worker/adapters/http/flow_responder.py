@@ -22,8 +22,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from .responder import HttpResponder
 from ..flow_mixin import FlowTraceMixin
+from .responder import HttpResponder
 
 
 class HttpFlowResponder(FlowTraceMixin, HttpResponder):
@@ -89,5 +89,5 @@ class HttpFlowResponder(FlowTraceMixin, HttpResponder):
         await super().stop()
         try:
             await self._registry.disconnect_all()
-        except Exception:  # noqa: BLE001 — best-effort teardown
+        except Exception:  # noqa: S110, BLE001 — best-effort teardown
             pass

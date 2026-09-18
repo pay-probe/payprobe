@@ -2,7 +2,7 @@
 URL and maps the response into a StepResult. Network is stubbed."""
 
 from worker.adapters.http.adapter import HttpAdapter
-import worker.engine.http_runner as http_runner
+from worker.engine import http_runner
 from worker.engine.http_runner import HttpResult
 
 

@@ -22,16 +22,17 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Iterator
+from typing import Any
 
 from ..adapters.base.base_adapter import StepResult
 from .code_runner import run_code
 from .crypto_tools import run_crypto
+from .events import STEP_RESULT, EventSink, NullSink, RunEvent
 from .generators import GeneratorContext
 from .http_runner import run_http
-from .events import RunEvent, STEP_RESULT, EventSink, NullSink
-from .variables import resolve_inputs, resolve_value, UnresolvedReferenceError, GEN_KEY
+from .variables import GEN_KEY, UnresolvedReferenceError, resolve_inputs, resolve_value
 
 # Status constants used across engine, persistence and reporting.
 PASSED = "passed"
@@ -256,7 +257,7 @@ class GraphExecutor:
         context: dict[str, Any],
         scenario_id: str,
         phase: int,
-    ) -> "StepOutcome | None":
+    ) -> StepOutcome | None:
         """Run one non-control node by ``kind`` and return its outcome.
 
         Returns ``None`` for control-flow kinds (if/switch/loop/merge/wait),
@@ -294,7 +295,7 @@ class GraphExecutor:
         context: dict[str, Any],
         scenario_id: str,
         phase: int,
-        result: "ScenarioResult",
+        result: ScenarioResult,
         stop_on_failure: bool,
     ) -> None:
         """Walk the node graph from its entry node, following control flow."""
@@ -348,7 +349,7 @@ class GraphExecutor:
         context: dict[str, Any],
         scenario_id: str,
         phase: int,
-        result: "ScenarioResult",
+        result: ScenarioResult,
         stop_on_failure: bool,
         budget: dict[str, int],
     ) -> None:
@@ -653,7 +654,7 @@ class GraphExecutor:
         context: dict[str, Any],
         scenario_id: str,
         phase: int,
-    ) -> "StepOutcome":
+    ) -> StepOutcome:
         """Execute a custom-code node and expose its return value downstream."""
         cfg = step.get("config") or {}
         language = cfg.get("language", "python")
@@ -694,7 +695,7 @@ class GraphExecutor:
         context: dict[str, Any],
         scenario_id: str,
         phase: int,
-    ) -> "StepOutcome":
+    ) -> StepOutcome:
         """Emit a fixed JSON object (with ${...} refs resolved) as this node's
         response — a starting point downstream steps read via ${id.response.*}."""
         cfg = step.get("config") or {}
@@ -734,7 +735,7 @@ class GraphExecutor:
         context: dict[str, Any],
         scenario_id: str,
         phase: int,
-    ) -> "StepOutcome":
+    ) -> StepOutcome:
         """Run a payment-crypto operation (real algorithms) and expose the result."""
         cfg = step.get("config") or {}
         op = cfg.get("operation", "")
@@ -781,7 +782,7 @@ class GraphExecutor:
         context: dict[str, Any],
         scenario_id: str,
         phase: int,
-    ) -> "StepOutcome":
+    ) -> StepOutcome:
         """Run another scenario as a sub-flow and expose its per-step outputs.
 
         The sub-scenario definition is taken from the attached ``subflows`` map.
@@ -795,7 +796,7 @@ class GraphExecutor:
         sub = self._subflows.get(sub_id)
         start = time.monotonic()
 
-        def _fail(msg: str) -> "StepOutcome":
+        def _fail(msg: str) -> StepOutcome:
             return StepOutcome(
                 step_id=step["id"],
                 target="call",
@@ -865,7 +866,7 @@ class GraphExecutor:
         context: dict[str, Any],
         scenario_id: str,
         phase: int,
-    ) -> "StepOutcome":
+    ) -> StepOutcome:
         """Perform an HTTP request node and expose its response downstream."""
         cfg = step.get("config") or {}
         start = time.monotonic()
@@ -889,7 +890,7 @@ class GraphExecutor:
         self,
         step: dict,
         status: str,
-        result: "ScenarioResult",
+        result: ScenarioResult,
         scenario_id: str,
         phase: int,
         branch: str | None = None,
@@ -1039,7 +1040,7 @@ class GraphExecutor:
             # the executor (engine) holds the adapter instance and evaluates the
             # scenario's assertions against the response via adapter.assert_response
             sr: StepResult = await execute_step(target, action, payload, assertion_rules)
-        except Exception as exc:  # adapter blew up
+        except Exception as exc:  # adapter blew up  # noqa: BLE001 - deliberate catch-all
             outcome = StepOutcome(
                 step_id=step_id,
                 target=display_target,

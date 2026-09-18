@@ -24,23 +24,23 @@ import time
 from ..adapters.base.base_adapter import StepResult
 from ..adapters.registry import AdapterRegistry
 from .events import (
-    RunEvent,
-    EventSink,
-    NullSink,
-    FanoutSink,
-    QueueSink,
-    RUN_STARTED,
     PHASE_UPDATE,
-    SCENARIO_RESULT,
     RUN_COMPLETED,
+    RUN_STARTED,
+    SCENARIO_RESULT,
+    EventSink,
+    FanoutSink,
+    NullSink,
+    QueueSink,
+    RunEvent,
 )
 from .runner import (
-    ScenarioRunner,
-    ScenarioResult,
-    scenario_targets,
-    PASSED,
-    FAILED,
     BLOCKED,
+    FAILED,
+    PASSED,
+    ScenarioResult,
+    ScenarioRunner,
+    scenario_targets,
 )
 
 log = logging.getLogger(__name__)
@@ -114,21 +114,20 @@ class WorkerEngine:
         payload: dict,
         assertions: list,
     ) -> StepResult:
-        async with self.connection_semaphore:
-            async with self.ops_limiter:
-                adapter = await self.registry.get(target)
-                start = time.monotonic()
-                sr = await adapter.execute(action, payload)
-                if not sr.duration_ms:
-                    sr.duration_ms = int((time.monotonic() - start) * 1000)
-                if assertions:
-                    # the step's measured timing is an assertable metric
-                    # (spec §10 tracks duration_ms per step); expose it
-                    # alongside the response without clobbering a real field.
-                    target_obj = dict(sr.response_payload or {})
-                    target_obj.setdefault("duration_ms", sr.duration_ms)
-                    sr.assertions = adapter.assert_response(target_obj, assertions)
-                return sr
+        async with self.connection_semaphore, self.ops_limiter:
+            adapter = await self.registry.get(target)
+            start = time.monotonic()
+            sr = await adapter.execute(action, payload)
+            if not sr.duration_ms:
+                sr.duration_ms = int((time.monotonic() - start) * 1000)
+            if assertions:
+                # the step's measured timing is an assertable metric
+                # (spec §10 tracks duration_ms per step); expose it
+                # alongside the response without clobbering a real field.
+                target_obj = dict(sr.response_payload or {})
+                target_obj.setdefault("duration_ms", sr.duration_ms)
+                sr.assertions = adapter.assert_response(target_obj, assertions)
+            return sr
 
     # -- the run -------------------------------------------------------------
 
@@ -307,9 +306,7 @@ class WorkerEngine:
         blocked = sum(r.status == BLOCKED for r in results)
         if failed:
             status = FAILED
-        elif total and passed == total:
-            status = PASSED
-        elif total == 0:
+        elif total and passed == total or total == 0:
             status = PASSED
         else:
             status = "partial"

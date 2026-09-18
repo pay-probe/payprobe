@@ -220,7 +220,7 @@ def paypal_transmission_headers(
 
 __all__ = [
     "WebhookEmitter",
-    "stripe_signature",
     "adyen_hmac_signature",
     "paypal_transmission_headers",
+    "stripe_signature",
 ]

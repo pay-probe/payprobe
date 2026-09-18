@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Protocol
+from collections.abc import AsyncIterator
+from typing import Any, Protocol
 
-from .events import RunEvent, RUN_COMPLETED
+from .events import RUN_COMPLETED, RunEvent
 
 # A stored event is (id, payload-dict). ``id`` is opaque to consumers; they only
 # pass the last id they saw back in to resume.
@@ -47,7 +48,7 @@ class StreamBackbone(Protocol):
 class StreamSink:
     """Adapts a ``StreamBackbone`` to the engine's ``EventSink`` interface."""
 
-    def __init__(self, backbone: "StreamBackbone") -> None:
+    def __init__(self, backbone: StreamBackbone) -> None:
         self.backbone = backbone
 
     async def publish(self, event: RunEvent) -> None:

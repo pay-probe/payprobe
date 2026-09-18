@@ -19,10 +19,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Awaitable, Callable, Protocol
+from collections.abc import Awaitable, Callable
+from typing import Any, Protocol
 
 from .histogram import LatencyHistogram, LoadStats
-from .profile import Shard, SOAK
+from .profile import SOAK, Shard
 
 log = logging.getLogger("payprobe.load_driver")
 
@@ -232,8 +233,7 @@ class LoadDriver:
         # waiting for a permit was never sent and is not counted here).
         async with self._in_flight:
             self.in_flight += 1
-            if self.in_flight > self.peak_in_flight:
-                self.peak_in_flight = self.in_flight
+            self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
             self.sent += 1
             try:
                 ok, latency, error = self._unpack(await self._run_once())  # type: ignore[misc]
@@ -284,7 +284,7 @@ class LoadDriver:
                 t.add_done_callback(tasks.discard)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=self._tick)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
         # The send window is over (duration reached, or a stop was signalled).
         # Drain outstanding transactions so each one that was launched resolves
@@ -372,7 +372,7 @@ class LoadDriver:
                             return
                     try:
                         await asyncio.wait_for(stop.wait(), timeout=interval)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         pass
             finally:
                 if client is not None:
@@ -387,7 +387,7 @@ class LoadDriver:
             if open_rate > 0 and i < n - 1:
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=1.0 / open_rate)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
             if stop.is_set():
                 break
@@ -396,7 +396,7 @@ class LoadDriver:
         if self.shard.duration_s > 0:
             try:
                 await asyncio.wait_for(stop.wait(), timeout=self.shard.duration_s)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
         else:
             await stop.wait()
@@ -412,7 +412,7 @@ class LoadDriver:
         while not done.is_set():
             try:
                 await asyncio.wait_for(done.wait(), timeout=self._sample_interval)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             self._refresh_tps()
             if self._on_sample is not None:

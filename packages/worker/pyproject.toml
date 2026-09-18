@@ -44,7 +44,7 @@ dependencies = [
 # tests can run under a plain `.[dev]` install — they exercise the protobuf-only
 # core without grpcio. Tests that need the protoc compiler (grpcio-tools) are
 # guarded with skipif and stay skipped until the full `grpc` extra is installed.
-dev = ["pytest", "pytest-asyncio", "pytest-cov", "ruff", "black", "httpx", "protobuf>=4.22"]
+dev = ["pytest", "pytest-asyncio", "pytest-cov", "ruff>=0.16,<0.17", "black", "httpx", "protobuf>=4.22"]
 # General gRPC adapter (descriptor-driven). Optional: the adapter imports grpc
 # lazily, so the worker runs without it until you use a grpc target.
 grpc = [

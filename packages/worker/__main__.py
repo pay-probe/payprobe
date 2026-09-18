@@ -12,13 +12,13 @@ import sys
 from pathlib import Path
 
 try:
-    import uvloop  # noqa
+    import uvloop
 
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-except Exception:  # uvloop optional for local/dev
+except Exception:  # noqa: BLE001, S110 - uvloop optional for local/dev
     pass
 
-from worker.engine import WorkerEngine, InMemorySink, FAILED
+from worker.engine import FAILED, InMemorySink, WorkerEngine
 
 REPO = Path(__file__).resolve().parents[2]
 

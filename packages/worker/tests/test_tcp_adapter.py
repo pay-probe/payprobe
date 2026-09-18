@@ -6,7 +6,6 @@ Run from the packages/ directory:
 
 import asyncio
 
-
 from worker.adapters.tcp import iso8583
 from worker.adapters.tcp.adapter import TcpAdapter
 

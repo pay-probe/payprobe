@@ -117,19 +117,23 @@ class McpAdapter(BaseAdapter):
             params = StdioServerParameters(
                 command=self.command, args=self.args, env=self.env or None
             )
-            async with stdio_client(params) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    yield session
+            async with (
+                stdio_client(params) as (read, write),
+                ClientSession(read, write) as session,
+            ):
+                await session.initialize()
+                yield session
         else:
             from mcp.client.streamable_http import streamablehttp_client
 
-            async with streamablehttp_client(
-                self.base_url, headers=self.headers or None, timeout=self.timeout
-            ) as (read, write, _get_session_id):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    yield session
+            async with (
+                streamablehttp_client(
+                    self.base_url, headers=self.headers or None, timeout=self.timeout
+                ) as (read, write, _get_session_id),
+                ClientSession(read, write) as session,
+            ):
+                await session.initialize()
+                yield session
 
     # -- execution -------------------------------------------------------------
 

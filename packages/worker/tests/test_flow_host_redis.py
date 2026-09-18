@@ -10,8 +10,8 @@ import pytest
 
 fakeredis = pytest.importorskip("fakeredis")
 
-from worker.engine.load import RedisLoadBus  # noqa: E402
-from worker.flow_host import run_flow_host  # noqa: E402
+from worker.engine.load import RedisLoadBus
+from worker.flow_host import run_flow_host
 
 pytestmark = pytest.mark.asyncio
 

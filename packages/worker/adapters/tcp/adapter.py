@@ -54,8 +54,8 @@ import asyncio
 import logging
 import time
 
-from ..base.base_adapter import BaseAdapter, StepResult
 from .. import socket_registry
+from ..base.base_adapter import BaseAdapter, StepResult
 from .protocols import EncodedMessage, make_protocol
 
 log = logging.getLogger(__name__)
@@ -144,7 +144,7 @@ class TcpAdapter(BaseAdapter):
             action, payload = self._probe("sign_on")
             try:
                 await self._exchange(self.protocol.encode(action, payload), _allow_wait=False)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - deliberate catch-all
                 log.warning("Sign-on to %s:%s failed: %s", self.host, self.port, exc)
 
     def _on_disconnect(self, exc: Exception) -> None:
@@ -155,9 +155,12 @@ class TcpAdapter(BaseAdapter):
         if not self._closing:
             log.warning("Connection lost to %s:%s: %s", self.host, self.port, exc)
         self._fail_pending(exc)
-        if not self._closing and self.reconnect_enabled:
-            if self._reconnect_task is None or self._reconnect_task.done():
-                self._reconnect_task = asyncio.create_task(self._reconnect())
+        if (
+            not self._closing
+            and self.reconnect_enabled
+            and (self._reconnect_task is None or self._reconnect_task.done())
+        ):
+            self._reconnect_task = asyncio.create_task(self._reconnect())
 
     async def _reconnect(self) -> None:
         backoff, attempt = self._backoff_initial, 0
@@ -221,7 +224,7 @@ class TcpAdapter(BaseAdapter):
             action, payload = self._probe("sign_on")
             parsed = await self._exchange(self.protocol.encode(action, payload))
             return self.protocol.is_healthy(parsed)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - deliberate catch-all
             log.warning("health_check failed for %s:%s: %s", self.host, self.port, exc)
             return False
 
@@ -240,7 +243,7 @@ class TcpAdapter(BaseAdapter):
                 duration_ms=int((time.monotonic() - start) * 1000),
                 raw_log=self._wire_log(msg, parsed, shaped),
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return StepResult(
                 success=False,
                 request_payload=payload,
@@ -248,7 +251,7 @@ class TcpAdapter(BaseAdapter):
                 duration_ms=int((time.monotonic() - start) * 1000),
                 error=f"No response within {self.response_timeout}s.",
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - deliberate catch-all
             return StepResult(
                 success=False,
                 request_payload=payload,
@@ -284,7 +287,7 @@ class TcpAdapter(BaseAdapter):
             if de_list:
                 lines.append("  DE " + ", ".join(str(d) for d in de_list))
             return "\n".join(lines)
-        except Exception:  # pragma: no cover - logging must not break a run
+        except Exception:  # pragma: no cover - must not break a run  # noqa: BLE001
             return f"{self.protocol.name}: sent {msg.request}"
 
     # -- send / correlate ----------------------------------------------------
@@ -299,7 +302,7 @@ class TcpAdapter(BaseAdapter):
                 raise ConnectionError(f"{self.host}:{self.port} is not connected")
             try:
                 await asyncio.wait_for(self._connected.wait(), timeout=self.response_timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise ConnectionError(f"{self.host}:{self.port} did not reconnect in time")
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
@@ -350,7 +353,7 @@ class TcpAdapter(BaseAdapter):
                 self._dispatch(self.protocol.decode(body))
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - deliberate catch-all
             self._on_disconnect(exc)
             return
         # clean EOF (peer closed) while we weren't shutting down
@@ -385,15 +388,12 @@ class TcpAdapter(BaseAdapter):
     async def _keepalive_loop(self, ka: dict) -> None:
         interval = float(ka.get("interval_sec", 30))
         action, payload = self._probe("keepalive")
-        try:
-            while not self._closing:
-                await asyncio.sleep(interval)
-                try:
-                    await self._exchange(self.protocol.encode(action, dict(payload)))
-                except Exception as exc:
-                    log.warning("Keepalive failed for %s:%s: %s", self.host, self.port, exc)
-        except asyncio.CancelledError:
-            raise
+        while not self._closing:
+            await asyncio.sleep(interval)
+            try:
+                await self._exchange(self.protocol.encode(action, dict(payload)))
+            except Exception as exc:  # noqa: BLE001 - keepalive must survive any send failure
+                log.warning("Keepalive failed for %s:%s: %s", self.host, self.port, exc)
 
 
 #: Backwards-compatible alias — the adapter began life as an ISO 8583-only class.

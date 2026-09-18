@@ -14,7 +14,7 @@ import pathlib
 
 import pytest
 
-from worker.engine import WorkerEngine, InMemorySink, PASSED, FAILED, BLOCKED
+from worker.engine import BLOCKED, FAILED, PASSED, InMemorySink, WorkerEngine
 
 # packages/worker/tests/this_file -> repo root is parents[3]
 EXAMPLES = pathlib.Path(__file__).resolve().parents[3] / "examples" / "scenarios"

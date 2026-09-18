@@ -5,6 +5,7 @@ Returns configurable canned responses. No real system required.
 
 import asyncio
 import time
+
 from ..base.base_adapter import BaseAdapter, StepResult
 
 DEFAULT_RESPONSES = {

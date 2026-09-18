@@ -21,13 +21,12 @@ import pytest
 
 pytest.importorskip("mcp", reason="mcp SDK not installed (optional dep)")
 
-from worker.adapters.mcp_client.adapter import McpAdapter  # noqa: E402
+from worker.adapters.mcp_client.adapter import McpAdapter
 
 
 def _make_server():
-    from pydantic import BaseModel
-
     from mcp.server.fastmcp import FastMCP
+    from pydantic import BaseModel
 
     srv = FastMCP("payprobe-test")
 

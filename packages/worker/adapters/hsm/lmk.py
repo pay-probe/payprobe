@@ -65,7 +65,7 @@ def _set_odd_parity(data: bytes) -> bytes:
     out = bytearray()
     for b in data:
         b &= 0xFE
-        if bin(b).count("1") % 2 == 0:
+        if (b).bit_count() % 2 == 0:
             b |= 1
         out.append(b)
     return bytes(out)

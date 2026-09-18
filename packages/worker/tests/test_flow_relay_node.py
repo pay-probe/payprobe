@@ -8,7 +8,7 @@ transparent TcpProxy instead; see orchestrator ``_relay_is_terminal``.)"""
 import pytest
 
 from worker.adapters.base.base_adapter import StepResult
-from worker.engine import FlowRunner, NullSink, PASSED, FAILED
+from worker.engine import FAILED, PASSED, FlowRunner, NullSink
 from worker.engine.runner import GraphExecutor
 
 

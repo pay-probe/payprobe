@@ -94,8 +94,9 @@ def _probe_network_sandbox() -> list[str] | None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=5,
+                check=False,
             )
-        except Exception:  # noqa: BLE001 - unshare missing flags / blocked
+        except Exception:  # noqa: BLE001, S112 - unshare missing flags / blocked
             continue
         if res.returncode == 0:
             return prefix
@@ -294,12 +295,12 @@ async def run_code(
                 env=_child_env(),
                 cwd=workdir,
             )
-        except Exception as exc:  # runtime missing / spawn failure
+        except Exception as exc:  # noqa: BLE001 - runtime missing / spawn failure
             return CodeResult(False, {}, f"failed to start {language} runtime: {exc}")
 
         try:
             out_b, err_b = await asyncio.wait_for(proc.communicate(payload), timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return CodeResult(False, {}, f"code timed out after {int(timeout * 1000)} ms")

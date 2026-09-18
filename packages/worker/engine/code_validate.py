@@ -84,7 +84,7 @@ async def _validate_node(language: str, code: str) -> dict:
             stderr=asyncio.subprocess.PIPE,
         )
         out, _ = await asyncio.wait_for(proc.communicate(payload), timeout=10)
-    except (asyncio.TimeoutError, OSError):
+    except (TimeoutError, OSError):
         return {"ok": True, "errors": [], "skipped": "validator timed out"}
     text = out.decode(errors="replace").strip()
     try:

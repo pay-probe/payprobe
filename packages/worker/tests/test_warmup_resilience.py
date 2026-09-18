@@ -1,8 +1,8 @@
 """A run must reach a verdict (and emit run.completed) even if an adapter can't
 connect — an unreachable host is a phase-1 failure, never a hung run."""
 
-from worker.engine import WorkerEngine, InMemorySink, RUN_COMPLETED
 from worker.adapters.registry import AdapterRegistry
+from worker.engine import RUN_COMPLETED, InMemorySink, WorkerEngine
 
 # A real (non-mock) env naming a TCP connection to an unreachable port.
 REAL_ENV = {

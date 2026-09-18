@@ -9,8 +9,8 @@ import pathlib
 
 import pytest
 
-from worker.adapters.registry import AdapterRegistry, _deep_merge
 from worker.adapters.mock.adapter import MockAdapter
+from worker.adapters.registry import AdapterRegistry, _deep_merge
 from worker.adapters.tcp.adapter import TcpAdapter
 
 ENV = {
@@ -159,7 +159,7 @@ def test_registry_first_import_still_registers_hsm_client():
         "assert 'payshield' in r.ADAPTER_MAP, sorted(r.ADAPTER_MAP); "
         "assert 'hsm_client' in r.ADAPTER_MAP"
     )
-    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert proc.returncode == 0, proc.stderr
 
 

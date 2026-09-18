@@ -192,7 +192,7 @@ class StripeSimulator(HttpResponder):
         if looks_form and raw:
             try:
                 parsed["body"] = _unflatten_form(raw)
-            except Exception:  # noqa: BLE001 — keep the raw string view
+            except Exception:
                 log.debug("stripe sim: could not parse form body", exc_info=True)
         return parsed
 

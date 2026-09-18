@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Protocol
+from collections.abc import AsyncIterator
+from typing import Any, Protocol
 
 
 class LoadBus(Protocol):
@@ -121,7 +122,7 @@ class InMemoryLoadBus:
     async def claim_shard(self, run_id: str, timeout_s: float = 10.0) -> dict[str, Any] | None:
         try:
             return await asyncio.wait_for(self._q(run_id).get(), timeout=timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
     async def pending_shards(self, run_id: str) -> int:
@@ -149,7 +150,7 @@ class InMemoryLoadBus:
             evt.clear()
             try:
                 await asyncio.wait_for(evt.wait(), timeout=0.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
     async def signal_stop(self, run_id: str) -> None:

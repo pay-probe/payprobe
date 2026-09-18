@@ -25,7 +25,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from .variables import resolve_value, UnresolvedReferenceError
+from .variables import UnresolvedReferenceError, resolve_value
 
 DEFAULT_TIMEOUT_MS = 30_000
 MAX_TIMEOUT_MS = 300_000

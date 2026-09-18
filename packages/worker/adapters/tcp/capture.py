@@ -79,9 +79,7 @@ def _cond_ok(value: str, cond: Any) -> bool:
             return False
         if "gte" in cond and not (value >= str(cond["gte"])):
             return False
-        if "lte" in cond and not (value <= str(cond["lte"])):
-            return False
-        return True
+        return not ("lte" in cond and not value <= str(cond["lte"]))
     return value == str(cond)
 
 

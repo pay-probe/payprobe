@@ -23,8 +23,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from .responder import NatsResponder
 from ..flow_mixin import FlowTraceMixin
+from .responder import NatsResponder
 
 
 class NatsFlowResponder(FlowTraceMixin, NatsResponder):
@@ -88,5 +88,5 @@ class NatsFlowResponder(FlowTraceMixin, NatsResponder):
         await super().stop()
         try:
             await self._registry.disconnect_all()
-        except Exception:  # noqa: BLE001 — best-effort teardown
+        except Exception:  # noqa: S110, BLE001 — best-effort teardown
             pass

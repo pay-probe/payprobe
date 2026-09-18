@@ -72,9 +72,7 @@ def _match_condition(value: str, cond: Any) -> bool:
             return False
         if "gte" in cond and not (value >= str(cond["gte"])):
             return False
-        if "lte" in cond and not (value <= str(cond["lte"])):
-            return False
-        return True
+        return not ("lte" in cond and not value <= str(cond["lte"]))
     return value == str(cond)
 
 
@@ -483,11 +481,10 @@ class TcpResponder:
 
     def _matches(self, when: dict, parsed: dict) -> bool:
         if self.protocol == "header_echo":
-            if "command" in when and not _match_condition(
-                parsed.get("command", ""), when["command"]
-            ):
-                return False
-            return True
+            return not (
+                "command" in when
+                and not _match_condition(parsed.get("command", ""), when["command"])
+            )
         if "mti" in when and parsed.get("mti") != when["mti"]:
             return False
         req_de = parsed.get("de", {})

@@ -238,7 +238,7 @@ class VisaSimulator(TcpResponder):
         yy, mm = int(expiry[:2]), int(expiry[2:4])
         if not 1 <= mm <= 12:
             return False
-        now = _dt.date.today()
+        now = _dt.datetime.now(_dt.UTC).date()
         exp = 2000 + yy
         # Card valid through the last day of its expiry month.
         return (exp, mm) < (now.year, now.month)

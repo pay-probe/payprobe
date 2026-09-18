@@ -11,9 +11,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import pathlib
 import sys
 
 from worker.adapters.tcp.responder import TcpResponder
+
+log = logging.getLogger("payprobe.responder")
 
 
 def _make_responder(config: dict) -> TcpResponder:
@@ -38,7 +41,7 @@ def _make_responder(config: dict) -> TcpResponder:
 async def _serve(config: dict) -> None:
     responder = _make_responder(config)
     port = await responder.start()
-    logging.info(
+    log.info(
         "Responder (%s) listening on %s:%s",
         config.get("protocol", "iso8583"),
         config.get("host", "127.0.0.1"),
@@ -58,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     if not argv:
         print(__doc__)
         return 2
-    config = json.loads(open(argv[0]).read())
+    config = json.loads(pathlib.Path(argv[0]).read_text())
     try:
         asyncio.run(_serve(config))
     except KeyboardInterrupt:

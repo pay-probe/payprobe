@@ -27,9 +27,9 @@ import time
 import uuid
 from typing import Any
 
-from .registry import AdapterRegistry
-from ..engine.flow_runner import FlowRunner
 from ..engine.events import NullSink
+from ..engine.flow_runner import FlowRunner
+from .registry import AdapterRegistry
 
 
 class FlowTraceMixin:
@@ -170,7 +170,7 @@ class FlowTraceMixin:
             started = time.time()
             try:
                 sr = await self._execute_step(target, action, payload, assertions)
-            except Exception as exc:  # noqa: BLE001 — record WHERE/WHY then re-raise
+            except Exception as exc:
                 calls.append(
                     {
                         "target": target,

@@ -74,9 +74,7 @@ def _match_condition(value: Any, cond: Any) -> bool:
                 return False
         if "gte" in cond and not _num_ge(value, cond["gte"]):
             return False
-        if "lte" in cond and not _num_le(value, cond["lte"]):
-            return False
-        return True
+        return not ("lte" in cond and not _num_le(value, cond["lte"]))
     return sval == str(cond)
 
 
@@ -177,7 +175,6 @@ class NatsResponder:
             for subject in self.subjects:
                 sub = await self._nc.subscribe(subject, queue=queue, cb=self._handle)
                 self._subs.append(sub)
-        return None
 
     async def _handle_js(self, msg: Any) -> None:
         """JetStream delivery: process like any message, then ACK so the broker
@@ -219,7 +216,7 @@ class NatsResponder:
             except Exception:  # noqa: BLE001
                 try:
                     await nc.close()
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: S110, BLE001
                     pass
 
     async def serve_forever(self) -> None:

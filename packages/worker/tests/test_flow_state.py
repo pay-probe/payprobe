@@ -1,8 +1,8 @@
 """Shared simulated state: a state node mutates ${state.*}, persisted per instance."""
 
-from worker.engine import FlowRunner, NullSink
 from worker.adapters.tcp.adapter import TcpAdapter
 from worker.adapters.tcp.flow_responder import FlowResponder
+from worker.engine import FlowRunner, NullSink
 
 COUNTER_FLOW = {
     "id": "counter",
