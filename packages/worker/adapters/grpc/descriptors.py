@@ -80,8 +80,8 @@ def compile_proto_sources(
     descriptor set you'd produce by hand.
     """
     try:
-        from grpc_tools import protoc
         import grpc_tools
+        from grpc_tools import protoc
     except ImportError as exc:  # pragma: no cover - exercised only without the dep
         raise RuntimeError(
             "compiling .proto sources needs grpcio-tools — "
