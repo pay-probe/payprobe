@@ -7,8 +7,10 @@ name = "payprobe-mcp-server"
 version = "0.1.0"
 description = "MCP server exposing the PayProbe scenario catalog + operations to AI agents"
 requires-python = ">=3.11"
-# >=1.9 for the title/annotations kwargs on tool()/prompt() and resource titles.
-dependencies = ["mcp>=1.9", "pyjwt>=2.0"]
+# >=1.9 for the title/annotations kwargs on tool()/prompt() and resource titles;
+# <2 because mcp 2.x renames FastMCP to MCPServer and changes other APIs
+# (https://py.sdk.modelcontextprotocol.io/v2/migration/) - migrate before bumping.
+dependencies = ["mcp>=1.9,<2", "pyjwt>=2.0"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
