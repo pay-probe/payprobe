@@ -4,7 +4,10 @@ FROM python:3.12-slim
 WORKDIR /app
 # Instant Client needs libaio; the kit ships the .deb when the build host has no apt mirror.
 COPY debs /debs
-RUN if ls /debs/*.deb >/dev/null 2>&1; then dpkg -i /debs/*.deb; fi && rm -rf /debs
+# trixie ships libaio as libaio.so.1t64; the Instant Client dlopens libaio.so.1.
+RUN if ls /debs/*.deb >/dev/null 2>&1; then dpkg -i /debs/*.deb; fi && rm -rf /debs \
+ && for d in /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu; do \
+      if [ -e "$d/libaio.so.1t64" ] && [ ! -e "$d/libaio.so.1" ]; then ln -s libaio.so.1t64 "$d/libaio.so.1"; fi; done
 COPY wheels /wheels
 RUN pip install --no-cache-dir --no-index --find-links=/wheels \
     "fastapi>=0.110" "uvicorn[standard]>=0.27" "redis[hiredis]>=5.0" \
