@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Offline portal image: the Angular app is built outside (ng build) and copied in.
 # nginx.conf is mounted at run time (infra/nginx/nginx.minimal.conf). Context = kit root.
 FROM nginx:alpine

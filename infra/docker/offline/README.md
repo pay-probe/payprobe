@@ -10,6 +10,9 @@ Oracle sessions — the Oracle Instant Client libraries.
 
 Differences from the online Dockerfiles, on purpose:
 
+- No `# syntax=docker/dockerfile:1` directive: BuildKit would try to pull the
+  frontend image from the registry. The built-in frontend is enough here.
+
 - `pip install --no-index --find-links=/wheels`; no `apt-get upgrade` (no apt
   mirror). Refresh the base image tarball to pick up OS fixes.
 - The orchestrator image installs `python-oracledb` and the Instant Client
