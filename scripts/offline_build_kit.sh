@@ -80,6 +80,8 @@ python-pkcs11>=0.7
 oracledb>=3.0
 setuptools>=70
 wheel
+# build backend of the in-tree packages (pip's isolated build env installs it from /wheels)
+hatchling
 EOF
 "$PY" -m pip download -q -d "$OUT/wheels" -r "$OUT/wheels/requirements-offline.txt" \
   --python-version 3.12 --implementation cp --abi cp312 --abi abi3 --abi none \
