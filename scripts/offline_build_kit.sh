@@ -88,8 +88,10 @@ EOF
 
 # 3. libaio for the Instant Client (python:3.12-slim is Debian trixie) -------
 log "libaio1t64 (.deb) from $DEBIAN_MIRROR"
-pkg_line="$(curl -sSL "$DEBIAN_MIRROR/dists/trixie/main/binary-amd64/Packages.gz" | gunzip \
-  | awk '/^Package: libaio1t64$/{f=1} f&&/^Filename:/{print $2; exit}')"
+pkgs_tmp="$(mktemp)"
+curl -sSL "$DEBIAN_MIRROR/dists/trixie/main/binary-amd64/Packages.gz" | gunzip > "$pkgs_tmp"
+pkg_line="$(awk '/^Package: libaio1t64$/{f=1} f&&/^Filename:/{print $2; exit}' "$pkgs_tmp")"
+rm -f "$pkgs_tmp"
 [[ -n "$pkg_line" ]] && curl -sSL -o "$OUT/debs/$(basename "$pkg_line")" "$DEBIAN_MIRROR/$pkg_line"
 
 # 4. Portal (Angular production build) --------------------------------------
