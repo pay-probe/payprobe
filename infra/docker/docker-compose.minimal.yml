@@ -86,6 +86,9 @@ services:
 
   portal:
     image: payprobe-portal:${PAYPROBE_TAG}
+    # Start nginx directly: the image's entrypoint scripts call `apk manifest`,
+    # which hangs on a host without network (the config is mounted anyway).
+    command: ["nginx", "-g", "daemon off;"]
     ports:
       - "${PORTAL_TLS_PORT}:443"
     volumes:
