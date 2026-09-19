@@ -86,9 +86,10 @@ services:
 
   portal:
     image: payprobe-portal:${PAYPROBE_TAG}
-    # Start nginx directly: the image's entrypoint scripts call `apk manifest`,
-    # which hangs on a host without network (the config is mounted anyway).
-    command: ["nginx", "-g", "daemon off;"]
+    # Start nginx directly: the image's entrypoint runs /docker-entrypoint.d
+    # scripts for any nginx command, and their `apk manifest` call hangs on a
+    # host without network. The config is mounted, so nothing there is needed.
+    entrypoint: ["nginx", "-g", "daemon off;"]
     ports:
       - "${PORTAL_TLS_PORT}:443"
     volumes:
