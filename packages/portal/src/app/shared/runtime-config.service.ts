@@ -10,6 +10,7 @@ export type EndpointKey =
   | "auth"
   | "assistant"
   | "insight"
+  | "agent-hub"
   | "redis"
   | "mcp";
 
@@ -133,6 +134,12 @@ export class RuntimeConfigService {
     return this.baseFor("insight", environment.insightApiBase);
   }
 
+  /** Agent registry (ADR-0010). Optional deployment — the Agents page
+   *  degrades to a "not reachable" notice when it isn't there. */
+  get agentHubApiBase(): string {
+    return this.baseFor("agent-hub", environment.agentHubApiBase);
+  }
+
   /** Build an absolute base from a config's scheme/host/port. */
   baseUrl(cfg: EndpointConfig): string {
     return `${cfg.scheme}://${cfg.host}:${cfg.port}`;
@@ -230,6 +237,11 @@ export class RuntimeConfigService {
     // routing target, which may point at the scenario-service shim). Probed at
     // /health so its status shows even before chat is switched over to it.
     const assistant = { scheme: "http", host: "localhost", port: 8400 };
+    const agentHub = parseBase(environment.agentHubApiBase, 8600) ?? {
+      scheme: "http",
+      host: "localhost",
+      port: 8600,
+    };
     const insight = parseBase(environment.insightApiBase, 8500) ?? {
       scheme: "http",
       host: "localhost",
@@ -289,6 +301,15 @@ export class RuntimeConfigService {
         healthPath: "/health",
         monitorOnly: false,
         hint: "Advisory ML insights — categorize / explain / predict (ADR-0005)",
+      },
+      {
+        key: "agent-hub",
+        label: "Agent hub",
+        ...agentHub,
+        kind: "http",
+        healthPath: "/health",
+        monitorOnly: false,
+        hint: "Agent registry — principals, workflows, pause switch (ADR-0010)",
       },
       {
         key: "redis",

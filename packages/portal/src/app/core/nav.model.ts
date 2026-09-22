@@ -96,6 +96,8 @@ export const NAV: NavItem[] = [
       { label: "Test Data", route: "/test-data", icon: "database" },
       { label: "Tables", route: "/tables", icon: "table" },
       { label: "Secrets", route: "/secrets", icon: "lock" },
+      // ADR-0010: agent principals + workflows, versioned and gated
+      { label: "Agents", route: "/agents", icon: "sparkles" },
     ],
   },
   {

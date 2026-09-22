@@ -272,6 +272,13 @@ export const routes: Routes = [
           ),
       },
       {
+        // ADR-0010: the agent-hub registry (agent principals + workflows)
+        path: "agents",
+        data: { title: "Agents" },
+        loadComponent: () =>
+          import("./agents/agents.component").then((m) => m.AgentsComponent),
+      },
+      {
         // ADR-0007: ad-hoc execution by reference against anything addressable
         path: "playground",
         data: { title: "Playground" },

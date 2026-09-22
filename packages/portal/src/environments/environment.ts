@@ -19,4 +19,7 @@ export const environment = {
   // explanations, outcome predictions. Advise-only; the portal degrades
   // gracefully when it is not deployed.
   insightApiBase: "http://localhost:8500",
+  // Agent registry (ADR-0010) — agent principals + workflows. Optional
+  // deployment; the Agents page shows a "not reachable" notice without it.
+  agentHubApiBase: "http://localhost:8600",
 };

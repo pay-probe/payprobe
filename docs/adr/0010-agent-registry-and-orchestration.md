@@ -6,11 +6,17 @@
 
 > **Implementation summary (2026-09-23).** Phase 1 landed: `packages/agent-hub`
 > (registry of agent principals and workflow definitions on PostgreSQL, 49 tests
-> green against Postgres 16 in the sandbox), compose/CI/Makefile wiring, and an
-> `agent-hub` entry in the orchestrator `/status` map. Still owed: host
-> `make test` (the sandbox cannot import `iso8583`, so the orchestrator
-> `test_observability` change is written to pattern, not run), the portal Agents
-> page plus its host `npm run build`, and the CI workflow hunk applied by hand.
+> green against Postgres 16 in the sandbox), compose/CI/Makefile/nginx wiring,
+> an `agent-hub` entry in the orchestrator `/status` map, and the portal
+> **Agents** page (Configure → Agents: list, version history, JSON draft editing,
+> validate/publish/retire, global pause switch, PollHealth staleness, Settings →
+> Endpoints entry). The portal was built in the sandbox with Node 22.22.3
+> (`ng build --configuration production`, exit 0, font inlining disabled locally
+> because Google Fonts is unreachable there; `angular.json` is unchanged). Still
+> owed: host `make test` (the sandbox cannot import `iso8583`, so the
+> orchestrator `test_observability` change is written to pattern, not run), a
+> host build with fonts, a click-through of the Agents page, and the CI workflow
+> hunk applied by hand.
 
 Companions: [`../agentic-engine-evaluation.md`](../agentic-engine-evaluation.md)
 (Opus), [`../agentic-engine-evaluation-fable.md`](../agentic-engine-evaluation-fable.md)
@@ -246,7 +252,7 @@ Each phase ends in a commit and a review gate.
 
 1. [x] Phase 1 registry service, tests, compose, CI, Makefile, `/status` probe.
 2. [ ] Host `make test` and `test_observability` run (sandbox cannot import `iso8583`).
-3. [ ] Portal Agents page (list, versions, publish, pause) + host `npm run build`; dashboard health panel + Settings → Endpoints entries.
+3. [x] Portal Agents page (list, versions, publish, pause), Settings → Endpoints entry, nginx `/api/agents/` routes; built in the sandbox. Owed: host build with fonts + click-through.
 4. [ ] Apply the `.github/workflows/ci.yml` hunk by hand (protected path).
 5. [ ] ATLAS §11: add agent-hub with a pointer to this ADR.
 6. [ ] Decide `AGENT_LOAD_APPROVAL_TPS` and the daily budget defaults for compose.

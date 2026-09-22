@@ -146,8 +146,8 @@ in `docs/adr/`.
   2026-07-16 but still owed a host build + click-through, 0009 (payment-provider
   integration — PSP simulators/packs + generic `mcp` client adapter + signed
   webhook emission) implemented, portal presets owed a host build, 0010 (agent
-  registry + orchestration) proposed with phase 1 (the registry) implemented
-  and the portal page owed; statuses in the files are kept truthful.
+  registry + orchestration) proposed with phase 1 (the registry + portal
+  Agents page) implemented, host click-through owed; statuses in the files are kept truthful.
 - `.claude/skills/payprobe-run-and-operate` and `payprobe-config-and-flags`
   — operator-grade API/env-flag reference, kept current.
 - `docs/history/` — finished build specs, plans and working notes (accurate at

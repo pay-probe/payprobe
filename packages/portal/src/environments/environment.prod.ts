@@ -16,4 +16,6 @@ export const environment = {
   // explanations, outcome predictions. Advise-only; the portal degrades
   // gracefully when it is not deployed.
   insightApiBase: "/api/insights",
+  // Agent registry (ADR-0010), same-origin via nginx.
+  agentHubApiBase: "/api/agents",
 };
