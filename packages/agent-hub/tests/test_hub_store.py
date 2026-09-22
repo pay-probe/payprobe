@@ -2,7 +2,7 @@
 
 import pytest
 from agent_hub.store import Conflict, Guardrail, NotFound, spec_hash
-from conftest import agent_spec
+from hub_testkit import agent_spec
 
 
 async def test_create_makes_version_1_draft(store):
@@ -110,7 +110,7 @@ async def test_migrations_are_recorded_and_idempotent(store):
     await store.publish("agent", "a1", 1)
     # a second pool over the same database sees the committed state
     from agent_hub.store import RegistryStore
-    from conftest import TEST_DSN
+    from hub_testkit import TEST_DSN
 
     other = await RegistryStore.connect(TEST_DSN, pool_max=1)
     try:

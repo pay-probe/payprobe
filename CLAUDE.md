@@ -30,8 +30,8 @@ product.
 | `packages/auth-service` | JWT auth + users/roles | 8300 |
 | `packages/payprobe-assistant` | Standalone LLM-gateway assistant (REST-backed) | 8400 |
 | `packages/insight-service` | Advisory ML insights: failure categorization + explanation + outcome prediction (ADR-0005; read-only, advise-only) | 8500 |
-| `packages/agent-hub` | Agent registry: versioned agent principals + JSON-DAG workflows, validated against the toolkit; PostgreSQL only (ADR-0010 phase 1; runner/engine in later phases) | 8600 |
-| `packages/payprobe_common` | Shared: `agent_toolkit` (assistant tool layer), `crypto` (SecretBox) | — |
+| `packages/agent-hub` | Agent registry + heartbeat runner: versioned agent principals, JSON-DAG workflows, bounded scoped wakes with journal/revert; PostgreSQL only (ADR-0010 phases 1–2; workflow engine in phase 3) | 8600 |
+| `packages/payprobe_common` | Shared: `agent_toolkit` (tool layer + scoped dispatch), `rest_backend`, `llm_provider`, `crypto` (SecretBox) | — |
 | `packages/report_service` | Shared report/gates/provenance library (orchestrator imports it) | — |
 | `packages/portal` | Angular 22 UI (standalone components, signals, `pp-*` design system) | 4200 |
 
@@ -104,6 +104,20 @@ in `docs/adr/`.
    matrix is the values.
 8. **Secrets never round-trip in plaintext.** SecretBox encrypts at rest,
    APIs mask, the vault page never reveals. Don't "fix" masking.
+9. **Agents get tools only through a scoped toolkit** (ADR-0010). A heartbeat
+   holds no service client, base URL or token of its own: it calls
+   `payprobe_common.agent_toolkit.scoped_dispatch` behind a `ToolScope` built
+   from the agent's *published* spec (allowlist, mode, write scope), acting
+   under an on-behalf-of JWT for the invoking user (`act` claim, never `svc`).
+   Allowlist, tiers, write scope, result caps and the untrusted-data envelope
+   are enforced there, never in prompts. The REST backend and the provider
+   caller live once, in `payprobe_common` (`rest_backend`, `llm_provider`).
+10. **No agent side effect without journal and gate.** Every agent write is a
+    journalled toolkit write (invariant #2 applies); `plan` mode records
+    *proposed* calls instead of executing; `full` mode outside `mock` needs an
+    `approval` node before it, checked when a workflow is published. Agents
+    are autonomous only inside one bounded heartbeat (per-wake limits, daily
+    budget = schedulability, global pause).
 
 ## Operational gotchas
 

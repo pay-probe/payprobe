@@ -340,6 +340,14 @@ services:
     environment:
       # Registry state lives in the platform Postgres (ADR-0010): no file fallback.
       AGENT_HUB_DATABASE_URL: ${AGENT_HUB_DATABASE_URL:-postgresql://payprobe:payprobe@postgres:5432/payprobe}
+      # Phase 2 (heartbeat runner): where agents reach the platform, and the
+      # LLM provider (D4: ASSIST_LLM_* env wins, else Settings → AI assistant).
+      SCENARIO_API_URL: http://scenario-service:8000
+      RUN_API_URL: http://orchestrator:8100
+      INSIGHT_API_URL: http://insight-service:8500
+      ASSIST_LLM_PROVIDER: ${ASSIST_LLM_PROVIDER:-openai}
+      ASSIST_LLM_API_KEY: ${ASSIST_LLM_API_KEY:-}
+      ASSIST_LLM_MODEL: ${ASSIST_LLM_MODEL:-}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
       PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
@@ -349,6 +357,10 @@ services:
       postgres:
         condition: service_healthy
       auth-service:
+        condition: service_started
+      scenario-service:
+        condition: service_started
+      orchestrator:
         condition: service_started
     <<: *restart
 

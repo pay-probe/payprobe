@@ -7,7 +7,7 @@ from agent_hub.validate import (
     validate_agent_spec,
     validate_workflow_spec,
 )
-from conftest import agent_spec
+from hub_testkit import agent_spec
 from pydantic import ValidationError
 
 # -- shapes ------------------------------------------------------------------------

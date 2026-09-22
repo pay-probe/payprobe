@@ -1,6 +1,6 @@
 # ADR-0010: Agent registry and orchestration (agent-hub)
 
-**Status:** Proposed — phase 1 (registry) implemented 2026-09-23, awaiting review gate 1
+**Status:** Proposed — phases 1 (registry) and 2 (heartbeat runner) implemented 2026-09-23
 **Date:** 2026-09-22
 **Deciders:** PayProbe maintainers (David + reviewers)
 
@@ -17,6 +17,18 @@
 > orchestrator `test_observability` change is written to pattern, not run), a
 > host build with fonts, a click-through of the Agents page, and the CI workflow
 > hunk applied by hand.
+>
+> **Phase 2 (2026-09-23).** Heartbeat runner landed: `ToolScope` +
+> `scoped_dispatch` in the one tool layer (allowlist, mode tiers, write scope,
+> 64 KiB result cap, untrusted envelope); the REST backend and the provider
+> caller moved into `payprobe_common` (the assistant now subclasses/imports
+> them; its 63 tests unchanged); per-heartbeat on-behalf-of JWTs with an `act`
+> claim; `agent_hub_heartbeats` (migration 2) with coalescing enforced by a
+> partial unique index; `POST /agents/{name}/wake`, `/heartbeats`, cancel and
+> revert; pause and daily-budget refusals recorded as heartbeats; `FakeLLMBackend`
+> for CI. 69 agent-hub tests, 529 across four packages in one session. Owed
+> from phase 2: the outbound alert webhook and a heartbeat view in the portal
+> (the API is complete; the page is next).
 
 Companions: [`../agentic-engine-evaluation.md`](../agentic-engine-evaluation.md)
 (Opus), [`../agentic-engine-evaluation-fable.md`](../agentic-engine-evaluation-fable.md)
@@ -243,7 +255,7 @@ Each phase ends in a commit and a review gate.
 
 - **Gate 0: this ADR accepted.** Passed 2026-09-22 (D1 to D4), D6 amended 2026-09-23.
 - **Phase 1: Registry.** Done in code; exit criteria: create → version → publish over HTTP; invalid tool refused at publish; RBAC enforced; `/status` shows `agent-hub`; portal Agents page + host `npm run build`; host `make test`; committed.
-- **Phase 2: Heartbeat runner.** Scoped toolkit; `auth-service /obo`; FakeLLM; provenance stamp; alert webhook; heartbeat records + portal detail. Exit: one agent wakes, runs bounded, every write reverts, budget and pause both stop it, survives a container restart.
+- **Phase 2: Heartbeat runner.** Done: scoped toolkit, OBO tokens minted in agent-hub with the shared secret (no new auth-service endpoint needed), FakeLLM, provenance (`spec_sha256`, model, `act` claim) on every heartbeat, heartbeat records with cancel/revert, pause and budget stops. Owed: alert webhook, portal heartbeat view, restart reconcile of `running` rows (phase 3 watchdog).
 - **Phase 3: Workflow engine.** State machine, node types, approvals inbox, reference workflows `observer` and `certification-plan`; fold :8400 in (D2). Exit: both workflows complete with a human approval mid-flow; container kill mid-workflow resumes; reviewer blocks a deliberately bad plan.
 - **Phase 4: Triggers and exposure.** Run-lifecycle events, schedules via the existing scheduler, webhook trigger, MCP catalog entries, insight-service as a tool. Exit: a failing scheduled regression wakes `observer` unattended and a finding with evidence reaches a human.
 - **Phase 5: Hardening and handover.** Injection pack, `agent-golden` CI, egress allowlist, quotas, ATLAS + CLAUDE.md invariants (D12), operator skill `payprobe-agents`, status flip to Accepted, :8400 alias removed. Exit: security review + Go/No-Go by David.

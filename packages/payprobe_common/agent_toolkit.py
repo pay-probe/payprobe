@@ -897,3 +897,152 @@ def _start_load_run(ctx: ToolContext, args: dict) -> Any:
     if args.get("extra"):
         body.update(args["extra"])
     return ctx.backend.start_load_run(body)
+
+
+# -- scoped toolkit (ADR-0010: agents get tools only through this) --------------
+
+#: Tools whose results carry data that originated outside the registry —
+#: runtime state, captured traffic, simulator output, model advice. Their
+#: results are wrapped as untrusted so a runner never treats content found in
+#: them as instructions (prompt-injection boundary).
+UNTRUSTED_RESULT_TOOLS: frozenset[str] = frozenset({
+    "platform_status", "list_runs", "list_network_runs",
+    "list_running_participants", "list_running_simulators",
+    "list_load_runs", "get_load_run", "get_run_insights",
+    "list_insight_predictions", "playground_targets", "playground_execute",
+})
+
+#: Arg names that name a project or an environment (top level, or one level
+#: down inside ``spec`` / ``target``), used by the write-scope check.
+_SCOPE_PROJECT_KEYS = ("project_id", "project")
+_SCOPE_ENV_KEYS = ("environment", "environment_name", "env")
+
+#: How much of a tool result the model may see (bytes of JSON).
+DEFAULT_RESULT_CAP = 64 * 1024
+
+
+def tiers_for_mode(mode: str) -> tuple[str, ...]:
+    """``advisor`` and ``plan`` may only *execute* the read tier (plan mode
+    shows write schemas so the model can propose exact calls, but dispatch
+    refuses them); ``full`` executes everything."""
+    return ALL_TIERS if mode == "full" else ("read",)
+
+
+@dataclass(frozen=True)
+class ToolScope:
+    """The per-agent grant a runner builds from its registry entry."""
+
+    allow: frozenset[str]
+    mode: str = "plan"
+    projects: tuple[str, ...] = ()
+    environments: tuple[str, ...] = ()
+    result_cap: int = DEFAULT_RESULT_CAP
+
+    @property
+    def tiers(self) -> tuple[str, ...]:
+        return tiers_for_mode(self.mode)
+
+    def schemas(self) -> list[dict]:
+        """The schemas this agent may see: allowlisted tools only. In plan
+        mode the write schemas are visible (the model proposes exact calls),
+        in advisor mode only the read tier is."""
+        visible = ALL_TIERS if self.mode in ("plan", "full") else ("read",)
+        return [{"name": t.name, "description": t.description,
+                 "parameters": t.parameters}
+                for t in tools_for(visible) if t.name in self.allow]
+
+
+def _scope_values(args: dict, keys: tuple[str, ...]) -> list[str]:
+    found: list[str] = []
+    for k in keys:
+        v = args.get(k)
+        if isinstance(v, str) and v:
+            found.append(v)
+    for nested in ("spec", "target"):
+        inner = args.get(nested)
+        if isinstance(inner, dict):
+            for k in keys:
+                v = inner.get(k)
+                if isinstance(v, str) and v:
+                    found.append(v)
+    return found
+
+
+def _outside(values: list[str], allowed: tuple[str, ...]) -> str | None:
+    if "*" in allowed:
+        return None
+    for v in values:
+        if v not in allowed:
+            return v
+    return None
+
+
+def check_write_scope(scope: ToolScope, spec: ToolSpec, args: dict) -> str | None:
+    """Reason a write/execute call is outside the agent's write scope, or None.
+
+    Rules (deliberately simple, enforced here rather than in prompts):
+
+    * read-tier tools are never scope-checked;
+    * a call naming a project or environment must name one in scope
+      (``"*"`` in the scope list allows any);
+    * a write that names neither (connections, tables, starter flows,
+      variables: global registry objects) needs ``"*"`` in ``projects``.
+    """
+    if spec.tier == "read":
+        return None
+    projects = _scope_values(args, _SCOPE_PROJECT_KEYS)
+    envs = _scope_values(args, _SCOPE_ENV_KEYS)
+    if bad := _outside(projects, scope.projects):
+        return f"project '{bad}' is outside this agent's write scope"
+    if bad := _outside(envs, scope.environments):
+        return f"environment '{bad}' is outside this agent's write scope"
+    if not projects and not envs and "*" not in scope.projects:
+        return "global registry writes need '*' in the agent's project scope"
+    return None
+
+
+def _cap_result(result: Any, cap: int) -> tuple[Any, bool]:
+    import json as _json
+    try:
+        blob = _json.dumps(result, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        blob = str(result)
+    if len(blob.encode("utf-8")) <= cap:
+        return result, False
+    cut = blob.encode("utf-8")[:cap].decode("utf-8", "ignore")
+    return {"truncated_json": cut, "note": f"result exceeded {cap} bytes and was cut"}, True
+
+
+def scoped_dispatch(ctx: ToolContext, scope: ToolScope, name: str,
+                    args: dict | None = None) -> dict:
+    """:func:`dispatch` behind an agent's grant. Same envelope, plus:
+
+    * a tool outside ``scope.allow`` is refused (``guardrail: True``) even if
+      the model somehow names it (schemas are filtered too, defense in depth);
+    * tiers follow ``scope.mode`` — a write in plan mode is refused with the
+      "describe it in your plan" hint so the runner can record a *proposed*
+      call instead;
+    * write/execute calls are checked against the write scope;
+    * results are capped and, for :data:`UNTRUSTED_RESULT_TOOLS`, wrapped as
+      ``{"kind": "untrusted", "source": <tool>, "data": ...}``.
+    """
+    args = args or {}
+    if name not in scope.allow:
+        return {"tool": name, "ok": False, "guardrail": True,
+                "error": f"tool '{name}' is not in this agent's allowlist"}
+    spec = REGISTRY.get(name)
+    if spec is None:
+        return {"tool": name, "ok": False, "guardrail": False,
+                "error": f"unknown tool '{name}'"}
+    if spec.tier in scope.tiers:
+        if reason := check_write_scope(scope, spec, args):
+            return {"tool": name, "ok": False, "guardrail": True, "error": reason}
+    out = dispatch(ctx, name, args, tiers=scope.tiers)
+    if out.get("ok"):
+        result, truncated = _cap_result(out.get("result"), scope.result_cap)
+        if name in UNTRUSTED_RESULT_TOOLS:
+            result = {"kind": "untrusted", "source": name, "data": result}
+        out["result"] = result
+        if truncated:
+            out["truncated"] = True
+    return out

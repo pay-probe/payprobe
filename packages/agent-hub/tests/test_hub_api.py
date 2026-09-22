@@ -5,8 +5,8 @@ import time
 import jwt
 from agent_hub.main import app
 from agent_hub.seed import SEEDS
-from conftest import agent_spec
 from fastapi.testclient import TestClient
+from hub_testkit import agent_spec
 
 # -- seeds -----------------------------------------------------------------------------
 
@@ -26,10 +26,10 @@ def test_seeds_are_published_builtins(client):
 def test_seed_can_be_disabled(monkeypatch):
     import asyncio
 
-    from conftest import _truncate
+    from hub_testkit import truncate
 
     monkeypatch.setenv("AGENT_HUB_SEED", "0")
-    asyncio.run(_truncate())
+    asyncio.run(truncate())
     with TestClient(app) as c:
         assert c.get("/agents").json() == []
         assert c.app.state.seeded == []

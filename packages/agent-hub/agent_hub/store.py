@@ -80,6 +80,38 @@ CREATE TABLE IF NOT EXISTS agent_hub_meta (
 );
 """,
     ),
+    (
+        2,
+        """
+CREATE TABLE IF NOT EXISTS agent_hub_heartbeats (
+  id               TEXT PRIMARY KEY,
+  agent            TEXT NOT NULL,
+  version          INTEGER NOT NULL,
+  spec_sha256      TEXT NOT NULL,
+  wake             TEXT NOT NULL,
+  invoked_by       TEXT NOT NULL DEFAULT '',
+  principal        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  input            TEXT NOT NULL DEFAULT '',
+  status           TEXT NOT NULL DEFAULT 'running',
+  steps            JSONB NOT NULL DEFAULT '[]'::jsonb,
+  proposed         JSONB NOT NULL DEFAULT '[]'::jsonb,
+  journal          JSONB NOT NULL DEFAULT '[]'::jsonb,
+  tokens_in        INTEGER NOT NULL DEFAULT 0,
+  tokens_out       INTEGER NOT NULL DEFAULT 0,
+  model            TEXT NOT NULL DEFAULT '',
+  result           TEXT,
+  error            TEXT,
+  cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
+  reverted_at      TIMESTAMPTZ,
+  started_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  finished_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS agent_hub_heartbeats_agent_started
+  ON agent_hub_heartbeats (agent, started_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_hub_heartbeats_one_running
+  ON agent_hub_heartbeats (agent) WHERE status = 'running';
+""",
+    ),
 ]
 
 
@@ -166,7 +198,8 @@ class RegistryStore:
     async def reset(self) -> None:
         """Test helper: wipe registry data (schema stays)."""
         await self._pool.execute(
-            "TRUNCATE agent_hub_versions, agent_hub_definitions, agent_hub_meta"
+            "TRUNCATE agent_hub_heartbeats, agent_hub_versions, agent_hub_definitions, "
+            "agent_hub_meta"
         )
 
     # -- row shaping -------------------------------------------------------------------
@@ -471,3 +504,150 @@ class RegistryStore:
             by or None,
         )
         return _loads(row["value"])
+
+    # -- heartbeats (phase 2) ----------------------------------------------------------
+
+    @staticmethod
+    def _hb_row(r: asyncpg.Record) -> dict:
+        d = dict(r)
+        for k in ("principal", "steps", "proposed", "journal"):
+            d[k] = _loads(d[k])
+        for k in ("started_at", "finished_at", "reverted_at"):
+            d[k] = _iso(d[k])
+        return d
+
+    async def start_heartbeat(self, hb: dict) -> dict:
+        """Insert a ``running`` row. Raises :class:`Conflict` when the agent
+        already has one (wakeups coalesce instead of stacking)."""
+        try:
+            await self._pool.execute(
+                "INSERT INTO agent_hub_heartbeats (id, agent, version, spec_sha256, wake, "
+                "invoked_by, principal, input, status, model) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'running',$9)",
+                hb["id"],
+                hb["agent"],
+                hb["version"],
+                hb["spec_sha256"],
+                hb["wake"],
+                hb.get("invoked_by", ""),
+                json.dumps(hb.get("principal") or {}),
+                hb.get("input", ""),
+                hb.get("model", ""),
+            )
+        except asyncpg.UniqueViolationError as exc:
+            raise Conflict(f"agent '{hb['agent']}' already has a running heartbeat") from exc
+        return await self.get_heartbeat(hb["id"])
+
+    async def record_heartbeat(
+        self,
+        hb_id: str,
+        status: str,
+        *,
+        steps: list,
+        proposed: list,
+        journal: list,
+        tokens: dict,
+        result: str | None,
+        error: str | None,
+    ) -> dict:
+        """Persist the outcome of a finished wake (from a running row) or of a
+        refused wake (status other than running, inserted directly)."""
+        await self._pool.execute(
+            "UPDATE agent_hub_heartbeats SET status=$2, steps=$3::jsonb, proposed=$4::jsonb, "
+            "journal=$5::jsonb, tokens_in=$6, tokens_out=$7, result=$8, error=$9, "
+            "finished_at=NOW() WHERE id=$1",
+            hb_id,
+            status,
+            json.dumps(steps),
+            json.dumps(proposed),
+            json.dumps(journal),
+            int(tokens.get("input", 0)),
+            int(tokens.get("output", 0)),
+            result,
+            error,
+        )
+        return await self.get_heartbeat(hb_id)
+
+    async def refuse_heartbeat(self, hb: dict, status: str, error: str) -> dict:
+        """A wake that never ran (paused, budget): recorded, never 'running'."""
+        await self._pool.execute(
+            "INSERT INTO agent_hub_heartbeats (id, agent, version, spec_sha256, wake, "
+            "invoked_by, principal, input, status, error, finished_at) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,NOW())",
+            hb["id"],
+            hb["agent"],
+            hb["version"],
+            hb["spec_sha256"],
+            hb["wake"],
+            hb.get("invoked_by", ""),
+            json.dumps(hb.get("principal") or {}),
+            hb.get("input", ""),
+            status,
+            error,
+        )
+        return await self.get_heartbeat(hb["id"])
+
+    async def get_heartbeat(self, hb_id: str) -> dict:
+        r = await self._pool.fetchrow("SELECT * FROM agent_hub_heartbeats WHERE id=$1", hb_id)
+        if r is None:
+            raise NotFound(f"heartbeat '{hb_id}' not found")
+        return self._hb_row(r)
+
+    async def list_heartbeats(self, agent: str | None = None, limit: int = 50) -> list[dict]:
+        rows = await self._pool.fetch(
+            "SELECT id, agent, version, spec_sha256, wake, invoked_by, status, "
+            "tokens_in, tokens_out, model, error, started_at, finished_at, reverted_at, "
+            "jsonb_array_length(steps) AS n_steps, jsonb_array_length(proposed) AS n_proposed, "
+            "jsonb_array_length(journal) AS n_writes "
+            "FROM agent_hub_heartbeats WHERE ($1::text IS NULL OR agent=$1) "
+            "ORDER BY started_at DESC LIMIT $2",
+            agent,
+            limit,
+        )
+        out = []
+        for r in rows:
+            d = dict(r)
+            for k in ("started_at", "finished_at", "reverted_at"):
+                d[k] = _iso(d[k])
+            out.append(d)
+        return out
+
+    async def running_heartbeat(self, agent: str) -> dict | None:
+        r = await self._pool.fetchrow(
+            "SELECT * FROM agent_hub_heartbeats WHERE agent=$1 AND status='running'", agent
+        )
+        return self._hb_row(r) if r else None
+
+    async def request_cancel(self, hb_id: str) -> dict:
+        n = await self._pool.execute(
+            "UPDATE agent_hub_heartbeats SET cancel_requested=TRUE "
+            "WHERE id=$1 AND status='running'",
+            hb_id,
+        )
+        if n == "UPDATE 0":
+            hb = await self.get_heartbeat(hb_id)  # raises NotFound
+            raise Conflict(f"heartbeat '{hb_id}' is {hb['status']}, not running")
+        return await self.get_heartbeat(hb_id)
+
+    async def cancel_requested(self, hb_id: str) -> bool:
+        return bool(
+            await self._pool.fetchval(
+                "SELECT cancel_requested FROM agent_hub_heartbeats WHERE id=$1", hb_id
+            )
+        )
+
+    async def mark_reverted(self, hb_id: str) -> dict:
+        await self._pool.execute(
+            "UPDATE agent_hub_heartbeats SET reverted_at=NOW(), journal='[]'::jsonb WHERE id=$1",
+            hb_id,
+        )
+        return await self.get_heartbeat(hb_id)
+
+    async def tokens_today(self, agent: str) -> int:
+        return int(
+            await self._pool.fetchval(
+                "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM agent_hub_heartbeats "
+                "WHERE agent=$1 AND started_at >= date_trunc('day', NOW())",
+                agent,
+            )
+        )

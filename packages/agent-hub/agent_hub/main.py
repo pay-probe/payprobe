@@ -26,16 +26,23 @@ The LLM key is not here: agent-hub reads the same source as the assistant
 
 from __future__ import annotations
 
+import asyncio
 import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
+from . import rest
 from .auth import caller_sub, require_auth, require_roles
+from .llm import ProviderLLMBackend, resolve_llm
 from .models import NAME_RE, AgentSpec, WorkflowSpec
+from .principal import mint_obo
+from .runner import Outcome, run_heartbeat
 from .seed import seed_builtin
 from .store import Conflict, Guardrail, NotFound, RegistryStore
 from .validate import tool_catalog, validate_agent_spec, validate_workflow_spec
@@ -59,10 +66,35 @@ async def lifespan(app: FastAPI):
     # Fails loudly without a Postgres DSN: the registry has no file fallback.
     app.state.store = await RegistryStore.connect()
     app.state.seeded = await seed_builtin(app.state.store) if _seed_enabled() else []
+    # Phase-2 seams (tests replace them): how a heartbeat reaches the LLM and
+    # the platform. Production: the platform-managed provider config (D4) and
+    # the shared REST backend bound to the heartbeat's on-behalf-of token.
+    app.state.llm_factory = _default_llm_factory
+    app.state.backend_factory = _default_backend_factory
+    app.state.tasks = set()
     try:
         yield
     finally:
+        for t in list(app.state.tasks):
+            t.cancel()
         await app.state.store.close()
+
+
+def _default_llm_factory(spec: AgentSpec):
+    llm = resolve_llm()
+    if not llm.get("enabled"):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "no LLM provider configured: set it under Settings → AI assistant "
+            "(or ASSIST_LLM_* env)",
+        )
+    return ProviderLLMBackend(llm, model=spec.model, temperature=spec.temperature)
+
+
+def _default_backend_factory(token: str):
+    from payprobe_common.rest_backend import RestBackend
+
+    return RestBackend(rest.request_as(token), rest.SCENARIO_API, rest.RUN_API, rest.INSIGHT_API)
 
 
 app = FastAPI(
@@ -307,3 +339,145 @@ def _mount(kind: Kind, prefix: str) -> None:
 
 _mount("agent", "/agents")
 _mount("workflow", "/workflows")
+
+
+# -- heartbeats (phase 2) ------------------------------------------------------------------
+
+
+class WakeBody(BaseModel):
+    input: str = Field(default="", max_length=20_000)
+    version: int | None = None
+    wake: Literal["manual", "schedule", "event", "mcp"] = "manual"
+
+
+def _caller(request: Request) -> dict:
+    return getattr(request.state, "auth", None) or {}
+
+
+@app.post("/agents/{name}/wake", status_code=202, response_model=None)
+async def wake_agent(request: Request, name: str, body: WakeBody) -> dict | JSONResponse:
+    """Start one heartbeat of ``name`` (its active version, or ``version``).
+
+    Refused, and recorded as such, when agents are paused or the agent's daily
+    token budget is spent. Coalesced (200, ``coalesced: true``) when the agent
+    already has a running heartbeat. Otherwise 202 with the ``running`` row;
+    poll ``GET /heartbeats/{id}`` for the outcome.
+    """
+    store = _store(request)
+    ref = f"{name}@{body.version}" if body.version else name
+    hit = await store.resolve("agent", ref)
+    if hit is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no runnable version for '{ref}'")
+    _, version, raw = hit
+    spec = AgentSpec.model_validate(raw)
+    require_roles(request, set(spec.rbac.invoke) | _admin_roles())
+    ver = await store.get_version("agent", name, version)
+    caller = _caller(request)
+    hb = {
+        "id": uuid.uuid4().hex,
+        "agent": name,
+        "version": version,
+        "spec_sha256": ver["spec_sha256"],
+        "wake": body.wake,
+        "invoked_by": caller_sub(request),
+        "principal": {"sub": caller.get("sub"), "roles": caller.get("roles") or []},
+        "input": body.input,
+    }
+    # Refusals and coalescing are 200 with the record: nothing was accepted
+    # for processing. Only a freshly started heartbeat is 202.
+    if (await store.paused())["paused"]:
+        return JSONResponse(await store.refuse_heartbeat(hb, "paused", "agents are paused"))
+    budget = spec.budget.daily_tokens
+    if budget and await store.tokens_today(name) >= budget:
+        return JSONResponse(
+            await store.refuse_heartbeat(
+                hb, "budget_exceeded", f"daily token budget ({budget}) spent; hard stop"
+            )
+        )
+    running = await store.running_heartbeat(name)
+    if running:
+        return JSONResponse({**running, "coalesced": True})
+
+    llm = request.app.state.llm_factory(spec)  # 503 when not configured
+    hb["model"] = llm.model
+    token = mint_obo(caller, name, version, hb["id"], spec.limits.wall_clock_s + 60)
+    backend = request.app.state.backend_factory(token)
+    row = await store.start_heartbeat(hb)
+    loop = asyncio.get_running_loop()
+
+    def flags() -> dict:
+        async def read() -> dict:
+            return {
+                "paused": (await store.paused())["paused"],
+                "cancel": await store.cancel_requested(hb["id"]),
+            }
+
+        return asyncio.run_coroutine_threadsafe(read(), loop).result(timeout=10)
+
+    async def execute() -> None:
+        try:
+            out: Outcome = await loop.run_in_executor(
+                None, lambda: run_heartbeat(spec, body.input, backend, llm, flags)
+            )
+        except Exception as exc:  # noqa: BLE001 — never leave a row 'running'
+            out = Outcome(status="failed", error=f"{type(exc).__name__}: {exc}")
+        await store.record_heartbeat(
+            hb["id"],
+            out.status,
+            steps=out.steps,
+            proposed=out.proposed,
+            journal=out.journal,
+            tokens=out.tokens,
+            result=out.result,
+            error=out.error,
+        )
+
+    task = asyncio.create_task(execute())
+    request.app.state.tasks.add(task)
+    task.add_done_callback(request.app.state.tasks.discard)
+    return row
+
+
+@app.get("/heartbeats")
+async def list_heartbeats(
+    request: Request, agent: str | None = None, limit: int = Query(default=50, ge=1, le=500)
+) -> list[dict]:
+    return await _store(request).list_heartbeats(agent, limit)
+
+
+@app.get("/heartbeats/{hb_id}")
+async def get_heartbeat(request: Request, hb_id: str) -> dict:
+    return await _wrap(_store(request).get_heartbeat(hb_id))
+
+
+@app.post("/heartbeats/{hb_id}/cancel")
+async def cancel_heartbeat(request: Request, hb_id: str) -> dict:
+    store = _store(request)
+    hb = await _wrap(store.get_heartbeat(hb_id))
+    hit = await store.resolve("agent", f"{hb['agent']}@{hb['version']}")
+    invoke = set(AgentSpec.model_validate(hit[2]).rbac.invoke) if hit else set()
+    require_roles(request, invoke | _admin_roles())
+    return await _wrap(store.request_cancel(hb_id))
+
+
+@app.post("/heartbeats/{hb_id}/revert")
+async def revert_heartbeat(request: Request, hb_id: str) -> dict:
+    """Undo every journalled write of a finished heartbeat (newest first),
+    using the caller's own credential — reverting is the human's act."""
+    store = _store(request)
+    hb = await _wrap(store.get_heartbeat(hb_id))
+    require_roles(request, _admin_roles())
+    if hb["status"] == "running":
+        raise HTTPException(status.HTTP_409_CONFLICT, "heartbeat is still running")
+    if not hb["journal"]:
+        raise HTTPException(status.HTTP_409_CONFLICT, "nothing to revert")
+    from payprobe_common import agent_toolkit as tk
+
+    bearer = (request.headers.get("authorization") or "")[len("Bearer ") :].strip()
+    backend = request.app.state.backend_factory(bearer or "dev")
+    ctx = tk.ToolContext(backend=backend)
+    n = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: tk.restore_journal(ctx, hb["journal"])
+    )
+    row = await store.mark_reverted(hb_id)
+    return {**row, "reverted": n}
