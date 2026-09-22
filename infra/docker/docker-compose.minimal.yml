@@ -1,5 +1,6 @@
 # Minimal PayProbe stack for a single air-gapped host: portal (TLS), scenario-
-# service, orchestrator (worker engine in-process), auth-service and Redis. No
+# service, orchestrator (worker engine in-process), auth-service, Redis and the
+# MCP server (loopback-bound). No
 # Postgres (every store is SQLite on a volume), no NATS, no assistant/insight/
 # MCP, no load-worker fleet. Images come from infra/docker/offline/ builds
 # (tagged ${PAYPROBE_TAG}); see docs/operations/offline-minimal-deployment.md.
@@ -81,6 +82,30 @@ services:
       scenario-service:
         condition: service_started
       auth-service:
+        condition: service_started
+    <<: *restart
+
+  # MCP server (Streamable HTTP at /mcp). It has NO client authentication of its
+  # own: any caller becomes the service identity it mints, so the port is bound
+  # to the host loopback by default. Reach it through an SSH tunnel, or widen
+  # MCP_BIND to 0.0.0.0 and MCP_ALLOWED_HOSTS to your DNS name on a trusted LAN.
+  mcp-server:
+    image: payprobe-mcp-server:${PAYPROBE_TAG}
+    environment:
+      SCENARIO_API_URL: http://scenario-service:8000
+      RUN_API_URL: http://orchestrator:8100
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8200
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET in the env file}
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-}
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-}
+    ports:
+      - "${MCP_BIND:-127.0.0.1}:${MCP_PORT:-8200}:8200"
+    depends_on:
+      scenario-service:
+        condition: service_started
+      orchestrator:
         condition: service_started
     <<: *restart
 

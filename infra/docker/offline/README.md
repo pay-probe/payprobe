@@ -1,7 +1,7 @@
 # Offline image builds (air-gapped hosts)
 
 These Dockerfiles build the **minimal** PayProbe stack (portal, scenario-service,
-orchestrator, auth-service — Redis is a stock image) on a host with **no
+orchestrator, auth-service, mcp-server — Redis is a stock image) on a host with **no
 registry, PyPI or npm access**. Everything they need is staged into one build
 context by `scripts/offline_build_kit.sh` on a machine that *does* have
 internet: base-image tarballs (skopeo), Python wheels (`pip download`), the
