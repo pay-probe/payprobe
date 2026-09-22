@@ -82,6 +82,8 @@ setuptools>=70
 wheel
 # build backend of the in-tree packages (pip's isolated build env installs it from /wheels)
 hatchling
+# MCP server
+mcp>=1.9,<2
 EOF
 "$PY" -m pip download -q -d "$OUT/wheels" -r "$OUT/wheels/requirements-offline.txt" \
   --python-version 3.12 --implementation cp --abi cp312 --abi abi3 --abi none \
@@ -109,7 +111,7 @@ log "git archive HEAD → src/"
 rm -rf "$OUT/src" && mkdir -p "$OUT/src"
 git -C "$REPO_ROOT" archive --format=tar HEAD \
   packages/worker packages/report_service packages/payprobe_common packages/orchestrator \
-  packages/scenario-service packages/auth-service examples infra/docker/offline \
+  packages/scenario-service packages/auth-service packages/mcp-server examples infra/docker/offline \
   infra/docker/docker-compose.minimal.yml infra/nginx/nginx.minimal.conf \
   | tar -x -C "$OUT/src"
 git -C "$REPO_ROOT" rev-parse HEAD > "$OUT/src/GIT_COMMIT"
@@ -138,6 +140,7 @@ docker build -f src/infra/docker/offline/Dockerfile.auth-service     -t payprobe
 docker build -f src/infra/docker/offline/Dockerfile.scenario-service -t payprobe-scenario-service:"\$TAG" .
 docker build -f src/infra/docker/offline/Dockerfile.orchestrator     -t payprobe-orchestrator:"\$TAG"     .
 docker build -f src/infra/docker/offline/Dockerfile.portal           -t payprobe-portal:"\$TAG"           .
+docker build -f src/infra/docker/offline/Dockerfile.mcp-server       -t payprobe-mcp-server:"\$TAG"       .
 docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep -E "payprobe-.*:\$TAG|redis:7-alpine"
 EOF
 chmod +x "$OUT/build-images.sh"

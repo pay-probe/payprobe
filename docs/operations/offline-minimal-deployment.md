@@ -13,8 +13,9 @@ inside a closed network.
 | orchestrator | `payprobe-orchestrator` | SQLite `/data/runs.db` | worker engine **in-process**; Instant Client for thick Oracle |
 | auth-service | `payprobe-auth-service` | SQLite `/data/auth.db` | local accounts, HS256 JWT |
 | redis | `redis:7-alpine` | AOF on a volume | durable run-event streams (run monitor resumes) |
+| mcp-server | `payprobe-mcp-server` | — | Streamable HTTP at `/mcp`; **loopback-bound** (`MCP_BIND`), no client auth of its own |
 
-Not deployed: Postgres, NATS, insight-service, assistant, mcp-server,
+Not deployed: Postgres, NATS, insight-service, assistant,
 Prometheus/Grafana, the load-worker fleet. The nginx config answers `503` on
 `/api/assistant/` and `/api/insights/` so the portal's optional panels fail
 fast. `PAYPROBE_WORKER_PROVISIONER=none`: no Docker socket is mounted.
@@ -70,6 +71,7 @@ Env file keys (all required unless a default is shown):
 | `AUTH_ADMIN_USER` / `AUTH_ADMIN_PASSWORD` | bootstrap administrator (first start only) |
 | `PAYPROBE_SECRET_KEY` | encrypts connection secrets at rest |
 | `PAYPROBE_ENV` | `prod` (default here): fail-closed auth and durable stores |
+| `MCP_BIND`, `MCP_PORT`, `MCP_ALLOWED_HOSTS` | MCP server bind address (default `127.0.0.1`), host port (8200) and extra `Host` values for the SDK's DNS-rebinding guard |
 
 Then: sign in, install the pack you need, fill its connections, and load a
 card pool. Connection passwords are typed into the portal and stored
