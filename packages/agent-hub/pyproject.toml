@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "payprobe-agent-hub"
+version = "0.1.0"
+description = "PayProbe agent hub — registry of agent principals and workflow definitions (ADR-0010 phase 1)"
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.110", "uvicorn>=0.27", "pyjwt>=2.0", "pydantic>=2.0", "asyncpg>=0.29"]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx"]
+redis = ["redis>=5.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_hub"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

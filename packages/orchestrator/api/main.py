@@ -112,6 +112,8 @@ MCP_API_URL = os.environ.get("MCP_API_URL", "")
 ASSIST_API_URL = os.environ.get("ASSIST_API_URL", "")
 # Insight-service base (ADR-0005, advisory ML). Optional: only probed when set.
 INSIGHT_API_URL = os.environ.get("INSIGHT_API_URL", "")
+# Agent-hub base (ADR-0010, agent registry). Optional: only probed when set.
+AGENT_HUB_API_URL = os.environ.get("AGENT_HUB_API_URL", "")
 
 app = FastAPI(
     title="PayProbe Run Orchestrator",
@@ -6093,6 +6095,17 @@ async def status() -> dict:
             return
         await _probe("insight-service", f"{INSIGHT_API_URL.rstrip('/')}/health")
 
+    async def _probe_agent_hub() -> None:
+        """Reachability of the agent registry (ADR-0010). Optional: only
+        probed when AGENT_HUB_API_URL is set."""
+        if not AGENT_HUB_API_URL:
+            services["agent-hub"] = {
+                "status": "disabled",
+                "detail": "not configured (not deployed)",
+            }
+            return
+        await _probe("agent-hub", f"{AGENT_HUB_API_URL.rstrip('/')}/health")
+
     await asyncio.gather(
         _probe("scenario-service", f"{SCENARIO_API_URL}/health"),
         _probe("auth-service", f"{AUTH_API_URL}/health"),
@@ -6100,6 +6113,7 @@ async def status() -> dict:
         _probe_mcp(),
         _probe_assistant(),
         _probe_insight(),
+        _probe_agent_hub(),
     )
     inflight = sum(1 for r in RUNS.values() if r.task and not r.task.done())
     services["orchestrator"] = {

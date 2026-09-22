@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 PYTEST ?= python -m pytest
-PKGS := worker/tests orchestrator/tests scenario-service/tests mcp-server/tests payprobe-assistant/tests insight-service/tests ../scripts/test_showcase.py
+PKGS := worker/tests orchestrator/tests scenario-service/tests mcp-server/tests payprobe-assistant/tests insight-service/tests agent-hub/tests ../scripts/test_showcase.py
 
 HUB_COMPOSE := infra/docker/docker-compose.hub.yml
 
@@ -30,6 +30,9 @@ test-scenario: ## Run the scenario-service suite
 
 test-insight: ## Run the insight-service suite (learned-layer tests skip without scikit-learn)
 	cd packages && $(PYTEST) insight-service/tests -q
+
+test-agent-hub: ## Run the agent-hub registry suite (ADR-0010)
+	cd packages && $(PYTEST) agent-hub/tests -q
 
 test-cov: ## Run the full suite with coverage
 	cd packages && $(PYTEST) $(PKGS) --cov --cov-report=term-missing -q

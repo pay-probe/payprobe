@@ -65,6 +65,16 @@ jobs:
         run: |
           pip install -e packages/payprobe_common
           cd packages/payprobe-assistant && pip install -e ".[dev]" && pytest tests/ -v
+      - name: Test agent-hub
+        # the registry validates tool allowlists against payprobe_common and
+        # persists to PostgreSQL only (ADR-0010) — it runs against the job's
+        # postgres service; without a database the suite skips, it never
+        # falls back to a file.
+        env:
+          AGENT_HUB_TEST_DATABASE_URL: postgresql://payprobe:test@localhost:5432/payprobe_test
+        run: |
+          pip install -e packages/payprobe_common
+          cd packages/agent-hub && pip install -e ".[dev]" && pytest tests/ -v
       - name: Guard the showcase demo (offline)
         # scripts/showcase.py has no importer of its own — this test locks its
         # generated docs + API-call shapes against the real models/services.

@@ -170,6 +170,7 @@ services:
       MCP_API_URL: http://mcp-server:8200
       ASSIST_API_URL: http://assistant:8400
       INSIGHT_API_URL: http://insight-service:8500
+      AGENT_HUB_API_URL: http://agent-hub:8600
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
       PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
@@ -233,6 +234,23 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+    <<: *restart
+
+  agent-hub:
+    image: ${PAYPROBE_NS:-datikos}/payprobe-agent-hub:${PAYPROBE_TAG:-latest}
+    environment:
+      # Registry state lives in the platform Postgres (ADR-0010): no file fallback.
+      AGENT_HUB_DATABASE_URL: ${AGENT_HUB_DATABASE_URL:-postgresql://payprobe:payprobe@postgres:5432/payprobe}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
+      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
+    ports:
+      - "${AGENT_HUB_PORT:-8600}:8600"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
     <<: *restart
 
   insight-service:

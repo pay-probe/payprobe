@@ -30,6 +30,7 @@ product.
 | `packages/auth-service` | JWT auth + users/roles | 8300 |
 | `packages/payprobe-assistant` | Standalone LLM-gateway assistant (REST-backed) | 8400 |
 | `packages/insight-service` | Advisory ML insights: failure categorization + explanation + outcome prediction (ADR-0005; read-only, advise-only) | 8500 |
+| `packages/agent-hub` | Agent registry: versioned agent principals + JSON-DAG workflows, validated against the toolkit; PostgreSQL only (ADR-0010 phase 1; runner/engine in later phases) | 8600 |
 | `packages/payprobe_common` | Shared: `agent_toolkit` (assistant tool layer), `crypto` (SecretBox) | — |
 | `packages/report_service` | Shared report/gates/provenance library (orchestrator imports it) | — |
 | `packages/portal` | Angular 22 UI (standalone components, signals, `pp-*` design system) | 4200 |
@@ -138,14 +139,15 @@ in `docs/adr/`.
 
 - `docs/ATLAS.md` — architecture with reasoning + roadmap (the companion to
   this file).
-- `docs/adr/` — nine ADRs; 0001 (fleet), 0004 (networks) and 0006 (NATS)
+- `docs/adr/` — ten ADRs; 0001 (fleet), 0004 (networks) and 0006 (NATS)
   are fully implemented, 0002 (proxy tap/intercept/stub) through stage 2 with
   only TLS deferred (now specced as 0008, proposed), 0005 (insight service)
   built as advise-only, 0007 (playground) backend built, portal page written
   2026-07-16 but still owed a host build + click-through, 0009 (payment-provider
   integration — PSP simulators/packs + generic `mcp` client adapter + signed
-  webhook emission) implemented, portal presets owed a host build; statuses in
-  the files are kept truthful.
+  webhook emission) implemented, portal presets owed a host build, 0010 (agent
+  registry + orchestration) proposed with phase 1 (the registry) implemented
+  and the portal page owed; statuses in the files are kept truthful.
 - `.claude/skills/payprobe-run-and-operate` and `payprobe-config-and-flags`
   — operator-grade API/env-flag reference, kept current.
 - `docs/history/` — finished build specs, plans and working notes (accurate at
