@@ -150,8 +150,8 @@ images/
 *.log
 EOF
 
-# 8. Manifest ----------------------------------------------------------------
+# 8. Manifest (KIT_INFO first, so the checksums cover it) --------------------
+printf 'kit=%s\ntag=%s\ncommit=%s\nbuilt=%s\n' "$OUT" "$TAG" "$(cat "$OUT/src/GIT_COMMIT")" "$(date -u +%FT%TZ)" > "$OUT/KIT_INFO"
 log "SHA256SUMS"
 (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
-printf 'kit=%s\ntag=%s\ncommit=%s\nbuilt=%s\n' "$OUT" "$TAG" "$(cat "$OUT/src/GIT_COMMIT")" "$(date -u +%FT%TZ)" > "$OUT/KIT_INFO"
 log "done: $(du -sh "$OUT" | cut -f1) in $OUT"
