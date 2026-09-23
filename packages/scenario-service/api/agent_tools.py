@@ -246,6 +246,16 @@ class StoresBackend:
     def list_runs(self) -> list[dict]:
         return _run_api_get("/runs")
 
+    def get_run_regression(self, run_id: str) -> dict | None:
+        import urllib.parse
+        try:
+            return _run_api_get(
+                f"/runs/{urllib.parse.quote(run_id, safe='')}/regression")
+        except ToolError as exc:  # unknown run → None, per the get_* convention
+            if "HTTP 404" in str(exc):
+                return None
+            raise
+
     def list_network_runs(self) -> list[dict]:
         return _run_api_get("/topology-runs")
 

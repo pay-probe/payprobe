@@ -185,6 +185,9 @@ class RestBackend:
     def list_runs(self) -> list[dict]:
         return self.request("GET", self.r("/runs"))
 
+    def get_run_regression(self, run_id: str) -> dict | None:
+        return self._get_or_none(self.r(f"/runs/{self.seg(run_id)}/regression"))
+
     def list_network_runs(self) -> list[dict]:
         return self.request("GET", self.r("/topology-runs"))
 

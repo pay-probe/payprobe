@@ -155,6 +155,30 @@
 > a fenced JSON block, not bare JSON, which the finding parser would have
 > missed; `extract_json` now finds fenced or embedded JSON in both the alert
 > path and the engine's `${node.json}` context, with that output as the test.
+>
+> **Deterministic regression post-check (2026-09-23).** The first real
+> `failure-triage` verdict called the very first run of a scenario a
+> regression because "similar failures" existed. Where the platform holds the
+> evidence, the evidence now overrides the model: the orchestrator gained
+> `GET /runs/{id}/regression` (`RunStore.regression`: per scenario, its
+> earlier pass/fail outcomes, `conclusion` = `regression` | `never_passed` |
+> `first_run` | `passed`, last passing run, failure streak; run-level
+> `verdict`), the toolkit gained the read tool `get_run_regression` (both
+> backends, untrusted-wrapped, in `failure-triage`'s allowlist and
+> instructions), and `agent_hub/postcheck.py` runs after the tool loop: a
+> `done` answer that is a JSON object with `run_id` and `regression` has the
+> field overwritten with the history's boolean, gains a `regression_evidence`
+> block (verdict, the model's original claim, the failed scenarios' history)
+> and a `postcheck` step on the heartbeat (`claimed`, `verified`, `verdict`,
+> `changed`). No evidence (unknown run, orchestrator down) keeps the claim as
+> written and records the miss; the check never raises. Portal: the run
+> report's verdict pill reads `regression · verified` or `first run` /
+> `never passed` / `not a regression`, and the heartbeat waterfall shows the
+> step as `corrected` / `confirmed` / `no evidence`. Existing registries keep
+> their `failure-triage` v1 (seeds never overwrite an operator's registry): the
+> post-check applies regardless of the version; publishing a v2 with the new
+> tool lets the model read the evidence itself. `test_hub_regression.py`
+> (9), orchestrator `test_schedules_and_trend.py` (+4).
 
 Companions: [`../agentic-engine-evaluation.md`](../agentic-engine-evaluation.md)
 (Opus), [`../agentic-engine-evaluation-fable.md`](../agentic-engine-evaluation-fable.md)

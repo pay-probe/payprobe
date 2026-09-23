@@ -339,6 +339,20 @@ the per-agent daily budget, remove the `assistant` alias (service, image
 publish, CI step, dev `assistantApiBase`), ADR status to Accepted, David's
 security review and Go/No-Go.
 
+Regression post-check (same day, from the first real triage verdict calling a
+first-ever run a regression): orchestrator `GET /runs/{id}/regression`
+(`RunStore.regression`, deterministic per-scenario history), toolkit read tool
+`get_run_regression` (both backends; in `_READ_RUNTIME`, so every runtime
+reader including `failure-triage` gets it), `agent_hub/postcheck.py` run from
+`launch_heartbeat.execute` on a `done` answer: overwrites `regression` with the
+history's boolean, adds `regression_evidence`, appends a `postcheck` step
+(`kind`, `tool`, `run_id`, `ok`, `changed`, `claimed`, `verified`, `verdict`,
+`error`). Portal reads the evidence on the verdict panel and renders the step
+kind in the waterfall (`HeartbeatPostcheckStep`). The live `failure-triage` is
+still v1 (seeds never overwrite); the post-check applies to it anyway. If you
+want the model to read the evidence itself, publish a v2 with
+`get_run_regression` in `tools` from the Agents page. `test_hub_regression.py`.
+
 ## 8. Gotchas learned this session
 
 - Postgres in the sandbox stopped between turns; a run that shows "49 skipped"

@@ -286,6 +286,31 @@ interface WaterfallRow {
                       usage so far: {{ t.step.usage.input }} in /
                       {{ t.step.usage.output }} out
                     </div>
+                  } @else if (t.step.kind === "postcheck") {
+                    <div class="tsub">
+                      {{
+                        !t.step.ok
+                          ? "no evidence: the model's claim was kept as written"
+                          : t.step.changed
+                            ? "the answer was corrected from the platform's evidence"
+                            : "the platform's evidence confirmed the answer"
+                      }}
+                    </div>
+                    <div class="muted small">
+                      run {{ t.step.run_id }} · claimed
+                      <span class="mono">{{ json(t.step.claimed) }}</span>
+                      @if (t.step.ok) {
+                        · verified
+                        <span class="mono">{{ json(t.step.verified) }}</span>
+                        · history says
+                        <span class="mono">{{ t.step.verdict }}</span>
+                      }
+                    </div>
+                    @if (t.step.error) {
+                      <pre class="hbd__pre hbd__pre--err">{{
+                        t.step.error
+                      }}</pre>
+                    }
                   } @else {
                     <div class="tsub">args</div>
                     <pre class="hbd__pre">{{ json(t.step.args) }}</pre>
@@ -565,6 +590,10 @@ interface WaterfallRow {
       .pill--kind-tool {
         opacity: 0.85;
       }
+      .pill--kind-postcheck {
+        border-color: #d97706;
+        color: #b45309;
+      }
       @media (max-width: 900px) {
         .trow__head {
           grid-template-columns: 14px 24px 44px 1fr 58px;
@@ -631,9 +660,11 @@ export class AgentHeartbeatsComponent implements OnInit, OnChanges, OnDestroy {
         label:
           step.kind === "tool"
             ? step.tool
-            : step.tool_calls.length
-              ? `llm → ${step.tool_calls.map((c) => c.name).join(", ")}`
-              : "llm · final answer",
+            : step.kind === "postcheck"
+              ? `post-check · ${step.tool}`
+              : step.tool_calls.length
+                ? `llm → ${step.tool_calls.map((c) => c.name).join(", ")}`
+                : "llm · final answer",
       };
     });
   });
@@ -768,6 +799,12 @@ export class AgentHeartbeatsComponent implements OnInit, OnChanges, OnDestroy {
   status(step: HeartbeatStep): string {
     if (step.kind === "llm")
       return step.tool_calls.length ? "tool calls" : "final";
+    if (step.kind === "postcheck")
+      return !step.ok
+        ? "no evidence"
+        : step.changed
+          ? "corrected"
+          : "confirmed";
     if (step.proposed) return "proposed";
     if (step.guardrail) return "refused";
     return step.ok ? "ok" : "error";
@@ -779,6 +816,7 @@ export class AgentHeartbeatsComponent implements OnInit, OnChanges, OnDestroy {
 
   private cls(step: HeartbeatStep): string {
     if (step.kind === "llm") return "run";
+    if (step.kind === "postcheck") return step.ok ? "plan" : "bad";
     if (step.proposed) return "plan";
     return step.ok ? "ok" : "bad";
   }

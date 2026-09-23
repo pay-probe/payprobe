@@ -100,6 +100,16 @@ Agents page → agent → Heartbeats → row (waterfall + result);
 inside a markdown report; `extract_json` finds the fenced block, so `${node.json}` and
 the alert parser both work on real model output.
 
+**Post-checks (the platform corrects the model):** after the loop, a `done` answer that
+is a JSON object with `run_id` and `regression` is checked against the orchestrator's
+run history (`GET /runs/{id}/regression`, the toolkit's `get_run_regression`). The
+field is overwritten with the history's answer, `regression_evidence` (verdict,
+the model's original `claimed`, the failed scenarios' prior outcomes) is added, and a
+step of kind `postcheck` lands on the heartbeat (`corrected` / `confirmed` /
+`no evidence` in the waterfall). `first_run` and `never_passed` are not regressions;
+a scenario is one only when it passed in an earlier run. No evidence keeps the
+model's claim as written and says so.
+
 **Cancel / revert:** `POST /heartbeats/{id}/cancel` (stops before the next LLM or tool
 call; rbac.invoke or admin). `POST /heartbeats/{id}/revert` (admin) restores every
 journalled write newest-first under *your* token: reverting is the human's act.
@@ -178,6 +188,9 @@ sent / failed / recent. Without a URL, findings wait in the heartbeat log.
 8. **Pause** (`PUT /pause`, Agents page button): checked before every LLM and tool call.
 9. **Limits and budget** per heartbeat and per day; **coalescing** (one running
    heartbeat per agent); **restart watchdog** (`orphaned by restart`).
+10. **Deterministic post-checks** (`agent_hub/postcheck.py`): where the platform holds
+    the evidence it overrides the answer (today: `regression` vs run history), keeping
+    the model's claim beside it. Advice stays advice; facts come from the registry.
 
 The proof is `tests/test_hub_injection.py` (hostile results, an obedient model, plan
 and full modes, size, wake input, forged approvals) and `tests/test_hub_egress.py`.

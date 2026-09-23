@@ -107,6 +107,9 @@ class Backend(Protocol):
     # starts/stops anything, that stays with the operator)
     def platform_status(self) -> dict: ...
     def list_runs(self) -> list[dict]: ...
+    # deterministic per-scenario history of one run (ADR-0010): the evidence
+    # an agent's "regression" claim is checked against; None for an unknown run
+    def get_run_regression(self, run_id: str) -> dict | None: ...
     def list_network_runs(self) -> list[dict]: ...
     def list_running_participants(self) -> list[dict]: ...
     def list_running_simulators(self) -> list[dict]: ...
@@ -556,6 +559,21 @@ def _list_runs(ctx: ToolContext, args: dict) -> Any:
     return rows[:limit]
 
 
+@_tool("get_run_regression", "read",
+       "Deterministic regression evidence for ONE run, from the platform's run "
+       "history: per scenario, whether it passed in an earlier run "
+       "(conclusion 'regression'), failed in every earlier run ('never_passed') "
+       "or has no history ('first_run'), with the last passing run id and the "
+       "current failure streak. THE authority on 'is this a regression': "
+       "report its `verdict`, never your own guess.",
+       _obj({"run_id": _STR}, ["run_id"]))
+def _get_run_regression(ctx: ToolContext, args: dict) -> Any:
+    ev = ctx.backend.get_run_regression(args["run_id"])
+    if ev is None:
+        raise ToolError(f"run '{args['run_id']}' not found")
+    return ev
+
+
 @_tool("list_network_runs", "read",
        "Live network runs (started networks / simulated payment networks): "
        "per-run readiness health (live/total/ready) and every instance's bound "
@@ -911,7 +929,7 @@ def _start_load_run(ctx: ToolContext, args: dict) -> Any:
 #: results are wrapped as untrusted so a runner never treats content found in
 #: them as instructions (prompt-injection boundary).
 UNTRUSTED_RESULT_TOOLS: frozenset[str] = frozenset({
-    "platform_status", "list_runs", "list_network_runs",
+    "platform_status", "list_runs", "get_run_regression", "list_network_runs",
     "list_running_participants", "list_running_simulators",
     "list_load_runs", "get_load_run", "get_run_insights",
     "list_insight_predictions", "playground_targets", "playground_execute",

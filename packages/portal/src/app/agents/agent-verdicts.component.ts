@@ -29,6 +29,8 @@ interface Verdict {
   rootCause?: string;
   nextStep?: string;
   regression?: unknown;
+  /** the hub's deterministic check of `regression` against run history */
+  evidence?: { verdict?: string; claimed?: unknown };
   /** observer style: a findings list */
   findings?: { severity?: string; subject?: string; headline?: string }[];
   /** neither: the first lines of the answer */
@@ -92,6 +94,10 @@ function toVerdict(hb: HeartbeatDetail): Verdict {
         typeof d["root_cause"] === "string" ? d["root_cause"] : undefined,
       nextStep: typeof d["next_step"] === "string" ? d["next_step"] : undefined,
       regression: d["regression"],
+      evidence:
+        d["regression_evidence"] && typeof d["regression_evidence"] === "object"
+          ? (d["regression_evidence"] as Verdict["evidence"])
+          : undefined,
     };
   }
   return { ...base, text: (hb.result ?? "").slice(0, 400) };
@@ -138,8 +144,30 @@ function toVerdict(hb: HeartbeatDetail): Verdict {
               @if (v.regression === true) {
                 <span
                   class="pill pill--warn"
-                  title="the agent judged this a regression"
-                  >regression</span
+                  [title]="
+                    v.evidence
+                      ? 'verified against run history: the scenario passed before'
+                      : 'the agent judged this a regression (unverified)'
+                  "
+                  >regression{{ v.evidence ? " · verified" : "" }}</span
+                >
+              } @else if (v.evidence) {
+                <span
+                  class="pill"
+                  [title]="
+                    'run history: ' +
+                    v.evidence.verdict +
+                    (v.evidence.claimed === true
+                      ? ' (the agent claimed a regression; corrected)'
+                      : '')
+                  "
+                  >{{
+                    v.evidence.verdict === "never_passed"
+                      ? "never passed"
+                      : v.evidence.verdict === "first_run"
+                        ? "first run"
+                        : "not a regression"
+                  }}</span
                 >
               }
             </div>

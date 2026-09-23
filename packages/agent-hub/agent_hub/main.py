@@ -46,7 +46,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
-from . import egress, rest
+from . import egress, postcheck, rest
 from .alerts import Alerter, verify
 from .auth import caller_sub, require_auth, require_roles
 from .engine import Engine
@@ -505,6 +505,18 @@ async def launch_heartbeat(
             )
         except Exception as exc:  # noqa: BLE001 — never leave a row 'running'
             out = Outcome(status="failed", error=f"{type(exc).__name__}: {exc}")
+        if out.status == "done" and out.result:
+            # deterministic post-checks: the platform's evidence overrides the
+            # model's claim where it has any (regression vs run history)
+            try:
+                out.result, checks = await loop.run_in_executor(
+                    None, lambda: postcheck.apply(out.result, backend)
+                )
+            except Exception as exc:  # noqa: BLE001 — a check failure never loses the answer
+                checks = [{"kind": postcheck.STEP_KIND, "ok": False, "changed": False,
+                           "error": f"{type(exc).__name__}: {exc}"}]
+            for i, c in enumerate(checks, start=len(out.steps) + 1):
+                out.steps.append({"n": i, **c})
         finished = await store.record_heartbeat(
             hb["id"],
             out.status,
@@ -519,7 +531,7 @@ async def launch_heartbeat(
         if on_done is not None:
             try:
                 await on_done(finished)
-            except Exception:  # noqa: BLE001 — a consumer's failure never leaks into the row
+            except Exception:
                 log.exception("heartbeat %s on_done failed", hb["id"])
 
     task = asyncio.create_task(execute())

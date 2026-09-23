@@ -34,6 +34,7 @@ _UNTRUSTED = (
 _READ_RUNTIME = [
     "platform_status",
     "list_runs",
+    "get_run_regression",
     "list_network_runs",
     "list_running_participants",
     "list_running_simulators",
@@ -183,7 +184,9 @@ SEEDS: dict[str, dict] = {
             "(environment|timeout|assertion|protocol|crypto|chaos|unknown), "
             '"root_cause" (one sentence), "evidence" (the tool results you '
             'relied on, by tool name), "regression": true|false|"unknown" '
-            '(true only if the same scenario passed recently), "next_step" (one '
+            "(call get_run_regression and copy its verdict: true only when it "
+            "says regression; a scenario that never passed is not a regression), "
+            '"next_step" (one '
             "action for a human, such as fix the connection, rerun, or open the "
             "trace)}. If the insight service is unavailable, say so in evidence "
             "and triage from the run and network state alone. An unreachable "

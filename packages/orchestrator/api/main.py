@@ -4907,6 +4907,18 @@ async def get_run(run_id: str) -> dict:
     return detail
 
 
+@app.get("/runs/{run_id}/regression")
+async def get_run_regression(run_id: str) -> dict:
+    """Deterministic regression evidence for one run: per scenario, whether it
+    passed in an earlier run (``regression``), never passed (``never_passed``)
+    or has no history (``first_run``). The agent-hub checks a triage agent's
+    ``regression`` claim against this (ADR-0010); the model reads, this decides."""
+    ev = run_store.regression(run_id)
+    if ev is None:
+        raise HTTPException(404, "run not found")
+    return ev
+
+
 #: finding categories that mean "the wire, not the scenario" — these trigger a
 #: live platform-doctor pass so the diagnosis shows what's broken *right now*
 _DOCTOR_TRIGGER_CATS = ("unreachable", "timeout", "tls", "auth", "binding")

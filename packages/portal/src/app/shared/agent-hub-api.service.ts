@@ -188,7 +188,29 @@ export interface HeartbeatToolStep {
   ms: number;
 }
 
-export type HeartbeatStep = HeartbeatLlmStep | HeartbeatToolStep;
+/**
+ * A deterministic post-check the hub ran on the final answer (the platform's
+ * evidence overriding one field of the model's claim, e.g. `regression`
+ * against run history). `changed` = the answer was corrected.
+ */
+export interface HeartbeatPostcheckStep {
+  n: number;
+  kind: "postcheck";
+  tool: string;
+  run_id?: string;
+  ok: boolean;
+  changed: boolean;
+  claimed?: unknown;
+  verified?: boolean;
+  verdict?: string;
+  error: string | null;
+  ms?: number;
+}
+
+export type HeartbeatStep =
+  | HeartbeatLlmStep
+  | HeartbeatToolStep
+  | HeartbeatPostcheckStep;
 
 export interface ProposedCall {
   step: number;

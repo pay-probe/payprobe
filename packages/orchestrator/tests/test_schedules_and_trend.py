@@ -80,6 +80,61 @@ def test_flakiness_blocked_status_ignored():
     assert f["runs"] == 3 and f["flips"] == 2
 
 
+# -- regression evidence (ADR-0010: what an agent's claim is checked against) --
+
+def test_regression_first_run_is_not_a_regression():
+    s = RunStore(":memory:")
+    _finish(s, "r0", [{"scenario_id": "x", "name": "purchase", "status": "failed"}])
+    ev = s.regression("r0")
+    assert ev["verdict"] == "first_run" and ev["regression"] is False
+    sc = ev["scenarios"][0]
+    assert sc["conclusion"] == "first_run" and sc["prior_runs"] == 0
+    assert sc["failure_streak"] == 1 and sc["last_passed_run_id"] is None
+
+
+def test_regression_needs_an_earlier_pass_of_the_same_scenario():
+    s = RunStore(":memory:")
+    _finish(s, "r0", [{"scenario_id": "x", "name": "purchase", "status": "passed"}])
+    _finish(s, "r1", [{"scenario_id": "x", "name": "purchase", "status": "failed"}])
+    _finish(s, "r2", [{"scenario_id": "x", "name": "purchase", "status": "failed"},
+                      {"scenario_id": "y", "name": "refund", "status": "failed"}])
+    ev = s.regression("r2")
+    assert ev["verdict"] == "regression" and ev["regression"] is True
+    assert ev["regressed"] == ["purchase"] and ev["never_passed"] == []
+    by = {sc["name"]: sc for sc in ev["scenarios"]}
+    x = by["purchase"]
+    assert x["conclusion"] == "regression"
+    assert x["prior_runs"] == 2 and x["prior_passed"] == 1 and x["prior_failed"] == 1
+    assert x["last_passed_run_id"] == "r0" and x["failure_streak"] == 2  # r1 + r2
+    assert by["refund"]["conclusion"] == "first_run"  # y has no history at all
+    # history is strictly before: the earliest run sees nothing
+    assert s.regression("r0")["verdict"] == "passed"
+    assert s.regression("r1")["verdict"] == "regression"
+
+
+def test_regression_never_passed_and_blocked_are_not_evidence():
+    s = RunStore(":memory:")
+    _finish(s, "r0", [{"scenario_id": "x", "name": "x", "status": "failed"}])
+    _finish(s, "r1", [{"scenario_id": "x", "name": "x", "status": "blocked"}])
+    _finish(s, "r2", [{"scenario_id": "x", "name": "x", "status": "failed"}])
+    ev = s.regression("r2")
+    assert ev["verdict"] == "never_passed" and ev["never_passed"] == ["x"]
+    sc = ev["scenarios"][0]
+    assert sc["prior_runs"] == 1  # the blocked outcome is not counted
+    assert sc["failure_streak"] == 2
+    assert s.regression("nope") is None
+
+
+def test_regression_endpoint_and_404():
+    m.run_store = RunStore(":memory:")
+    _finish(m.run_store, "a", [{"scenario_id": "x", "name": "x", "status": "passed"}])
+    _finish(m.run_store, "b", [{"scenario_id": "x", "name": "x", "status": "failed"}])
+    with TestClient(m.app) as c:
+        r = c.get("/runs/b/regression")
+        assert r.status_code == 200 and r.json()["verdict"] == "regression"
+        assert c.get("/runs/zzz/regression").status_code == 404
+
+
 # -- schedule store -----------------------------------------------------------
 
 def test_next_after_interval_and_daily():
