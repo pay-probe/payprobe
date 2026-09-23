@@ -39,7 +39,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 #: heartbeat statuses that always alert
-ALERT_STATUSES = frozenset({"failed", "budget_exceeded", "timed_out"})
+ALERT_STATUSES = frozenset({"failed", "budget_exceeded", "timed_out", "quota_exceeded"})
 
 #: advisor finding severities, ranked; ``warn`` and above alert
 _SEVERITY_RANK = {

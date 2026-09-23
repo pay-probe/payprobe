@@ -129,12 +129,17 @@ export interface HubHealth {
   schema_version?: number;
 }
 
-/** `paused` and `budget_exceeded` can be recorded for a wake that never ran. */
+/**
+ * `paused`, `budget_exceeded` (per-agent budget or the hub-wide daily token
+ * ceiling) and `quota_exceeded` (hub-wide concurrency cap) are recorded for a
+ * wake that never ran.
+ */
 export type HeartbeatStatus =
   | "running"
   | "done"
   | "failed"
   | "budget_exceeded"
+  | "quota_exceeded"
   | "timed_out"
   | "cancelled"
   | "paused";

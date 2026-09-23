@@ -53,6 +53,7 @@ from .engine import Engine
 from .llm import ProviderLLMBackend, resolve_llm
 from .models import NAME_RE, AgentSpec, WorkflowSpec
 from .principal import mint_obo
+from .quotas import Quotas
 from .runner import Outcome, run_heartbeat
 from .seed import seed_builtin
 from .store import Conflict, Guardrail, NotFound, RegistryStore
@@ -75,6 +76,11 @@ def _seed_enabled() -> bool:
     return (os.environ.get("AGENT_HUB_SEED") or "1").lower() not in ("0", "false", "no")
 
 
+def _quotas(app_: FastAPI) -> Quotas:
+    """The hub-wide quotas in force (tests swap ``app.state.quotas``)."""
+    return getattr(app_.state, "quotas", None) or Quotas.from_env()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Fails loudly without a Postgres DSN: the registry has no file fallback.
@@ -87,6 +93,7 @@ async def lifespan(app: FastAPI):
     app.state.backend_factory = _default_backend_factory
     app.state.tasks = set()
     app.state.alerts = Alerter.from_env()
+    app.state.quotas = Quotas.from_env()  # hub-wide ceilings, read once
     # Restart watchdog: a row still `running` from a previous process can never
     # finish, and while it stands every wake of that agent coalesces onto it.
     for hb in await app.state.store.reconcile_running():
@@ -329,6 +336,11 @@ async def health(request: Request) -> dict:
         "schema_version": await store.schema_version(),
         "alerts": alerts.stats() if alerts else None,
         "egress": sorted(egress.allowed_hosts()),
+        "quotas": {
+            **_quotas(request.app).as_dict(),
+            "tokens_today": await store.tokens_today(),
+            "running": await store.running_count(),
+        },
     }
 
 
@@ -481,6 +493,18 @@ async def launch_heartbeat(
     running = await store.running_heartbeat(name)
     if running:
         return {**running, "coalesced": True}
+    # hub-wide quotas (phase 5): one ledger for every agent's tokens, one cap
+    # on heartbeats running at once. Refusals are recorded and alert like a
+    # budget stop; a schedule fires again on its next due tick.
+    q: Quotas = _quotas(app_)
+    if reason := q.tokens_refusal(await store.tokens_today()):
+        refused = await store.refuse_heartbeat(hb, "budget_exceeded", reason)
+        app_.state.alerts.emit_for(refused, mode=spec.mode)
+        return refused
+    if reason := q.concurrency_refusal(await store.running_count()):
+        refused = await store.refuse_heartbeat(hb, "quota_exceeded", reason)
+        app_.state.alerts.emit_for(refused, mode=spec.mode)
+        return refused
 
     llm = app_.state.llm_factory(spec)  # 503 when not configured
     hb["model"] = llm.model

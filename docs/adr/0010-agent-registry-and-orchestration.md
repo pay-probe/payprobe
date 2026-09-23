@@ -179,6 +179,28 @@
 > post-check applies regardless of the version; publishing a v2 with the new
 > tool lets the model read the evidence itself. `test_hub_regression.py`
 > (9), orchestrator `test_schedules_and_trend.py` (+4).
+>
+> **Quotas and the budget defaults (2026-09-23, action item 6).**
+> `agent_hub/quotas.py`, three knobs read once at startup and shown under
+> `/health.quotas`, `0` = off, all set in the three compose files:
+> `AGENT_HUB_DAILY_TOKENS` (5,000,000; every agent's tokens per UTC day on
+> the same ledger as the per-agent budget; refused wakes are recorded as
+> `budget_exceeded` and alert), `AGENT_HUB_MAX_CONCURRENT` (4 heartbeats
+> running at once across agents; refused wakes are recorded as the new status
+> `quota_exceeded` and alert; per agent the cap stays one through coalescing;
+> a schedule fires again on its next tick, an event wake is lost and the row
+> says so), and `AGENT_LOAD_APPROVAL_TPS` (100; enforced where invariant #6
+> puts guardrails, in `scoped_dispatch` through `ToolScope.load_tps_cap`:
+> a heartbeat's `start_load_run` above that peak rate, any of `target_tps`,
+> `end_tps`, `spike_tps`, `start_tps`, top level or in `extra`, is refused
+> with `guardrail: true`; the engine's `tool` node scope carries no cap
+> because outside mock it must sit behind an `approval`). Seed budgets:
+> observer 3,000,000 (96 scheduled wakes a day at ~30k), failure-triage
+> 1,000,000, config / scenario-author / certification-planner / reviewer
+> 500,000, plan-executor 300,000. Seeds never overwrite a registry, so an
+> existing deployment keeps `budget: null` on its v1 builtins until an
+> operator publishes v2; the hub-wide ceiling covers it meanwhile.
+> `test_hub_quotas.py` (10). 179 agent-hub tests.
 
 Companions: [`../agentic-engine-evaluation.md`](../agentic-engine-evaluation.md)
 (Opus), [`../agentic-engine-evaluation-fable.md`](../agentic-engine-evaluation-fable.md)
@@ -442,6 +464,6 @@ Each phase ends in a commit and a review gate.
 3. [x] Portal Agents page, Settings → Endpoints entry, nginx `/api/agents/` in all three confs (the dev conf was missed by phase 1 and fixed 2026-09-23), host production build with fonts. Owed: browser click-through of the Agents page and heartbeat view.
 4. [x] `.github/workflows/ci.yml` carries the "Test agent-hub" step. Not yet exercised: the `adr-0010` branch has never been pushed, so CI has not run it.
 5. [x] ATLAS: agent-hub in §6 (the pattern generalised), §7 (security), §11 (follow-through) and §13 (decision log); operator skill `.claude/skills/payprobe-agents`.
-6. [ ] Decide `AGENT_LOAD_APPROVAL_TPS` and the daily budget defaults for compose.
+6. [x] Decide `AGENT_LOAD_APPROVAL_TPS` and the daily budget defaults for compose (2026-09-23: 100 tps enforced in the tool layer; seed budgets 300k to 3M per agent; hub-wide `AGENT_HUB_DAILY_TOKENS` 5M and `AGENT_HUB_MAX_CONCURRENT` 4 in compose).
 7. [ ] Push the branch and get one green CI run before phase 3 lands on top.
 8. [ ] Phase 2 loose ends: a real provider call through `ProviderLLMBackend`; the `nats-demo-net` driver still points at a deleted scenario (`scn-0039c642`); `delete_scenario` has no "referenced by a network" guard (pre-existing, outside this ADR).

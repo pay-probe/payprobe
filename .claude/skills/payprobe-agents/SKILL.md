@@ -187,7 +187,16 @@ sent / failed / recent. Without a URL, findings wait in the heartbeat log.
    listed); otherwise the heartbeat fails with `egress refused` and nothing is sent.
 8. **Pause** (`PUT /pause`, Agents page button): checked before every LLM and tool call.
 9. **Limits and budget** per heartbeat and per day; **coalescing** (one running
-   heartbeat per agent); **restart watchdog** (`orphaned by restart`).
+   heartbeat per agent); **restart watchdog** (`orphaned by restart`). **Hub-wide
+   quotas** on top (`/health.quotas`; `0` = off): `AGENT_HUB_DAILY_TOKENS` (default 5M,
+   every agent on one ledger; refused as `budget_exceeded`), `AGENT_HUB_MAX_CONCURRENT`
+   (default 4 running heartbeats; refused as `quota_exceeded`, schedules retry next tick,
+   an event wake is lost and the row says so) and `AGENT_LOAD_APPROVAL_TPS` (default 100:
+   a heartbeat's `start_load_run` above that peak rate is refused by the tool layer;
+   heavier load is a workflow `tool` node behind an `approval`). Every builtin seed
+   carries `budget.daily_tokens` (observer 3M, failure-triage 1M, plan-executor 300k,
+   others 500k); a registry seeded before 2026-09-23 keeps `budget: null` on its v1
+   builtins until you publish a v2.
 10. **Deterministic post-checks** (`agent_hub/postcheck.py`): where the platform holds
     the evidence it overrides the answer (today: `regression` vs run history), keeping
     the model's claim beside it. Advice stays advice; facts come from the registry.

@@ -573,7 +573,8 @@ interface WaterfallRow {
       }
       .pill--failed,
       .pill--timed_out,
-      .pill--budget_exceeded {
+      .pill--budget_exceeded,
+      .pill--quota_exceeded {
         border-color: #dc2626;
         color: #b91c1c;
       }

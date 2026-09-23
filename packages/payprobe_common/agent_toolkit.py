@@ -960,6 +960,10 @@ class ToolScope:
     projects: tuple[str, ...] = ()
     environments: tuple[str, ...] = ()
     result_cap: int = DEFAULT_RESULT_CAP
+    #: ``start_load_run`` above this rate (target / end / spike tps) is refused
+    #: here; heavier load only through an approved workflow step (ADR-0010
+    #: ``AGENT_LOAD_APPROVAL_TPS``). None = no cap.
+    load_tps_cap: int | None = None
 
     @property
     def tiers(self) -> tuple[str, ...]:
@@ -1036,6 +1040,44 @@ def _cap_result(result: Any, cap: int) -> tuple[Any, bool]:
     return {"truncated_json": cut, "note": f"result exceeded {cap} bytes and was cut"}, True
 
 
+#: the one tool that fires real traffic; its rate knobs, top level or in `extra`
+_LOAD_TOOL = "start_load_run"
+_LOAD_RATE_KEYS = ("target_tps", "end_tps", "spike_tps", "start_tps")
+
+
+def requested_tps(args: dict) -> float:
+    """The highest rate a ``start_load_run`` call asks for (0 if none)."""
+    peak = 0.0
+    for holder in (args, args.get("extra") if isinstance(args.get("extra"), dict) else {}):
+        for k in _LOAD_RATE_KEYS:
+            v = holder.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                peak = max(peak, float(v))
+            elif isinstance(v, str):
+                try:
+                    peak = max(peak, float(v))
+                except ValueError:
+                    pass
+    return peak
+
+
+def check_load_cap(scope: ToolScope, name: str, args: dict) -> str | None:
+    """Refusal reason when a load run asks for more than the scope's cap.
+
+    Load is the one agent action that reaches real endpoints at volume, so a
+    heartbeat may only start it below ``AGENT_LOAD_APPROVAL_TPS``; anything
+    heavier goes through a workflow ``tool`` node behind an ``approval``
+    (the engine builds that scope without a cap)."""
+    if name != _LOAD_TOOL or not scope.load_tps_cap:
+        return None
+    peak = requested_tps(args)
+    if peak > scope.load_tps_cap:
+        return (f"load at {peak:g} tps exceeds this agent's cap of "
+                f"{scope.load_tps_cap} tps (AGENT_LOAD_APPROVAL_TPS): heavier load "
+                "needs an approved workflow step, not a heartbeat")
+    return None
+
+
 def scoped_dispatch(ctx: ToolContext, scope: ToolScope, name: str,
                     args: dict | None = None) -> dict:
     """:func:`dispatch` behind an agent's grant. Same envelope, plus:
@@ -1059,6 +1101,8 @@ def scoped_dispatch(ctx: ToolContext, scope: ToolScope, name: str,
                 "error": f"unknown tool '{name}'"}
     if spec.tier in scope.tiers:
         if reason := check_write_scope(scope, spec, args):
+            return {"tool": name, "ok": False, "guardrail": True, "error": reason}
+        if reason := check_load_cap(scope, name, args):
             return {"tool": name, "ok": False, "guardrail": True, "error": reason}
     out = dispatch(ctx, name, args, tiers=scope.tiers)
     if out.get("ok"):

@@ -33,6 +33,7 @@ from typing import Any
 
 from payprobe_common import agent_toolkit as tk
 
+from . import quotas
 from .llm import LLMBackend
 from .models import AgentSpec
 
@@ -85,6 +86,9 @@ def scope_for(spec: AgentSpec) -> tk.ToolScope:
         mode=spec.mode,
         projects=tuple(spec.write_scope.projects),
         environments=tuple(spec.write_scope.environments),
+        # a heartbeat may start light load only; heavier load is a workflow
+        # step behind an approval (the engine builds that scope without a cap)
+        load_tps_cap=quotas.load_approval_tps(),
     )
 
 

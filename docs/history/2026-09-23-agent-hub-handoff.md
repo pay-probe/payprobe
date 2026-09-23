@@ -353,6 +353,23 @@ still v1 (seeds never overwrite); the post-check applies to it anyway. If you
 want the model to read the evidence itself, publish a v2 with
 `get_run_regression` in `tools` from the Agents page. `test_hub_regression.py`.
 
+Quotas (same day, closes ADR action item 6): `agent_hub/quotas.py`
+(`Quotas.from_env`, on `app.state.quotas`, shown under `/health.quotas` with
+`tokens_today` and `running`). `launch_heartbeat` checks, after the per-agent
+budget and the coalesce check, the hub-wide daily ceiling
+(`AGENT_HUB_DAILY_TOKENS`, refused as `budget_exceeded`) and the concurrency
+cap (`AGENT_HUB_MAX_CONCURRENT`, refused as the new status `quota_exceeded`;
+in `ALERT_STATUSES` and the portal's status type and pill). The load cap
+(`AGENT_LOAD_APPROVAL_TPS`) lives in the tool layer: `ToolScope.load_tps_cap`
++ `check_load_cap` / `requested_tps` in `agent_toolkit.py`; `runner.scope_for`
+fills it from the env, the engine's `_run_tool` scope leaves it None on
+purpose (approval-gated). `store.tokens_today(None)` is the hub-wide sum,
+`store.running_count()` the live count. Every seed now carries
+`budget.daily_tokens` (observer 3M, failure-triage 1M, plan-executor 300k,
+the rest 500k); the live registry keeps its v1 builtins with `budget: null`
+until someone publishes v2. Knobs in all three compose files with the
+defaults; rows in `payprobe-config-and-flags` §7.6. `test_hub_quotas.py`.
+
 ## 8. Gotchas learned this session
 
 - Postgres in the sandbox stopped between turns; a run that shows "49 skipped"

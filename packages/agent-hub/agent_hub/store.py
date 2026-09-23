@@ -731,12 +731,30 @@ class RegistryStore:
         )
         return await self.get_heartbeat(hb_id)
 
-    async def tokens_today(self, agent: str) -> int:
+    async def tokens_today(self, agent: str | None = None) -> int:
+        """Tokens spent since UTC midnight by one agent, or by all (``None``):
+        the per-agent budget and the hub-wide ceiling read the same ledger."""
+        if agent is None:
+            return int(
+                await self._pool.fetchval(
+                    "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM agent_hub_heartbeats "
+                    "WHERE started_at >= date_trunc('day', NOW())"
+                )
+            )
         return int(
             await self._pool.fetchval(
                 "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM agent_hub_heartbeats "
                 "WHERE agent=$1 AND started_at >= date_trunc('day', NOW())",
                 agent,
+            )
+        )
+
+    async def running_count(self) -> int:
+        """Heartbeats ``running`` right now across all agents (the hub-wide
+        concurrency quota reads this)."""
+        return int(
+            await self._pool.fetchval(
+                "SELECT COUNT(*) FROM agent_hub_heartbeats WHERE status='running'"
             )
         )
 

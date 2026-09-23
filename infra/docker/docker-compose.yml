@@ -360,6 +360,12 @@ services:
       # Phase 5 LLM egress allowlist: extra provider/proxy hosts (exact or *.suffix,
       # optional :port) beyond api.openai.com / api.anthropic.com and ASSIST_LLM_BASE_URL.
       AGENT_HUB_EGRESS_ALLOW: ${AGENT_HUB_EGRESS_ALLOW:-}
+      # Hub-wide quotas (ADR-0010 phase 5; 0 = off): tokens all agents may spend per
+      # UTC day, heartbeats running at once, and the load rate a heartbeat may start
+      # by itself (heavier load needs an approved workflow step).
+      AGENT_HUB_DAILY_TOKENS: ${AGENT_HUB_DAILY_TOKENS:-5000000}
+      AGENT_HUB_MAX_CONCURRENT: ${AGENT_HUB_MAX_CONCURRENT:-4}
+      AGENT_LOAD_APPROVAL_TPS: ${AGENT_LOAD_APPROVAL_TPS:-100}
       ASSIST_LLM_PROVIDER: ${ASSIST_LLM_PROVIDER:-openai}
       ASSIST_LLM_API_KEY: ${ASSIST_LLM_API_KEY:-}
       ASSIST_LLM_MODEL: ${ASSIST_LLM_MODEL:-}
