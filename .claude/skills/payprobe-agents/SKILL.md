@@ -91,7 +91,10 @@ turn → `scoped_dispatch` per tool call → record, until a final answer or a l
 `journal` (executed writes, revertable), `result` (the final answer), `error`, tokens,
 model, `spec_sha256` (provenance to the exact published version).
 
-**Reading the output:** Agents page → agent → Heartbeats → row (waterfall + result);
+**Reading the output:** the run report (Run monitor → run → "agent verdict,
+advisory" panel: every finished heartbeat whose `subject` is `run:<that id>`,
+so `failure-triage` woken by `run.failed` shows up on the run it triaged);
+Agents page → agent → Heartbeats → row (waterfall + result);
 `GET /api/agents/heartbeats?agent=observer` then `/heartbeats/{id}`; MCP
 `get_heartbeat`; or push via the alert webhook (§6). Advisors answer as JSON findings
 inside a markdown report; `extract_json` finds the fenced block, so `${node.json}` and

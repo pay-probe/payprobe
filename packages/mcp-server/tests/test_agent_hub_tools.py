@@ -36,7 +36,9 @@ def test_wake_posts_mcp_wake_source(calls):
     assert method == "POST" and url.endswith("/agents/observer/wake")
     assert body == {"input": "anything wrong?", "wake": "mcp"}
     tools.wake_agent("observer", version=2)
-    assert calls[-1][2]["version"] == 2
+    assert calls[-1][2]["version"] == 2 and "subject" not in calls[-1][2]
+    tools.wake_agent("failure-triage", input='{"run_id": "r1"}', subject="run:r1")
+    assert calls[-1][2]["subject"] == "run:r1"
     tools.cancel_heartbeat("h1")
     assert calls[-1][:2] == ("POST", f"{tools.AGENT_HUB_API}/heartbeats/h1/cancel")
 

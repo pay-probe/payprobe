@@ -24,11 +24,18 @@ import {
   InsightFailure,
 } from "../shared/insight-api.service";
 import { PageHeaderComponent } from "../shared/ui/page-header.component";
+import { AgentVerdictsComponent } from "../agents/agent-verdicts.component";
 
 @Component({
   selector: "app-run-report",
   standalone: true,
-  imports: [PageHeaderComponent, CommonModule, DatePipe, RouterLink],
+  imports: [
+    PageHeaderComponent,
+    CommonModule,
+    DatePipe,
+    RouterLink,
+    AgentVerdictsComponent,
+  ],
   template: `
     <div class="rr">
       <pp-page-header>
@@ -305,6 +312,11 @@ import { PageHeaderComponent } from "../shared/ui/page-header.component";
             </section>
           }
         }
+
+        <!-- agent verdicts (ADR-0010): heartbeats whose subject is this run,
+             e.g. failure-triage woken by run.failed. Attached, never consulted:
+             the report and its gates stay deterministic. -->
+        <app-agent-verdicts [subject]="'run:' + detail()!.id" />
 
         @if (!detail()!.summary) {
           <p class="rr__idle">

@@ -1413,16 +1413,22 @@ def get_agent(name: str) -> dict:
     return _request("GET", f"{AGENT_HUB_API}/agents/{urllib.parse.quote(name, safe='')}")
 
 
-def wake_agent(name: str, input: str = "", version: int | None = None) -> dict:
+def wake_agent(name: str, input: str = "", version: int | None = None,
+               subject: str | None = None) -> dict:
     """Run ONE bounded heartbeat of an agent now (its active version, or
     ``version``). Returns the heartbeat row: ``running`` (poll
     ``get_heartbeat``), ``coalesced: true`` when the agent already had a
     running heartbeat, or a recorded refusal (``paused`` / ``budget_exceeded``)
     that never ran. Advisor agents only read; plan agents propose calls a human
-    applies; full agents execute journalled writes inside their write scope."""
+    applies; full agents execute journalled writes inside their write scope.
+    ``subject`` (e.g. ``run:<run id>``) attaches the heartbeat to a run so its
+    verdict shows on that run's report; inferred from a JSON ``input`` with
+    ``run_id`` when omitted."""
     body: dict[str, Any] = {"input": input, "wake": "mcp"}
     if version is not None:
         body["version"] = version
+    if subject:
+        body["subject"] = subject
     return _request(
         "POST", f"{AGENT_HUB_API}/agents/{urllib.parse.quote(name, safe='')}/wake", body)
 

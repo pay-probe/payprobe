@@ -157,6 +157,8 @@ export interface HeartbeatSummary {
   started_at: string;
   finished_at: string | null;
   reverted_at: string | null;
+  /** What the wake was about, e.g. `run:<id>`; null for untargeted wakes. */
+  subject: string | null;
   n_steps: number;
   n_proposed: number;
   n_writes: number;
@@ -467,9 +469,15 @@ export class AgentHubApiService {
     );
   }
 
-  heartbeats(agent?: string, limit = 50): Observable<HeartbeatSummary[]> {
+  /** `subject` (e.g. `run:<id>`) is how a run report finds its agent verdicts. */
+  heartbeats(
+    agent?: string,
+    limit = 50,
+    subject?: string,
+  ): Observable<HeartbeatSummary[]> {
     const q = new URLSearchParams({ limit: String(limit) });
     if (agent) q.set("agent", agent);
+    if (subject) q.set("subject", subject);
     return this.http.get<HeartbeatSummary[]>(`${this.base}/heartbeats?${q}`);
   }
 

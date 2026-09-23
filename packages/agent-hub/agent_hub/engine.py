@@ -386,6 +386,7 @@ class Engine:
             input_text=input_text,
             wake="event",
             on_done=lambda hb: self._heartbeat_done(run_id, node_id, hb),
+            subject=f"wfrun:{run_id}",
         )
         st["mode"] = mode
         st["agent"] = f"{name}@{version}"

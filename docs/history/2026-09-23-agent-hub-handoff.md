@@ -313,6 +313,17 @@ all three compose files. `test_hub_webhooks.py`.
 Owed in phase 4: insight-service as a first-class agent tool, the alert
 webhook half of the unattended proof (needs a URL).
 
+Verdicts on the run report (same day, David's ask "how about in the
+reports?"): migration 4 adds `agent_hub_heartbeats.subject` (indexed);
+`launch_heartbeat(subject=...)` with `_infer_subject` (`run:<id>` from a
+JSON input's `run_id`), `WakeBody.subject`, the engine's `wfrun:<id>`,
+`GET /heartbeats?subject=`, MCP `wake_agent(subject=)`. Portal:
+`agents/agent-verdicts.component.ts` embedded in `run-report.component.ts`
+right after the insight panel; reads finished heartbeats for `run:<id>` and
+renders triage verdicts or findings as advisory. `test_hub_subjects.py`.
+Owed: the same block as an annotation on the sign-off snapshot (shown, never
+counted).
+
 Phase 5, started 2026-09-23: `test_hub_injection.py` (10 tests: untrusted
 wrapping and never-dispatched embedded calls, allowlist stop of an obedient
 model, advisor write refused at publish and dispatch, plan-mode injection

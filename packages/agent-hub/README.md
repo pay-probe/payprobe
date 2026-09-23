@@ -40,6 +40,13 @@ AUTH_JWT_SECRET=... uvicorn agent_hub.main:app --port 8600
 | `AGENT_HUB_WEBHOOK_SECRET` | HMAC secret for inbound `/webhooks/events/{event}` and `/webhooks/agents/{name}` (signature `X-PayProbe-Signature: t=<ts>,v1=<HMAC-SHA256("<ts>.<body>")>`); unset = those routes answer 503 |
 | `AGENT_HUB_EGRESS_ALLOW` | extra LLM hosts a prompt may be sent to (comma list; exact host, `*.suffix`, optional `:port`; may be http). Always allowed over https: `api.openai.com`, `api.anthropic.com`, and the host of `ASSIST_LLM_BASE_URL`. Anything else fails the heartbeat with `egress refused` before a byte leaves; `/health.egress` lists the effective set |
 
+Subjects: every heartbeat may carry a `subject` (`run:<run id>` when the wake
+input is a JSON object with `run_id`, which event payloads and triage wakes
+are; `wfrun:<id>` for workflow agent tasks; or an explicit `subject` on the
+wake body). `GET /heartbeats?subject=run:<id>` is how the portal's run report
+attaches the agents' verdicts to a run: shown as advisory, never consulted by
+the gates.
+
 Workflow runs (phase 3): `POST /workflows/{name}/run` (inputs, optional
 `version`), `GET /runs[?workflow=&status=]`, `GET /runs/{id}`,
 `POST /runs/{id}/cancel`, `GET /approvals[?status=pending|all]` (the inbox),

@@ -404,10 +404,34 @@ class WakeBody(BaseModel):
     input: str = Field(default="", max_length=20_000)
     version: int | None = None
     wake: Literal["manual", "schedule", "event", "mcp"] = "manual"
+    #: what the wake is about, e.g. "run:<id>"; inferred from a JSON input's
+    #: run_id when omitted. Reports look heartbeats up by it.
+    subject: str | None = Field(default=None, pattern=r"^[a-z_]+:[A-Za-z0-9_.:/-]{1,120}$")
 
 
 def _caller(request: Request) -> dict:
     return getattr(request.state, "auth", None) or {}
+
+
+_SUBJECT_RE = re.compile(r"^[a-z_]+:[A-Za-z0-9_.:/-]{1,120}$")
+
+
+def _infer_subject(input_text: str) -> str | None:
+    """What a heartbeat is *about*, so reports can find it: ``run:<id>`` when
+    the wake input is a JSON object naming ``run_id`` (event payloads and
+    triage wakes do), else nothing. Explicit ``subject`` wins over this."""
+    text = (input_text or "").lstrip()
+    if not text.startswith("{"):
+        return None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    run_id = data.get("run_id") if isinstance(data, dict) else None
+    if isinstance(run_id, str) and run_id:
+        subject = f"run:{run_id}"
+        return subject if _SUBJECT_RE.fullmatch(subject) else None
+    return None
 
 
 async def launch_heartbeat(
@@ -421,6 +445,7 @@ async def launch_heartbeat(
     input_text: str,
     wake: str,
     on_done: Callable[[dict], Awaitable[None]] | None = None,
+    subject: str | None = None,
 ) -> dict:
     """The one heartbeat code path, shared by ``POST /agents/{name}/wake`` and
     the workflow engine's ``agent_task`` nodes.
@@ -442,6 +467,7 @@ async def launch_heartbeat(
         "invoked_by": str(caller.get("sub") or "anonymous"),
         "principal": {"sub": caller.get("sub"), "roles": caller.get("roles") or []},
         "input": input_text,
+        "subject": subject or _infer_subject(input_text),
     }
     if (await store.paused())["paused"]:
         return await store.refuse_heartbeat(hb, "paused", "agents are paused")
@@ -529,6 +555,7 @@ async def wake_agent(request: Request, name: str, body: WakeBody) -> dict | JSON
         caller=_caller(request),
         input_text=body.input,
         wake=body.wake,
+        subject=body.subject,
     )
     # Refusals and coalescing are 200 with the record: nothing was accepted
     # for processing. Only a freshly started heartbeat is 202.
@@ -539,9 +566,14 @@ async def wake_agent(request: Request, name: str, body: WakeBody) -> dict | JSON
 
 @app.get("/heartbeats")
 async def list_heartbeats(
-    request: Request, agent: str | None = None, limit: int = Query(default=50, ge=1, le=500)
+    request: Request,
+    agent: str | None = None,
+    subject: str | None = Query(default=None, max_length=128),
+    limit: int = Query(default=50, ge=1, le=500),
 ) -> list[dict]:
-    return await _store(request).list_heartbeats(agent, limit)
+    """Newest first. ``subject`` (e.g. ``run:<id>``) is how a run report finds
+    the agent verdicts attached to it."""
+    return await _store(request).list_heartbeats(agent, limit, subject)
 
 
 @app.get("/heartbeats/{hb_id}")

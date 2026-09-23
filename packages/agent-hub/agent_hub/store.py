@@ -168,6 +168,14 @@ CREATE TABLE IF NOT EXISTS agent_hub_plans (
 CREATE INDEX IF NOT EXISTS agent_hub_plans_run ON agent_hub_plans (run_id, created_at DESC);
 """,
     ),
+    (
+        4,
+        """
+ALTER TABLE agent_hub_heartbeats ADD COLUMN IF NOT EXISTS subject TEXT;
+CREATE INDEX IF NOT EXISTS agent_hub_heartbeats_subject
+  ON agent_hub_heartbeats (subject, started_at DESC) WHERE subject IS NOT NULL;
+""",
+    ),
 ]
 
 
@@ -596,8 +604,8 @@ class RegistryStore:
         try:
             await self._pool.execute(
                 "INSERT INTO agent_hub_heartbeats (id, agent, version, spec_sha256, wake, "
-                "invoked_by, principal, input, status, model) "
-                "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'running',$9)",
+                "invoked_by, principal, input, status, model, subject) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'running',$9,$10)",
                 hb["id"],
                 hb["agent"],
                 hb["version"],
@@ -607,6 +615,7 @@ class RegistryStore:
                 json.dumps(hb.get("principal") or {}),
                 hb.get("input", ""),
                 hb.get("model", ""),
+                hb.get("subject"),
             )
         except asyncpg.UniqueViolationError as exc:
             raise Conflict(f"agent '{hb['agent']}' already has a running heartbeat") from exc
@@ -646,8 +655,8 @@ class RegistryStore:
         """A wake that never ran (paused, budget): recorded, never 'running'."""
         await self._pool.execute(
             "INSERT INTO agent_hub_heartbeats (id, agent, version, spec_sha256, wake, "
-            "invoked_by, principal, input, status, error, finished_at) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,NOW())",
+            "invoked_by, principal, input, status, error, finished_at, subject) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,NOW(),$11)",
             hb["id"],
             hb["agent"],
             hb["version"],
@@ -658,6 +667,7 @@ class RegistryStore:
             hb.get("input", ""),
             status,
             error,
+            hb.get("subject"),
         )
         return await self.get_heartbeat(hb["id"])
 
@@ -667,16 +677,20 @@ class RegistryStore:
             raise NotFound(f"heartbeat '{hb_id}' not found")
         return self._hb_row(r)
 
-    async def list_heartbeats(self, agent: str | None = None, limit: int = 50) -> list[dict]:
+    async def list_heartbeats(
+        self, agent: str | None = None, limit: int = 50, subject: str | None = None
+    ) -> list[dict]:
         rows = await self._pool.fetch(
-            "SELECT id, agent, version, spec_sha256, wake, invoked_by, status, "
+            "SELECT id, agent, version, spec_sha256, wake, invoked_by, status, subject, "
             "tokens_in, tokens_out, model, error, started_at, finished_at, reverted_at, "
             "jsonb_array_length(steps) AS n_steps, jsonb_array_length(proposed) AS n_proposed, "
             "jsonb_array_length(journal) AS n_writes "
             "FROM agent_hub_heartbeats WHERE ($1::text IS NULL OR agent=$1) "
+            "AND ($3::text IS NULL OR subject=$3) "
             "ORDER BY started_at DESC LIMIT $2",
             agent,
             limit,
+            subject,
         )
         out = []
         for r in rows:

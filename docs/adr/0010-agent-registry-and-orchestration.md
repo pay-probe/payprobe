@@ -135,6 +135,17 @@
 > `egress refused` and alerts, with nothing sent. `/health.egress` shows the
 > effective set. 154 agent-hub tests.
 >
+> **Verdicts on the run report (2026-09-23).** Heartbeats carry a `subject`
+> (migration 4): `run:<id>` when the wake input is a JSON object naming
+> `run_id` (event payloads and triage wakes), `wfrun:<id>` for workflow agent
+> tasks, or an explicit `subject` on the wake body and the MCP `wake_agent`
+> tool; `GET /heartbeats?subject=`. The portal run report gained an "agent
+> verdict, advisory" panel (`agents/agent-verdicts.component.ts`) that shows
+> what each agent concluded about that run: `failure-triage`'s category, root
+> cause and next step, or observer-style findings. The report attaches this
+> text and never consults it; gates and sign-off stay deterministic (D5). The
+> sign-off snapshot annotation is still owed. 158 agent-hub tests.
+>
 > **First real run (2026-09-23 13:23 UTC).** Thirty seconds after the phase-4
 > deploy, the scheduler woke `observer` unattended against the configured
 > provider (`claude-haiku-4-5`, key from Settings): 12 steps, 9 read-only tool
