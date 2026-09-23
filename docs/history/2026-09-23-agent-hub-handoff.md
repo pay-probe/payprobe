@@ -370,6 +370,14 @@ security review and Go/No-Go.
   defaults to `payprobe_test`, created on demand by `ensure_test_db()`; the
   conftest probe calls it; README, CLAUDE.md and the skill say so. Test
   leftovers (`hooked`) were deleted from the live registry by hand.
+- Found by the first real triage wake: a model passed a run label as a
+  scenario id, the REST backend interpolated it unescaped,
+  `http.client.InvalidURL` (not a `ValueError`) escaped `dispatch`, and the
+  heartbeat died with no steps or tokens. Fixed in three layers: the REST
+  backend percent-encodes every path id (`RestBackend.seg`), toolkit
+  `dispatch` returns an error envelope for any exception, and the runner
+  wraps both the dispatch and the loop (`test_hub_tool_errors.py`). The
+  general rule: a tool failure is data the model sees, never a dead wake.
 
 ## 9. Suggested opening prompt for the Claude Code session
 
