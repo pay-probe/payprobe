@@ -30,7 +30,7 @@ product.
 | `packages/auth-service` | JWT auth + users/roles | 8300 |
 | `packages/payprobe-assistant` | LLM-gateway assistant (REST-backed), a library mounted inside agent-hub at `/assistant` (ADR-0010 D2); the standalone :8400 container was removed 2026-09-23, nginx `/api/assistant/` → agent-hub | (8600) |
 | `packages/insight-service` | Advisory ML insights: failure categorization + explanation + outcome prediction (ADR-0005; read-only, advise-only) | 8500 |
-| `packages/agent-hub` | Agents (ADR-0010): registry of versioned agent principals and JSON-DAG workflows, heartbeat runner with journal/revert, workflow engine with human approvals, wake sources (portal, MCP, schedule, orchestrator events, signed inbound webhooks), alert webhook, LLM egress allowlist; also serves the folded-in assistant at `/assistant`; PostgreSQL only (phases 1 to 4 built, phase 5 hardening in progress) | 8600 |
+| `packages/agent-hub` | Agents (ADR-0010): registry of versioned agent principals and JSON-DAG workflows, heartbeat runner with journal/revert, workflow engine with human approvals, wake sources (portal, MCP, schedule, orchestrator events, signed inbound webhooks), alert webhook, LLM egress allowlist, hub-wide quotas, deterministic post-checks (regression vs run history), insight/run-history tools; also serves the folded-in assistant at `/assistant`; PostgreSQL only (phases 1 to 5 built 2026-09-23; David's review, Go/No-Go and the status flip owed) | 8600 |
 | `packages/payprobe_common` | Shared: `agent_toolkit` (tool layer + scoped dispatch), `rest_backend`, `llm_provider`, `crypto` (SecretBox) | — |
 | `packages/report_service` | Shared report/gates/provenance library (orchestrator imports it) | — |
 | `packages/portal` | Angular 22 UI (standalone components, signals, `pp-*` design system) | 4200 |
@@ -169,10 +169,12 @@ in `docs/adr/`.
   2026-07-16 but still owed a host build + click-through, 0009 (payment-provider
   integration — PSP simulators/packs + generic `mcp` client adapter + signed
   webhook emission) implemented, portal presets owed a host build, 0010 (agent
-  registry + orchestration) proposed, phases 1 to 4 built 2026-09-23 (registry,
+  registry + orchestration) proposed, phases 1 to 5 built 2026-09-23 (registry,
   heartbeats, workflow engine + approvals, wake sources, alert webhook, egress
-  allowlist, injection pack), phase 5 hardening in progress, status flips to
-  Accepted after David's review; statuses in the files are kept truthful.
+  allowlist, injection pack, quotas, regression post-check, insight tools,
+  sign-off annotation, assistant alias removed); status flips to Accepted
+  after David's security review and Go/No-Go; statuses in the files are kept
+  truthful.
 - `.claude/skills/payprobe-run-and-operate`, `payprobe-config-and-flags` and
   `payprobe-agents` — operator-grade API/env-flag/agent reference, kept current.
 - `docs/history/` — finished build specs, plans and working notes (accurate at

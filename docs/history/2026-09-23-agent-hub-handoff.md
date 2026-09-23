@@ -334,10 +334,11 @@ material/secret tool exists); CI step `agent-golden` runs
 (`agent_hub/egress.py`, hooked in `llm._post_json`; `AGENT_HUB_EGRESS_ALLOW`;
 `/health.egress`; `test_hub_egress.py`, 12 tests) done the same day. ATLAS
 (§6, §7, §11, §13) and the operator skill `.claude/skills/payprobe-agents`
-(registered in the skills README) written the same day. Owed: quotas beyond
-the per-agent daily budget, remove the `assistant` alias (service, image
-publish, CI step, dev `assistantApiBase`), ADR status to Accepted, David's
-security review and Go/No-Go.
+(registered in the skills README) written the same day. Quotas and the
+alias removal landed later the same day (paragraphs below). Still owed, and
+David's alone: the PR to `main` and one green CI run (opened 2026-09-23,
+see §7 end), the security review and Go/No-Go, the ADR status flip to
+Accepted, the browser click-through, and an alert-webhook URL.
 
 Regression post-check (same day, from the first real triage verdict calling a
 first-ever run a regression): orchestrator `GET /runs/{id}/regression`
