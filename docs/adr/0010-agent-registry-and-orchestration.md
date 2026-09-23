@@ -234,6 +234,24 @@
 > deferred on purpose; the chat keeps its own session store inside the
 > mounted app. Upgrading an existing stack: `docker compose up -d
 > --remove-orphans` removes the stopped `payprobe-assistant-1`.
+>
+> **Agent verdicts on the sign-off snapshot (2026-09-23).** `certify_run`
+> now fetches, after the gates are decided and the content hash computed,
+> the finished heartbeats attached to `run:<id>` (`GET /heartbeats?subject=`
+> then each record, 5 s timeouts, best-effort) and freezes them into the
+> snapshot as `annotations.agent_verdicts`: per heartbeat the agent, version,
+> `spec_sha256`, wake, status, model and either the triage `verdict`
+> (category, root cause, `regression` with its evidence verdict and the
+> model's original claim, next step), observer `findings`, or the first
+> lines of a free-text answer. The block carries `advisory: true`,
+> `counted_in_gate: false`, `in_content_hash: false` and says why it is
+> empty when it is (agent-hub unset or unreachable). Rendered in the
+> printable sign-off document (`report_service.generators`, between the
+> evidence and the provenance, headed "advisory: not a gate input, outside
+> the content hash") and on the portal sign-off page. Pure
+> `_agent_verdict_annotation` + `_json_in_text` in the orchestrator;
+> `test_signoff.py` (+3, including "unreachable agent-hub still certifies")
+> and `test_generators.py` (+2).
 
 Companions: [`../agentic-engine-evaluation.md`](../agentic-engine-evaluation.md)
 (Opus), [`../agentic-engine-evaluation-fable.md`](../agentic-engine-evaluation-fable.md)

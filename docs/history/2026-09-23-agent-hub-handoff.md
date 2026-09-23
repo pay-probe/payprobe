@@ -399,6 +399,24 @@ chat turns, not `config`-agent heartbeats. On David's stack:
 portal image needs a rebuild for the dev base change only if serving the dev
 bundle (prod uses `/api/assistant`, unchanged).
 
+Agent verdicts on the sign-off (same day, closes the "owed" from the run
+report work): orchestrator `certify_run` calls `_agent_verdicts_for(run_id)`
+(list by subject, then each record; `AGENT_HUB_API_URL` unset or any error
+→ `(None, reason)`, 5 s timeouts) after the hash is computed and stores
+`annotations.agent_verdicts` = `_agent_verdict_annotation(rows, subject,
+error)` (pure; `_json_in_text` mirrors agent-hub's `extract_json`). Fields:
+`advisory`, `counted_in_gate: false`, `in_content_hash: false`,
+`available`, `error`, `verdicts[]` (heartbeat id, agent, version,
+spec_sha256, wake, status, finished_at, model, then `verdict` / `findings` /
+`text`). `report_service.generators._signoff_agent_verdicts_html` renders it
+in the printable document between evidence and provenance; the portal
+sign-off page (`run-signoff.component.ts`, `Signoff.annotations` in
+`run.models.ts`) renders it before Approvals. Tests: `test_signoff.py` (+3;
+the hash test recomputes `_content_hash` from the snapshot because a GO
+advances the baseline, so two certifies of one run never hash equal),
+`test_generators.py` (+2). Snapshots frozen before today have no
+`annotations` key; both renderers treat that as "no section".
+
 ## 8. Gotchas learned this session
 
 - Postgres in the sandbox stopped between turns; a run that shows "49 skipped"

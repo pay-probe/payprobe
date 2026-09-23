@@ -277,6 +277,69 @@ SIGNOFF_CSS = (
 )
 
 
+def _signoff_agent_verdicts_html(ann: dict | None) -> str:
+    """The 'Agent verdicts (advisory)' section of a sign-off document, or an
+    empty string when the snapshot carries no annotation (pre-ADR-0010
+    snapshots, or agent-hub not deployed and nothing recorded)."""
+    if not isinstance(ann, dict):
+        return ""
+    verdicts = [v for v in (ann.get("verdicts") or []) if isinstance(v, dict)]
+    if not verdicts and not ann.get("error"):
+        return ""
+    head = (
+        "<h2>Agent verdicts <span style='font-weight:normal;color:#888'>"
+        "(advisory: shown to the signer, not a gate input, outside the content hash)"
+        "</span></h2>"
+    )
+    if not verdicts:
+        return head + (
+            f"<p style='color:#888'>No agent verdict recorded for "
+            f"<span class='mono'>{escape(str(ann.get('subject') or ''))}</span>"
+            f" ({escape(str(ann.get('error') or ''))}).</p>"
+        )
+    rows = []
+    for v in verdicts:
+        who = (f"<b>{escape(str(v.get('agent') or '?'))}</b> v{escape(str(v.get('version') or '?'))}"
+               f" · {escape(str(v.get('wake') or ''))} wake · {escape(str(v.get('status') or ''))}"
+               f" · <span class='mono'>{escape(str(v.get('heartbeat_id') or '')[:12])}</span>")
+        body = ""
+        verdict = v.get("verdict")
+        if isinstance(verdict, dict):
+            ev = verdict.get("regression_evidence") or {}
+            reg = verdict.get("regression")
+            reg_txt = ("regression (verified against run history)" if reg is True and ev
+                       else "regression (unverified claim)" if reg is True
+                       else f"not a regression ({escape(str(ev.get('verdict')))})" if ev
+                       else "")
+            parts = []
+            if verdict.get("category"):
+                parts.append(f"<span class='chip'>{escape(str(verdict['category']))}</span>")
+            if reg_txt:
+                parts.append(f"<span class='chip'>{reg_txt}</span>")
+            if verdict.get("root_cause"):
+                parts.append(f"<div><b>Root cause.</b> {escape(str(verdict['root_cause']))}</div>")
+            if verdict.get("next_step"):
+                parts.append(f"<div><b>Next step.</b> {escape(str(verdict['next_step']))}</div>")
+            body = "".join(parts)
+        elif isinstance(v.get("findings"), list):
+            items = "".join(
+                f"<li><span class='chip'>{escape(str(f.get('severity') or 'info'))}</span> "
+                f"<span class='mono'>{escape(str(f.get('subject') or ''))}</span> "
+                f"{escape(str(f.get('headline') or ''))}</li>"
+                for f in v["findings"] if isinstance(f, dict)
+            )
+            body = f"<ul>{items}</ul>" if items else "<span style='color:#888'>no findings</span>"
+        elif v.get("text"):
+            body = f"<div style='color:#555'>{escape(str(v['text']))}</div>"
+        if v.get("error"):
+            body += f"<div class='bad'>{escape(str(v['error']))}</div>"
+        rows.append(f"<tr><td>{who}</td><td>{body}</td></tr>")
+    return head + (
+        "<table><thead><tr><th>Agent</th><th>Conclusion</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
 def signoff_html(snapshot: dict) -> str:
     """A printable, self-contained Go/No-Go sign-off document (ADR-0003).
 
@@ -374,6 +437,12 @@ def signoff_html(snapshot: dict) -> str:
             f"<tbody>{''.join(rows)}</tbody></table>"
         )
 
+    # Agent verdicts (ADR-0010): an annotation frozen with the snapshot. Shown
+    # so the signer knows what the agents concluded; never a gate input and
+    # outside the content hash, which the heading says in as many words.
+    agents = _signoff_agent_verdicts_html(
+        ((snapshot.get("annotations") or {}).get("agent_verdicts")) or None)
+
     return f"""<!doctype html><html><head><meta charset='utf-8'>
 <title>Sign-off {escape(str(snapshot.get('id', '')))}</title>
 <style>{SIGNOFF_CSS}</style></head><body><div class='doc'>
@@ -393,6 +462,7 @@ def signoff_html(snapshot: dict) -> str:
 <table><thead><tr><th>Result</th><th>Gate</th><th>Detail</th></tr></thead>
 <tbody>{gate_rows}</tbody></table>
 {evidence}
+{agents}
 <h2>Provenance</h2>
 <dl class='kv'>
 <dt>Environment</dt><dd>{escape(str(prov.get('environment') or '—'))}</dd>

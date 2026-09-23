@@ -148,6 +148,87 @@ import { Signoff } from "./run.models";
           </dl>
         </section>
 
+        <!-- agent verdicts (ADR-0010): frozen annotation, advisory only -->
+        @if (s.annotations?.agent_verdicts; as av) {
+          @if (av.verdicts.length || av.error) {
+            <section class="card">
+              <h3>
+                Agent verdicts
+                <span class="muted small"
+                  >advisory: shown to the signer, not a gate input, outside the
+                  content hash</span
+                >
+              </h3>
+              @if (!av.verdicts.length) {
+                <p class="muted">
+                  No agent verdict recorded for
+                  <span class="mono">{{ av.subject }}</span> ({{ av.error }}).
+                </p>
+              } @else {
+                <ul class="trail">
+                  @for (v of av.verdicts; track v.heartbeat_id) {
+                    <li>
+                      <strong>{{ v.agent }}</strong>
+                      <span class="muted">
+                        v{{ v.version }} · {{ v.wake }} wake · {{ v.status }} ·
+                        <span class="mono">{{
+                          v.heartbeat_id.slice(0, 12)
+                        }}</span>
+                      </span>
+                      @if (v.verdict; as vd) {
+                        @if (vd.category) {
+                          <span class="chip">{{ vd.category }}</span>
+                        }
+                        @if (vd.regression === true) {
+                          <span class="chip">{{
+                            vd.regression_evidence
+                              ? "regression · verified"
+                              : "regression · unverified"
+                          }}</span>
+                        } @else if (vd.regression_evidence) {
+                          <span class="chip"
+                            >not a regression ·
+                            {{ vd.regression_evidence.verdict }}</span
+                          >
+                        }
+                        @if (vd.root_cause) {
+                          <div>
+                            <strong>Root cause.</strong> {{ vd.root_cause }}
+                          </div>
+                        }
+                        @if (vd.next_step) {
+                          <div>
+                            <strong>Next step.</strong> {{ vd.next_step }}
+                          </div>
+                        }
+                      }
+                      @if (v.findings?.length) {
+                        <ul>
+                          @for (f of v.findings; track $index) {
+                            <li>
+                              <span class="chip">{{
+                                f.severity || "info"
+                              }}</span>
+                              <span class="mono">{{ f.subject }}</span>
+                              {{ f.headline }}
+                            </li>
+                          }
+                        </ul>
+                      }
+                      @if (v.text) {
+                        <div class="muted">{{ v.text }}</div>
+                      }
+                      @if (v.error) {
+                        <div class="muted">{{ v.error }}</div>
+                      }
+                    </li>
+                  }
+                </ul>
+              }
+            </section>
+          }
+        }
+
         <!-- approval trail -->
         <section class="card">
           <h3>Approvals</h3>

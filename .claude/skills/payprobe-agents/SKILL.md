@@ -96,7 +96,11 @@ advisory" panel: every finished heartbeat whose `subject` is `run:<that id>`,
 so `failure-triage` woken by `run.failed` shows up on the run it triaged);
 Agents page → agent → Heartbeats → row (waterfall + result);
 `GET /api/agents/heartbeats?agent=observer` then `/heartbeats/{id}`; MCP
-`get_heartbeat`; or push via the alert webhook (§6). Advisors answer as JSON findings
+`get_heartbeat`; or push via the alert webhook (§6). A run's sign-off
+(`POST /runs/{id}/certify`) freezes the same verdicts into the snapshot as
+`annotations.agent_verdicts`, shown in the printable document and on the sign-off page
+under "Agent verdicts (advisory)": not a gate input, outside the content hash, and
+empty with a reason when agent-hub was unset or unreachable. Advisors answer as JSON findings
 inside a markdown report; `extract_json` finds the fenced block, so `${node.json}` and
 the alert parser both work on real model output.
 

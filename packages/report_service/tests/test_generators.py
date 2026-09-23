@@ -236,3 +236,38 @@ def test_signoff_html_includes_evidence_when_summary_frozen():
     assert "Evidence" in html
     assert "refund flow" in html and "DE39 expected 00 got 05" in html
     assert "2/2 gate(s) passed" in html
+
+
+def test_signoff_html_shows_agent_verdicts_as_advisory():
+    snap = _snapshot("GO")
+    snap["annotations"] = {"agent_verdicts": {
+        "source": "agent-hub", "subject": "run:run-1", "advisory": True,
+        "counted_in_gate": False, "in_content_hash": False, "available": True,
+        "verdicts": [
+            {"heartbeat_id": "h1abcdef0000", "agent": "failure-triage", "version": 1,
+             "wake": "event", "status": "done",
+             "verdict": {"category": "assertion", "root_cause": "DE39 05 <b>",
+                         "regression": False, "next_step": "check the switch",
+                         "regression_evidence": {"verdict": "first_run", "claimed": True}}},
+            {"heartbeat_id": "h2", "agent": "observer", "version": 2, "wake": "schedule",
+             "status": "done",
+             "findings": [{"severity": "warn", "subject": "run-1", "headline": "flaky"}]},
+        ],
+    }}
+    html = signoff_html(snap)
+    assert "Agent verdicts" in html and "not a gate input" in html
+    assert "failure-triage" in html and "check the switch" in html
+    assert "DE39 05 &lt;b&gt;" in html  # escaped
+    assert "not a regression (first_run)" in html
+    assert "observer" in html and "flaky" in html
+    # the section sits before Provenance, after the evidence
+    assert html.index("Agent verdicts") < html.index("<h2>Provenance</h2>")
+
+
+def test_signoff_html_without_annotation_or_without_verdicts():
+    assert "Agent verdicts" not in signoff_html(_snapshot("GO"))  # pre-ADR-0010 snapshot
+    snap = _snapshot("GO")
+    snap["annotations"] = {"agent_verdicts": {"subject": "run:run-1", "available": False,
+                                              "verdicts": [], "error": "agent-hub down"}}
+    html = signoff_html(snap)
+    assert "No agent verdict recorded" in html and "agent-hub down" in html

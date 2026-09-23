@@ -232,6 +232,50 @@ export interface Approval {
   at: string;
 }
 
+/**
+ * One agent's conclusion about the run, as frozen into the sign-off
+ * (ADR-0010): a triage-style `verdict`, observer-style `findings`, or the
+ * first lines of a free-text answer.
+ */
+export interface AgentVerdictAnnotation {
+  heartbeat_id: string;
+  agent: string;
+  version: number;
+  spec_sha256?: string;
+  wake: string;
+  status: string;
+  finished_at?: string | null;
+  model?: string | null;
+  error?: string;
+  verdict?: {
+    category?: string;
+    root_cause?: string;
+    regression?: unknown;
+    next_step?: string;
+    regression_evidence?: { verdict?: string; claimed?: unknown };
+  };
+  findings?: { severity?: string; subject?: string; headline?: string }[];
+  text?: string;
+}
+
+/**
+ * Advisory annotations frozen with a snapshot. Shown to the signer, never a
+ * gate input and outside `content_hash` (the block says so itself).
+ */
+export interface SignoffAnnotations {
+  agent_verdicts?: {
+    source: string;
+    subject: string;
+    advisory: boolean;
+    counted_in_gate: boolean;
+    in_content_hash: boolean;
+    fetched_at: string;
+    available: boolean;
+    error?: string;
+    verdicts: AgentVerdictAnnotation[];
+  };
+}
+
 /** An immutable Go/No-Go sign-off snapshot (POST /runs/{id}/certify). */
 export interface Signoff {
   id: string;
@@ -244,6 +288,8 @@ export interface Signoff {
   provenance: Provenance;
   content_hash: string;
   summary: RunSummary | null;
+  /** absent on snapshots frozen before ADR-0010 */
+  annotations?: SignoffAnnotations;
   created_at: string;
   created_by: string;
   frozen: boolean;

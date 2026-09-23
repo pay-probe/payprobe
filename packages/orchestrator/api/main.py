@@ -553,6 +553,122 @@ def _agent_hub_event_for(status: str) -> str | None:
     return None
 
 
+def _json_in_text(text: Any) -> Any:
+    """The JSON an agent's answer carries: bare, fenced, or embedded in a
+    report (mirrors agent-hub's ``extract_json``); None when there is none."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    candidates = [text.strip()]
+    for m in re.finditer(r"```(?:json)?\s*(.*?)```", text, re.S):
+        candidates.append(m.group(1).strip())
+    for opener, closer in (("{", "}"), ("[", "]")):
+        a, b = text.find(opener), text.rfind(closer)
+        if a != -1 and b > a:
+            candidates.append(text[a:b + 1])
+    for c in candidates:
+        if not c or c[0] not in "[{":
+            continue
+        try:
+            v = json.loads(c)
+        except ValueError:
+            continue
+        if isinstance(v, (dict, list)):
+            return v
+    return None
+
+
+#: per-verdict fields copied from a triage-style answer
+_VERDICT_KEYS = ("category", "root_cause", "regression", "next_step")
+
+
+def _agent_verdict_annotation(rows: list[dict] | None, subject: str,
+                              error: str | None = None) -> dict:
+    """ADR-0010: what the agents concluded about a run, frozen into its sign-off
+    as an *annotation*. Shown to the signer, never counted: gates are
+    deterministic and ``content_hash`` covers evidence only, so a missing or
+    unreachable agent-hub changes nothing about the verdict. Pure."""
+    from datetime import UTC, datetime
+
+    ann: dict[str, Any] = {
+        "source": "agent-hub",
+        "subject": subject,
+        "advisory": True,
+        "counted_in_gate": False,
+        "in_content_hash": False,
+        "fetched_at": datetime.now(UTC).isoformat(),
+        "available": rows is not None,
+        "verdicts": [],
+    }
+    if error:
+        ann["error"] = error
+    for hb in rows or []:
+        if not isinstance(hb, dict) or hb.get("status") == "running":
+            continue
+        v: dict[str, Any] = {
+            "heartbeat_id": hb.get("id"),
+            "agent": hb.get("agent"),
+            "version": hb.get("version"),
+            "spec_sha256": hb.get("spec_sha256"),
+            "wake": hb.get("wake"),
+            "status": hb.get("status"),
+            "finished_at": hb.get("finished_at"),
+            "model": hb.get("model"),
+        }
+        if hb.get("error"):
+            v["error"] = str(hb["error"])[:400]
+        data = _json_in_text(hb.get("result"))
+        findings = None
+        if isinstance(data, list):
+            findings = data
+        elif isinstance(data, dict) and isinstance(data.get("findings"), list):
+            findings = data["findings"]
+        if findings is not None:
+            v["findings"] = [
+                {k: f.get(k) for k in ("severity", "subject", "headline") if k in f}
+                for f in findings[:20] if isinstance(f, dict)
+            ]
+        elif isinstance(data, dict):
+            verdict = {k: data.get(k) for k in _VERDICT_KEYS if k in data}
+            ev = data.get("regression_evidence")
+            if isinstance(ev, dict):
+                verdict["regression_evidence"] = {
+                    "verdict": ev.get("verdict"), "claimed": ev.get("claimed"),
+                }
+            v["verdict"] = verdict
+        elif isinstance(hb.get("result"), str) and hb["result"].strip():
+            v["text"] = hb["result"].strip()[:400]
+        ann["verdicts"].append(v)
+    return ann
+
+
+async def _agent_verdicts_for(run_id: str) -> tuple[list[dict] | None, str | None]:
+    """Finished heartbeats attached to ``run:<run_id>`` (list, then each
+    record for its ``result``), best-effort with short timeouts. ``(None,
+    reason)`` when agent-hub is not configured or does not answer."""
+    import urllib.parse
+
+    if not AGENT_HUB_API_URL:
+        return None, "agent-hub not configured (AGENT_HUB_API_URL unset)"
+    base = AGENT_HUB_API_URL.rstrip("/")
+    subject = urllib.parse.quote(f"run:{run_id}", safe="")
+    try:
+        rows = await asyncio.wait_for(
+            _http_get_json(f"{base}/heartbeats?subject={subject}&limit=10"), timeout=5,
+        )
+    except Exception as exc:  # noqa: BLE001 — an annotation never blocks a sign-off
+        return None, f"{type(exc).__name__}: {exc}"
+    out: list[dict] = []
+    for r in (rows if isinstance(rows, list) else [])[:10]:
+        try:
+            out.append(await asyncio.wait_for(
+                _http_get_json(f"{base}/heartbeats/{urllib.parse.quote(str(r['id']), safe='')}"),
+                timeout=5,
+            ))
+        except Exception:  # noqa: BLE001 — keep the summary row when the detail is unavailable
+            out.append(r)
+    return out, None
+
+
 def _notify_agent_hub(event: str, subject: dict) -> None:
     """Tell agent-hub about a platform event so agents with a matching trigger
     wake (ADR-0010 phase 4). Fire-and-forget: never blocks or fails the caller;
@@ -4849,11 +4965,19 @@ async def certify_run(run_id: str, body: CertifyRequest, request: Request) -> di
     })
     summary = detail.get("summary") or {}
     chash = _content_hash(summary=summary, gate_result=gate, prov=prov)
+    # ADR-0010: the agents' verdicts about this run travel with the sign-off as
+    # an annotation the signer reads. Advisory by construction: fetched after
+    # the gates are decided and the hash is computed, never an input to either.
+    hb_rows, hb_err = await _agent_verdicts_for(run_id)
+    annotations = {
+        "agent_verdicts": _agent_verdict_annotation(hb_rows, f"run:{run_id}", hb_err),
+    }
 
     return signoff_store.create({
         "run_id": run_id, "project": body.project, "pack": body.pack,
         "environment": env, "verdict": gate["verdict"], "gate_result": gate,
         "provenance": prov, "content_hash": chash, "summary": summary,
+        "annotations": annotations,
         "created_by": _principal(request),
     })
 
