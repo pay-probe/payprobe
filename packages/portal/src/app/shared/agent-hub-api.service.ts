@@ -129,6 +129,95 @@ export interface HubHealth {
   schema_version?: number;
 }
 
+/** `paused` and `budget_exceeded` can be recorded for a wake that never ran. */
+export type HeartbeatStatus =
+  | "running"
+  | "done"
+  | "failed"
+  | "budget_exceeded"
+  | "timed_out"
+  | "cancelled"
+  | "paused";
+
+export type WakeKind = "manual" | "schedule" | "event" | "mcp";
+
+/** One heartbeat as listed (`GET /heartbeats`): counts instead of bodies. */
+export interface HeartbeatSummary {
+  id: string;
+  agent: string;
+  version: number;
+  spec_sha256: string;
+  wake: WakeKind;
+  invoked_by: string;
+  status: HeartbeatStatus;
+  tokens_in: number;
+  tokens_out: number;
+  model: string;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+  reverted_at: string | null;
+  n_steps: number;
+  n_proposed: number;
+  n_writes: number;
+}
+
+/** An LLM turn: what the model said and which tools it asked for. */
+export interface HeartbeatLlmStep {
+  n: number;
+  kind: "llm";
+  text: string;
+  tool_calls: { name: string; args: Record<string, unknown> }[];
+  usage: { input: number; output: number };
+  ms: number;
+}
+
+/** One scoped tool dispatch. `proposed` = plan-mode write recorded, not run. */
+export interface HeartbeatToolStep {
+  n: number;
+  kind: "tool";
+  tool: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  guardrail: boolean;
+  proposed: boolean;
+  error: string | null;
+  truncated: boolean;
+  ms: number;
+}
+
+export type HeartbeatStep = HeartbeatLlmStep | HeartbeatToolStep;
+
+export interface ProposedCall {
+  step: number;
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+/** Full record (`GET /heartbeats/{id}`), also what wake/cancel/revert return. */
+export interface HeartbeatDetail extends Omit<
+  HeartbeatSummary,
+  "n_steps" | "n_proposed" | "n_writes"
+> {
+  principal: { sub?: string; roles?: string[] };
+  input: string;
+  steps: HeartbeatStep[];
+  proposed: ProposedCall[];
+  journal: unknown[];
+  result: string | null;
+  cancel_requested: boolean;
+  /** Set on a 200 from wake when the agent already had a running heartbeat. */
+  coalesced?: boolean;
+  /** Set on the revert response: how many journal entries were restored. */
+  reverted?: number;
+}
+
+export interface WakeRequest {
+  input?: string;
+  version?: number | null;
+  wake?: WakeKind;
+}
+
 /** The problems list agent-hub returns on 422 (shape or publish validation). */
 export function problemsOf(err: unknown): string[] {
   const detail = (err as { error?: { detail?: unknown } })?.error?.detail;
@@ -263,6 +352,43 @@ export class AgentHubApiService {
   retire(kind: RegistryKind, name: string): Observable<DefinitionDetail> {
     return this.http.post<DefinitionDetail>(
       `${this.path(kind)}/${encodeURIComponent(name)}/retire`,
+      {},
+    );
+  }
+
+  // -- heartbeats (ADR-0010 phase 2) -------------------------------------------
+
+  /** 202 = a fresh `running` row; 200 = refused (paused/budget) or coalesced. */
+  wake(name: string, body: WakeRequest = {}): Observable<HeartbeatDetail> {
+    return this.http.post<HeartbeatDetail>(
+      `${this.base}/agents/${encodeURIComponent(name)}/wake`,
+      body,
+    );
+  }
+
+  heartbeats(agent?: string, limit = 50): Observable<HeartbeatSummary[]> {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (agent) q.set("agent", agent);
+    return this.http.get<HeartbeatSummary[]>(`${this.base}/heartbeats?${q}`);
+  }
+
+  heartbeat(id: string): Observable<HeartbeatDetail> {
+    return this.http.get<HeartbeatDetail>(
+      `${this.base}/heartbeats/${encodeURIComponent(id)}`,
+    );
+  }
+
+  cancelHeartbeat(id: string): Observable<HeartbeatDetail> {
+    return this.http.post<HeartbeatDetail>(
+      `${this.base}/heartbeats/${encodeURIComponent(id)}/cancel`,
+      {},
+    );
+  }
+
+  /** Restores every journalled write, newest first, under the caller's token. */
+  revertHeartbeat(id: string): Observable<HeartbeatDetail> {
+    return this.http.post<HeartbeatDetail>(
+      `${this.base}/heartbeats/${encodeURIComponent(id)}/revert`,
       {},
     );
   }

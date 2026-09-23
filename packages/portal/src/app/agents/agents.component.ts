@@ -30,6 +30,7 @@ import { UiService } from "../shared/ui.service";
 import { IconComponent } from "../shared/ui/icon.component";
 import { PageHeaderComponent } from "../shared/ui/page-header.component";
 import { StaleChipComponent } from "../shared/ui/stale-chip.component";
+import { AgentHeartbeatsComponent } from "./heartbeats.component";
 
 /** Starting spec for a new definition of each kind (valid against the seeds). */
 const TEMPLATES: Record<RegistryKind, AgentSpec | WorkflowSpec> = {
@@ -84,6 +85,7 @@ const POLL_MS = 15_000;
     PageHeaderComponent,
     StaleChipComponent,
     IconComponent,
+    AgentHeartbeatsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -351,6 +353,14 @@ const POLL_MS = 15_000;
                 }
                 <ng-container *ngTemplateOutlet="problemsTpl" />
               </div>
+            }
+
+            @if (kind() === "agent") {
+              <app-agent-heartbeats
+                [agent]="d.name"
+                [canInvoke]="canInvoke(d)"
+                [isAdmin]="isAdmin()"
+              />
             }
           } @else {
             <p class="muted">Select a {{ kind() }} to see its versions.</p>
@@ -665,6 +675,14 @@ export class AgentsComponent implements OnInit, OnDestroy {
     (this.auth.user()?.roles ?? []).includes("admin"),
   );
   readonly base = computed(() => this.cfg.agentHubApiBase);
+
+  /** Wake/cancel need a role in the active spec's rbac.invoke, or admin. */
+  canInvoke(d: DefinitionDetail): boolean {
+    if (this.isAdmin()) return true;
+    const mine = new Set(this.auth.user()?.roles ?? []);
+    const invoke = (d.spec as AgentSpec | null)?.rbac?.invoke ?? [];
+    return invoke.some((r) => mine.has(r));
+  }
   readonly specAgent = computed<AgentSpec | null>(() => {
     const v = this.version();
     return v && this.kind() === "agent" ? (v.spec as AgentSpec) : null;
