@@ -24,7 +24,7 @@ from typing import Protocol
 
 from payprobe_common import llm_provider
 
-from . import rest
+from . import egress, rest
 
 _DEFAULTS = {
     "openai": ("https://api.openai.com/v1/chat/completions", "gpt-4o-mini"),
@@ -82,6 +82,11 @@ class FakeLLMBackend:
 
 
 def _post_json(url: str, headers: dict, body: dict) -> dict:
+    # The one place a prompt leaves agent-hub: refuse hosts outside the egress
+    # allowlist before anything is sent (a refusal fails the heartbeat, which
+    # alerts; it never falls back to another host).
+    if reason := egress.check(url):
+        raise RuntimeError(reason)
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),

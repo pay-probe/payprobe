@@ -46,7 +46,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
-from . import rest
+from . import egress, rest
 from .alerts import Alerter, verify
 from .auth import caller_sub, require_auth, require_roles
 from .engine import Engine
@@ -328,6 +328,7 @@ async def health(request: Request) -> dict:
         "paused": (await store.paused())["paused"],
         "schema_version": await store.schema_version(),
         "alerts": alerts.stats() if alerts else None,
+        "egress": sorted(egress.allowed_hosts()),
     }
 
 
