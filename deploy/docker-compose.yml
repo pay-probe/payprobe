@@ -201,6 +201,8 @@ services:
     environment:
       SCENARIO_API_URL: http://scenario-service:8000
       RUN_API_URL: http://orchestrator:8100
+      # agent-hub (ADR-0010): agents, heartbeats, workflows, approvals inbox tools.
+      AGENT_HUB_API_URL: http://agent-hub:8600
       MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8200

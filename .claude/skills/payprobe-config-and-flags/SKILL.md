@@ -209,7 +209,8 @@ Drift check:
 | `INSIGHT_API_URL` | `http://localhost:8500` | Upstream insight-service (advisory tools `get_run_insights` / `list_insight_predictions` / `train_insights`). | prod | `tools.py:INSIGHT_API` |
 | `MCP_API_TOKEN` | unset | Static bearer for upstream calls; wins over `API_TOKEN`, which wins over JWT minting. | prod | `tools.py:_auth_header` (~line 65) |
 | `MCP_JWT_TTL` | `3600` | Minted service-JWT lifetime (s). | prod | `tools.py:_service_jwt` (~line 44) |
-| `MCP_JWT_SUB` | `mcp-server` | `sub` claim on minted JWTs. | prod | `tools.py:_service_jwt` (~line 46) |
+| `MCP_JWT_SUB` | `mcp-server` | `sub` claim on minted JWTs; since ADR-0010 phase 4 also copied into a `svc` claim, which only agent-hub's role gate reads (lets the MCP server wake agents and run workflows as a platform service; the other services ignore it). | prod | `tools.py:_service_jwt` |
+| `AGENT_HUB_API_URL` | `http://localhost:8600` (compose: `http://agent-hub:8600`) | agent-hub base for the "Agents & workflows" tool group (agents, wake, heartbeats, workflows, runs, approvals inbox; no decide tool by design). Optional deployment: tools fail with a clear "cannot reach" when it is down. | prod | `tools.py:AGENT_HUB_API` |
 
 Drift check:
 `grep -rn "environ" packages/mcp-server --include="*.py" | grep -v tests`

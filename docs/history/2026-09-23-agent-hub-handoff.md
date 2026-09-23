@@ -290,10 +290,21 @@ off; nothing scheduled while paused), `store.active_specs` /
 `_notify_agent_hub`, `_notify_run_terminal` (both run engines' `finally`),
 `gate.failed` from `certify_run`; all fire-and-forget behind
 `AGENT_HUB_API_URL`. Tests: `test_hub_events.py` (agent-hub) and
-`orchestrator/tests/test_agent_hub_events.py`. Owed in phase 4: webhook
-trigger, MCP catalog entries (wake, heartbeats, runs, approvals),
-insight-service as a first-class tool, and the unattended proof against a
-real provider.
+`orchestrator/tests/test_agent_hub_events.py`.
+
+MCP catalog entries (same day): `mcp_server/tools.py` gained an agent-hub
+section (`AGENT_HUB_API_URL`, default `http://localhost:8600`; 13 tools:
+`list_agents`, `get_agent`, `wake_agent`, `list_heartbeats`, `get_heartbeat`,
+`cancel_heartbeat`, `list_workflows`, `get_workflow`, `run_workflow`,
+`list_workflow_runs`, `get_workflow_run`, `cancel_workflow_run`,
+`list_approvals`), `registry.py` the group "Agents & workflows (ADR-0010)"
+and three resources, and the minted service JWT carries `svc: mcp-server`
+(only agent-hub reads it). No `decide_approval` tool on purpose. Portal
+catalog regenerated (`scripts/gen_catalog.py`); `tests/test_agent_hub_tools.py`.
+Compose gives mcp-server `AGENT_HUB_API_URL` in all three files.
+
+Owed in phase 4: webhook trigger, insight-service as a first-class agent
+tool, the alert webhook half of the unattended proof (needs a URL).
 
 Phase 5 remains as written in the ADR.
 

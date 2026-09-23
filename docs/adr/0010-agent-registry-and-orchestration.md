@@ -83,11 +83,19 @@
 > only when `AGENT_HUB_API_URL` is set. Seeds already declare these wakes:
 > `observer` (15 min schedule + `run.failed` + `gate.failed`),
 > `failure-triage` (`run.failed`), `certification-planner`
-> (`run.completed`). 124 agent-hub tests, 386 orchestrator tests. Owed from
-> phase 4: the webhook trigger, MCP catalog entries for wake/heartbeats/runs,
-> insight-service as a first-class tool, and the unattended end-to-end proof
-> against a real provider (a failing scheduled regression waking `observer`
-> and a finding reaching a human through the alert webhook).
+> (`run.completed`). 124 agent-hub tests, 386 orchestrator tests. MCP catalog
+> entries followed the same day: an "Agents & workflows" group of 13 tools
+> (list/get agents and workflows, wake, heartbeats, cancel, run workflow,
+> runs, cancel run, approvals inbox) plus `payprobe://agents`, `//workflows`,
+> `//approvals` resources; the MCP server's minted JWT now carries
+> `svc: mcp-server`, which only agent-hub's gate reads, so a Claude Code or
+> Claude Desktop operator can wake agents and start workflows. Deciding an
+> approval is deliberately not an MCP tool: it is a human's act, recorded
+> with the human's identity in the portal inbox. Owed from phase 4: the
+> webhook trigger, insight-service as a first-class agent tool, and the
+> unattended end-to-end proof (a failing scheduled regression waking
+> `observer` and a finding reaching a human through the alert webhook; the
+> first half is already observed, the webhook half needs a URL configured).
 >
 > **First real run (2026-09-23 13:23 UTC).** Thirty seconds after the phase-4
 > deploy, the scheduler woke `observer` unattended against the configured

@@ -31,7 +31,7 @@ export interface McpCatalog {
 }
 
 export const MCP_CATALOG: McpCatalog = {
-  "toolCount": 158,
+  "toolCount": 171,
   "groups": [
     {
       "name": "Discovery",
@@ -659,6 +659,76 @@ export const MCP_CATALOG: McpCatalog = {
       ]
     },
     {
+      "name": "Agents & workflows (ADR-0010)",
+      "tools": [
+        {
+          "name": "list_agents",
+          "title": "List agents",
+          "kind": "read"
+        },
+        {
+          "name": "get_agent",
+          "title": "Get agent",
+          "kind": "read"
+        },
+        {
+          "name": "wake_agent",
+          "title": "Wake agent (one heartbeat)",
+          "kind": "run"
+        },
+        {
+          "name": "list_heartbeats",
+          "title": "List heartbeats",
+          "kind": "read"
+        },
+        {
+          "name": "get_heartbeat",
+          "title": "Get heartbeat",
+          "kind": "read"
+        },
+        {
+          "name": "cancel_heartbeat",
+          "title": "Cancel heartbeat",
+          "kind": "delete"
+        },
+        {
+          "name": "list_workflows",
+          "title": "List workflows",
+          "kind": "read"
+        },
+        {
+          "name": "get_workflow",
+          "title": "Get workflow",
+          "kind": "read"
+        },
+        {
+          "name": "run_workflow",
+          "title": "Run workflow",
+          "kind": "run"
+        },
+        {
+          "name": "list_workflow_runs",
+          "title": "List workflow runs",
+          "kind": "read"
+        },
+        {
+          "name": "get_workflow_run",
+          "title": "Get workflow run",
+          "kind": "read"
+        },
+        {
+          "name": "cancel_workflow_run",
+          "title": "Cancel workflow run",
+          "kind": "delete"
+        },
+        {
+          "name": "list_approvals",
+          "title": "List approvals inbox",
+          "kind": "read"
+        }
+      ]
+    },
+    {
       "name": "Go/No-Go sign-off",
       "tools": [
         {
@@ -999,6 +1069,21 @@ export const MCP_CATALOG: McpCatalog = {
       "uri": "payprobe://runs/{run_id}",
       "title": "Run",
       "description": "Full run detail: per-step results + summary."
+    },
+    {
+      "uri": "payprobe://agents",
+      "title": "Agents",
+      "description": "Agent principals in the agent-hub registry (ADR-0010)."
+    },
+    {
+      "uri": "payprobe://workflows",
+      "title": "Workflows",
+      "description": "Workflow definitions (JSON DAGs with approval gates)."
+    },
+    {
+      "uri": "payprobe://approvals",
+      "title": "Approvals inbox",
+      "description": "Workflow runs waiting for a human decision."
     }
   ],
   "prompts": [
