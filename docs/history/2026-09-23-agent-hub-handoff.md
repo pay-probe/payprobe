@@ -343,6 +343,12 @@ review and Go/No-Go.
   verification honestly, keep config lean, route new portal polls through
   PollHealth, update CLAUDE.md and the ADR when a decision changes, no em
   dashes in prose written for him.
+- Seen once (2026-09-23, full agent-hub suite under CPU contention, 20 s run
+  instead of 14 s): `test_hub_alerts.py::test_advisor_findings_alert_at_warn_and_above`
+  failed; it passed alone, in its file, and in two further full runs. Not
+  quarantined: no mechanism was found. If it recurs, suspect the
+  `_wait_stats(pending == 0)` poll racing the delivery task and make the
+  test wait on `sent == 1` instead.
 
 ## 9. Suggested opening prompt for the Claude Code session
 
