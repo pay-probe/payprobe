@@ -35,6 +35,14 @@ AUTH_JWT_SECRET=... uvicorn agent_hub.main:app --port 8600
 | `AGENT_HUB_ALERT_WEBHOOK_URL` | D11 alert webhook: POSTed on `failed` / `budget_exceeded` / `timed_out` heartbeats and on advisor findings at `warn` or above; unset = disabled |
 | `AGENT_HUB_ALERT_WEBHOOK_SECRET` | signs each POST as `X-PayProbe-Signature: t=<ts>,v1=<HMAC-SHA256("<ts>.<body>")>` (the Stripe scheme); unset = unsigned |
 | `AGENT_HUB_ALERT_TIMEOUT_S` | per-attempt timeout (default 5; 3 attempts, backoff 1 s then 4 s) |
+| `AGENT_HUB_ENGINE_TICK_S` | workflow engine housekeeping interval (default 30): expires timed-out approvals |
+
+Workflow runs (phase 3): `POST /workflows/{name}/run` (inputs, optional
+`version`), `GET /runs[?workflow=&status=]`, `GET /runs/{id}`,
+`POST /runs/{id}/cancel`, `GET /approvals[?status=pending|all]` (the inbox),
+`POST /approvals/{id}/decide` (`approved` / `rejected` + note, needs one of
+the node's roles or admin), `GET /plans[?run=]`. A run's `node_states` and
+`results` are the whole state; a restart resumes every active run from them.
 | `PAYPROBE_ENV`, `API_TOKEN`, `AUTH_JWT_SECRET` / `AUTH_JWT_PUBLIC_KEY` | the platform auth gate (fails closed outside dev) |
 
 ## Test

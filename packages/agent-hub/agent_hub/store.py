@@ -112,6 +112,62 @@ CREATE UNIQUE INDEX IF NOT EXISTS agent_hub_heartbeats_one_running
   ON agent_hub_heartbeats (agent) WHERE status = 'running';
 """,
     ),
+    (
+        3,
+        """
+CREATE TABLE IF NOT EXISTS agent_hub_runs (
+  id               TEXT PRIMARY KEY,
+  workflow         TEXT NOT NULL,
+  version          INTEGER NOT NULL,
+  spec_sha256      TEXT NOT NULL,
+  status           TEXT NOT NULL DEFAULT 'running',
+  inputs           JSONB NOT NULL DEFAULT '{}'::jsonb,
+  node_states      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  results          JSONB NOT NULL DEFAULT '{}'::jsonb,
+  invoked_by       TEXT NOT NULL DEFAULT '',
+  principal        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  error            TEXT,
+  cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
+  started_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  finished_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS agent_hub_runs_workflow_started
+  ON agent_hub_runs (workflow, started_at DESC);
+CREATE INDEX IF NOT EXISTS agent_hub_runs_active
+  ON agent_hub_runs (status) WHERE status IN ('running', 'waiting');
+CREATE TABLE IF NOT EXISTS agent_hub_approvals (
+  id            TEXT PRIMARY KEY,
+  run_id        TEXT NOT NULL REFERENCES agent_hub_runs (id) ON DELETE CASCADE,
+  node_id       TEXT NOT NULL,
+  workflow      TEXT NOT NULL,
+  roles         JSONB NOT NULL DEFAULT '[]'::jsonb,
+  context       JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status        TEXT NOT NULL DEFAULT 'pending',
+  decided_by    TEXT,
+  note          TEXT,
+  requested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at    TIMESTAMPTZ,
+  decided_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS agent_hub_approvals_status
+  ON agent_hub_approvals (status, requested_at DESC);
+CREATE TABLE IF NOT EXISTS agent_hub_plans (
+  id            TEXT PRIMARY KEY,
+  run_id        TEXT REFERENCES agent_hub_runs (id) ON DELETE SET NULL,
+  node_id       TEXT,
+  heartbeat_id  TEXT,
+  agent         TEXT NOT NULL,
+  version       INTEGER NOT NULL,
+  spec_sha256   TEXT NOT NULL,
+  proposed      JSONB NOT NULL DEFAULT '[]'::jsonb,
+  result        TEXT,
+  authored_by   TEXT NOT NULL DEFAULT '',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS agent_hub_plans_run ON agent_hub_plans (run_id, created_at DESC);
+""",
+    ),
 ]
 
 
@@ -198,8 +254,8 @@ class RegistryStore:
     async def reset(self) -> None:
         """Test helper: wipe registry data (schema stays)."""
         await self._pool.execute(
-            "TRUNCATE agent_hub_heartbeats, agent_hub_versions, agent_hub_definitions, "
-            "agent_hub_meta"
+            "TRUNCATE agent_hub_approvals, agent_hub_plans, agent_hub_runs, "
+            "agent_hub_heartbeats, agent_hub_versions, agent_hub_definitions, agent_hub_meta"
         )
 
     # -- row shaping -------------------------------------------------------------------
@@ -669,3 +725,224 @@ class RegistryStore:
             int(grace_s),
         )
         return [self._hb_row(r) for r in rows]
+
+    # -- workflow runs (phase 3) -------------------------------------------------------
+
+    @staticmethod
+    def _run_row(r: asyncpg.Record) -> dict:
+        d = dict(r)
+        for k in ("inputs", "node_states", "results", "principal"):
+            d[k] = _loads(d[k])
+        for k in ("started_at", "updated_at", "finished_at"):
+            d[k] = _iso(d[k])
+        return d
+
+    async def create_run(self, run: dict) -> dict:
+        await self._pool.execute(
+            "INSERT INTO agent_hub_runs (id, workflow, version, spec_sha256, status, inputs, "
+            "node_states, results, invoked_by, principal) "
+            "VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10::jsonb)",
+            run["id"],
+            run["workflow"],
+            run["version"],
+            run["spec_sha256"],
+            run.get("status", "running"),
+            json.dumps(run.get("inputs") or {}),
+            json.dumps(run.get("node_states") or {}),
+            json.dumps(run.get("results") or {}),
+            run.get("invoked_by", ""),
+            json.dumps(run.get("principal") or {}),
+        )
+        return await self.get_run(run["id"])
+
+    async def get_run(self, run_id: str) -> dict:
+        r = await self._pool.fetchrow("SELECT * FROM agent_hub_runs WHERE id=$1", run_id)
+        if r is None:
+            raise NotFound(f"run '{run_id}' not found")
+        return self._run_row(r)
+
+    async def list_runs(
+        self, workflow: str | None = None, status: str | None = None, limit: int = 50
+    ) -> list[dict]:
+        rows = await self._pool.fetch(
+            "SELECT id, workflow, version, spec_sha256, status, invoked_by, error, "
+            "cancel_requested, started_at, updated_at, finished_at, "
+            "(SELECT COUNT(*) FROM jsonb_each(node_states) e "
+            " WHERE e.value->>'status' = 'done') AS n_done, "
+            "(SELECT COUNT(*) FROM jsonb_object_keys(node_states)) AS n_nodes "
+            "FROM agent_hub_runs "
+            "WHERE ($1::text IS NULL OR workflow=$1) AND ($2::text IS NULL OR status=$2) "
+            "ORDER BY started_at DESC LIMIT $3",
+            workflow,
+            status,
+            limit,
+        )
+        out = []
+        for r in rows:
+            d = dict(r)
+            for k in ("started_at", "updated_at", "finished_at"):
+                d[k] = _iso(d[k])
+            out.append(d)
+        return out
+
+    async def active_runs(self) -> list[dict]:
+        rows = await self._pool.fetch(
+            "SELECT * FROM agent_hub_runs WHERE status IN ('running', 'waiting') "
+            "ORDER BY started_at"
+        )
+        return [self._run_row(r) for r in rows]
+
+    async def save_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        node_states: dict,
+        results: dict,
+        error: str | None = None,
+    ) -> dict:
+        """Persist one engine step. Terminal statuses stamp ``finished_at``."""
+        terminal = status in ("done", "failed", "cancelled", "rejected")
+        await self._pool.execute(
+            "UPDATE agent_hub_runs SET status=$2, node_states=$3::jsonb, results=$4::jsonb, "
+            "error=$5, updated_at=NOW(), "
+            "finished_at = CASE WHEN $6 THEN COALESCE(finished_at, NOW()) ELSE finished_at END "
+            "WHERE id=$1",
+            run_id,
+            status,
+            json.dumps(node_states, default=str),
+            json.dumps(results, default=str),
+            error,
+            terminal,
+        )
+        return await self.get_run(run_id)
+
+    async def request_run_cancel(self, run_id: str) -> dict:
+        n = await self._pool.execute(
+            "UPDATE agent_hub_runs SET cancel_requested=TRUE, updated_at=NOW() "
+            "WHERE id=$1 AND status IN ('running', 'waiting')",
+            run_id,
+        )
+        if n == "UPDATE 0":
+            run = await self.get_run(run_id)  # raises NotFound
+            raise Conflict(f"run '{run_id}' is {run['status']}, not active")
+        return await self.get_run(run_id)
+
+    # -- approvals ---------------------------------------------------------------------
+
+    @staticmethod
+    def _approval_row(r: asyncpg.Record) -> dict:
+        d = dict(r)
+        for k in ("roles", "context"):
+            d[k] = _loads(d[k])
+        for k in ("requested_at", "expires_at", "decided_at"):
+            d[k] = _iso(d[k])
+        return d
+
+    async def create_approval(self, ap: dict) -> dict:
+        await self._pool.execute(
+            "INSERT INTO agent_hub_approvals (id, run_id, node_id, workflow, roles, context, "
+            "expires_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb, "
+            "CASE WHEN $7::int IS NULL THEN NULL ELSE NOW() + make_interval(secs => $7) END)",
+            ap["id"],
+            ap["run_id"],
+            ap["node_id"],
+            ap["workflow"],
+            json.dumps(ap.get("roles") or []),
+            json.dumps(ap.get("context") or {}, default=str),
+            ap.get("timeout_s"),
+        )
+        return await self.get_approval(ap["id"])
+
+    async def get_approval(self, ap_id: str) -> dict:
+        r = await self._pool.fetchrow("SELECT * FROM agent_hub_approvals WHERE id=$1", ap_id)
+        if r is None:
+            raise NotFound(f"approval '{ap_id}' not found")
+        return self._approval_row(r)
+
+    async def list_approvals(
+        self, status: str | None = "pending", run_id: str | None = None, limit: int = 100
+    ) -> list[dict]:
+        rows = await self._pool.fetch(
+            "SELECT * FROM agent_hub_approvals "
+            "WHERE ($1::text IS NULL OR status=$1) AND ($2::text IS NULL OR run_id=$2) "
+            "ORDER BY requested_at DESC LIMIT $3",
+            status,
+            run_id,
+            limit,
+        )
+        return [self._approval_row(r) for r in rows]
+
+    async def decide_approval(self, ap_id: str, decision: str, by: str, note: str = "") -> dict:
+        """``approved`` / ``rejected``; only a pending approval can be decided."""
+        n = await self._pool.execute(
+            "UPDATE agent_hub_approvals SET status=$2, decided_by=$3, note=$4, decided_at=NOW() "
+            "WHERE id=$1 AND status='pending'",
+            ap_id,
+            decision,
+            by,
+            note or None,
+        )
+        if n == "UPDATE 0":
+            ap = await self.get_approval(ap_id)  # raises NotFound
+            raise Conflict(f"approval '{ap_id}' is {ap['status']}, not pending")
+        return await self.get_approval(ap_id)
+
+    async def expire_approvals(self) -> list[dict]:
+        rows = await self._pool.fetch(
+            "UPDATE agent_hub_approvals SET status='expired', decided_at=NOW() "
+            "WHERE status='pending' AND expires_at IS NOT NULL AND expires_at < NOW() "
+            "RETURNING *"
+        )
+        return [self._approval_row(r) for r in rows]
+
+    async def close_pending_approvals(self, run_id: str, status: str) -> int:
+        n = await self._pool.execute(
+            "UPDATE agent_hub_approvals SET status=$2, decided_at=NOW() "
+            "WHERE run_id=$1 AND status='pending'",
+            run_id,
+            status,
+        )
+        return int(n.split()[-1]) if n else 0
+
+    # -- plans -------------------------------------------------------------------------
+
+    @staticmethod
+    def _plan_row(r: asyncpg.Record) -> dict:
+        d = dict(r)
+        d["proposed"] = _loads(d["proposed"])
+        d["created_at"] = _iso(d["created_at"])
+        return d
+
+    async def create_plan(self, plan: dict) -> dict:
+        await self._pool.execute(
+            "INSERT INTO agent_hub_plans (id, run_id, node_id, heartbeat_id, agent, version, "
+            "spec_sha256, proposed, result, authored_by) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)",
+            plan["id"],
+            plan.get("run_id"),
+            plan.get("node_id"),
+            plan.get("heartbeat_id"),
+            plan["agent"],
+            plan["version"],
+            plan["spec_sha256"],
+            json.dumps(plan.get("proposed") or [], default=str),
+            plan.get("result"),
+            plan.get("authored_by", ""),
+        )
+        return await self.get_plan(plan["id"])
+
+    async def get_plan(self, plan_id: str) -> dict:
+        r = await self._pool.fetchrow("SELECT * FROM agent_hub_plans WHERE id=$1", plan_id)
+        if r is None:
+            raise NotFound(f"plan '{plan_id}' not found")
+        return self._plan_row(r)
+
+    async def list_plans(self, run_id: str | None = None, limit: int = 50) -> list[dict]:
+        rows = await self._pool.fetch(
+            "SELECT * FROM agent_hub_plans WHERE ($1::text IS NULL OR run_id=$1) "
+            "ORDER BY created_at DESC LIMIT $2",
+            run_id,
+            limit,
+        )
+        return [self._plan_row(r) for r in rows]

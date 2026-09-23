@@ -145,10 +145,36 @@ def validate_workflow_spec(spec: WorkflowSpec, resolve: Resolver) -> list[str]:
                     f"'{n.reviews}' (executor and reviewer must differ)"
                 )
 
+    # -- edge labels must match what the source node can branch on -----------------
+    for e in spec.edges:
+        src = by_id.get(e.from_)
+        if src is None or e.when is None:
+            continue
+        label = e.when.lower()
+        if src.type == "condition" and label not in ("true", "false"):
+            problems.append(f"edge {e.from_} -> {e.to}: a condition branches on 'true'/'false'")
+        elif src.type == "approval" and label not in ("approved", "rejected"):
+            problems.append(
+                f"edge {e.from_} -> {e.to}: an approval branches on 'approved'/'rejected'"
+            )
+        elif src.type not in ("condition", "approval"):
+            problems.append(f"edge {e.from_} -> {e.to}: '{src.type}' nodes take no 'when'")
+
     # -- D3: full mode outside mock needs an approval ancestor -----------------
     if not any("cycle" in p for p in problems):
         ancestors = _ancestors(ids, spec)
         for n in spec.nodes:
+            if n.type == "tool":
+                # a direct write/execute call is a full-mode act by another name
+                t = toolkit.REGISTRY.get(n.tool or "")
+                if t is None or t.tier == "read" or n.environment in MOCK_ENVIRONMENTS:
+                    continue
+                if not any(by_id[a].type == "approval" for a in ancestors[n.id]):
+                    problems.append(
+                        f"node '{n.id}': tool '{n.tool}' is tier '{t.tier}' and needs an "
+                        "approval node before it (ADR-0010 D3)"
+                    )
+                continue
             if n.type != "agent_task" or n.id not in resolved:
                 continue
             eff = n.mode or resolved[n.id][2].mode

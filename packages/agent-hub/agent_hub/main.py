@@ -14,6 +14,10 @@ Endpoints (all gated by the platform bearer except ``/health``):
 * ``POST /agents/{name}/versions/{v}/publish``     validate, then activate
 * ``POST /agents/{name}/retire``                   no new runs; builtins refuse
 * the same surface under ``/workflows``
+* ``POST /agents/{name}/wake``, ``GET /heartbeats[/{id}]``, cancel, revert   (phase 2)
+* ``POST /workflows/{name}/run``, ``GET /runs[/{id}]``, ``POST /runs/{id}/cancel``,
+  ``GET /approvals[/{id}]``, ``POST /approvals/{id}/decide``, ``GET /plans[/{id}]``
+  (phase 3: the workflow engine, see :mod:`agent_hub.engine`)
 
 Roles: creating, editing, publishing and pausing require an ``admin``-class
 role (``AGENT_HUB_ADMIN_ROLES``, default ``admin``) *or* a role named in the
@@ -27,8 +31,10 @@ The LLM key is not here: agent-hub reads the same source as the assistant
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
@@ -40,6 +46,7 @@ from pydantic import BaseModel, Field, ValidationError
 from . import rest
 from .alerts import Alerter
 from .auth import caller_sub, require_auth, require_roles
+from .engine import Engine
 from .llm import ProviderLLMBackend, resolve_llm
 from .models import NAME_RE, AgentSpec, WorkflowSpec
 from .principal import mint_obo
@@ -47,6 +54,8 @@ from .runner import Outcome, run_heartbeat
 from .seed import seed_builtin
 from .store import Conflict, Guardrail, NotFound, RegistryStore
 from .validate import tool_catalog, validate_agent_spec, validate_workflow_spec
+
+log = logging.getLogger(__name__)
 
 Kind = Literal["agent", "workflow"]
 
@@ -78,13 +87,32 @@ async def lifespan(app: FastAPI):
     # finish, and while it stands every wake of that agent coalesces onto it.
     for hb in await app.state.store.reconcile_running():
         app.state.alerts.emit_for(hb, mode=None)
+    # Phase 3: the workflow engine resumes every active run from its row, then
+    # expires timed-out approvals on a slow tick.
+    app.state.engine = Engine(
+        app.state.store,
+        app.state.alerts,
+        launch_heartbeat=lambda **kw: launch_heartbeat(app, **kw),
+        tool_backend=lambda run: app.state.backend_factory(_run_token(run)),
+    )
+    await app.state.engine.reconcile()
+    app.state.engine.start_ticker(float(os.environ.get("AGENT_HUB_ENGINE_TICK_S") or 30))
     try:
         yield
     finally:
+        app.state.engine.stop()
         for t in list(app.state.tasks):
             t.cancel()
         app.state.alerts.cancel()
         await app.state.store.close()
+
+
+def _run_token(run: dict) -> str:
+    """OBO token for a workflow's ``tool`` node: the invoking user, acting
+    through the run (``act`` names the workflow and run, never ``svc``)."""
+    return mint_obo(
+        run.get("principal") or {}, f"workflow:{run['workflow']}", run["version"], run["id"], 600
+    )
 
 
 def _default_llm_factory(spec: AgentSpec):
@@ -363,6 +391,98 @@ def _caller(request: Request) -> dict:
     return getattr(request.state, "auth", None) or {}
 
 
+async def launch_heartbeat(
+    app_: FastAPI,
+    *,
+    name: str,
+    version: int,
+    spec: AgentSpec,
+    spec_sha256: str,
+    caller: dict,
+    input_text: str,
+    wake: str,
+    on_done: Callable[[dict], Awaitable[None]] | None = None,
+) -> dict:
+    """The one heartbeat code path, shared by ``POST /agents/{name}/wake`` and
+    the workflow engine's ``agent_task`` nodes.
+
+    Returns the heartbeat row. A refusal (``paused`` / ``budget_exceeded``) is
+    recorded and returned without running; a wake on an agent that already has
+    a running heartbeat returns that row with ``coalesced: true``; otherwise the
+    row is ``running`` and ``on_done`` (if given) is awaited with the finished
+    record. ``spec`` may carry a narrowed mode (a workflow node may narrow,
+    never escalate); ``spec_sha256`` stays the registered version's hash.
+    """
+    store: RegistryStore = app_.state.store
+    hb = {
+        "id": uuid.uuid4().hex,
+        "agent": name,
+        "version": version,
+        "spec_sha256": spec_sha256,
+        "wake": wake,
+        "invoked_by": str(caller.get("sub") or "anonymous"),
+        "principal": {"sub": caller.get("sub"), "roles": caller.get("roles") or []},
+        "input": input_text,
+    }
+    if (await store.paused())["paused"]:
+        return await store.refuse_heartbeat(hb, "paused", "agents are paused")
+    budget = spec.budget.daily_tokens
+    if budget and await store.tokens_today(name) >= budget:
+        refused = await store.refuse_heartbeat(
+            hb, "budget_exceeded", f"daily token budget ({budget}) spent; hard stop"
+        )
+        app_.state.alerts.emit_for(refused, mode=spec.mode)
+        return refused
+    running = await store.running_heartbeat(name)
+    if running:
+        return {**running, "coalesced": True}
+
+    llm = app_.state.llm_factory(spec)  # 503 when not configured
+    hb["model"] = llm.model
+    token = mint_obo(caller, name, version, hb["id"], spec.limits.wall_clock_s + 60)
+    backend = app_.state.backend_factory(token)
+    row = await store.start_heartbeat(hb)
+    loop = asyncio.get_running_loop()
+
+    def flags() -> dict:
+        async def read() -> dict:
+            return {
+                "paused": (await store.paused())["paused"],
+                "cancel": await store.cancel_requested(hb["id"]),
+            }
+
+        return asyncio.run_coroutine_threadsafe(read(), loop).result(timeout=10)
+
+    async def execute() -> None:
+        try:
+            out: Outcome = await loop.run_in_executor(
+                None, lambda: run_heartbeat(spec, input_text, backend, llm, flags)
+            )
+        except Exception as exc:  # noqa: BLE001 — never leave a row 'running'
+            out = Outcome(status="failed", error=f"{type(exc).__name__}: {exc}")
+        finished = await store.record_heartbeat(
+            hb["id"],
+            out.status,
+            steps=out.steps,
+            proposed=out.proposed,
+            journal=out.journal,
+            tokens=out.tokens,
+            result=out.result,
+            error=out.error,
+        )
+        app_.state.alerts.emit_for(finished, mode=spec.mode)
+        if on_done is not None:
+            try:
+                await on_done(finished)
+            except Exception:  # noqa: BLE001 — a consumer's failure never leaks into the row
+                log.exception("heartbeat %s on_done failed", hb["id"])
+
+    task = asyncio.create_task(execute())
+    app_.state.tasks.add(task)
+    task.add_done_callback(app_.state.tasks.discard)
+    return row
+
+
 @app.post("/agents/{name}/wake", status_code=202, response_model=None)
 async def wake_agent(request: Request, name: str, body: WakeBody) -> dict | JSONResponse:
     """Start one heartbeat of ``name`` (its active version, or ``version``).
@@ -381,70 +501,20 @@ async def wake_agent(request: Request, name: str, body: WakeBody) -> dict | JSON
     spec = AgentSpec.model_validate(raw)
     require_roles(request, set(spec.rbac.invoke) | _admin_roles())
     ver = await store.get_version("agent", name, version)
-    caller = _caller(request)
-    hb = {
-        "id": uuid.uuid4().hex,
-        "agent": name,
-        "version": version,
-        "spec_sha256": ver["spec_sha256"],
-        "wake": body.wake,
-        "invoked_by": caller_sub(request),
-        "principal": {"sub": caller.get("sub"), "roles": caller.get("roles") or []},
-        "input": body.input,
-    }
+    row = await launch_heartbeat(
+        request.app,
+        name=name,
+        version=version,
+        spec=spec,
+        spec_sha256=ver["spec_sha256"],
+        caller=_caller(request),
+        input_text=body.input,
+        wake=body.wake,
+    )
     # Refusals and coalescing are 200 with the record: nothing was accepted
     # for processing. Only a freshly started heartbeat is 202.
-    if (await store.paused())["paused"]:
-        return JSONResponse(await store.refuse_heartbeat(hb, "paused", "agents are paused"))
-    budget = spec.budget.daily_tokens
-    if budget and await store.tokens_today(name) >= budget:
-        refused = await store.refuse_heartbeat(
-            hb, "budget_exceeded", f"daily token budget ({budget}) spent; hard stop"
-        )
-        request.app.state.alerts.emit_for(refused, mode=spec.mode)
-        return JSONResponse(refused)
-    running = await store.running_heartbeat(name)
-    if running:
-        return JSONResponse({**running, "coalesced": True})
-
-    llm = request.app.state.llm_factory(spec)  # 503 when not configured
-    hb["model"] = llm.model
-    token = mint_obo(caller, name, version, hb["id"], spec.limits.wall_clock_s + 60)
-    backend = request.app.state.backend_factory(token)
-    row = await store.start_heartbeat(hb)
-    loop = asyncio.get_running_loop()
-
-    def flags() -> dict:
-        async def read() -> dict:
-            return {
-                "paused": (await store.paused())["paused"],
-                "cancel": await store.cancel_requested(hb["id"]),
-            }
-
-        return asyncio.run_coroutine_threadsafe(read(), loop).result(timeout=10)
-
-    async def execute() -> None:
-        try:
-            out: Outcome = await loop.run_in_executor(
-                None, lambda: run_heartbeat(spec, body.input, backend, llm, flags)
-            )
-        except Exception as exc:  # noqa: BLE001 — never leave a row 'running'
-            out = Outcome(status="failed", error=f"{type(exc).__name__}: {exc}")
-        finished = await store.record_heartbeat(
-            hb["id"],
-            out.status,
-            steps=out.steps,
-            proposed=out.proposed,
-            journal=out.journal,
-            tokens=out.tokens,
-            result=out.result,
-            error=out.error,
-        )
-        request.app.state.alerts.emit_for(finished, mode=spec.mode)
-
-    task = asyncio.create_task(execute())
-    request.app.state.tasks.add(task)
-    task.add_done_callback(request.app.state.tasks.discard)
+    if row.get("coalesced") or row["status"] != "running":
+        return JSONResponse(row)
     return row
 
 
@@ -491,3 +561,105 @@ async def revert_heartbeat(request: Request, hb_id: str) -> dict:
     )
     row = await store.mark_reverted(hb_id)
     return {**row, "reverted": n}
+
+
+# -- workflow runs and approvals (phase 3) ------------------------------------------------
+
+
+class RunBody(BaseModel):
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    version: int | None = None
+
+
+class DecideBody(BaseModel):
+    decision: Literal["approved", "rejected"]
+    note: str = Field(default="", max_length=2_000)
+
+
+def _engine(request: Request) -> Engine:
+    return request.app.state.engine
+
+
+@app.post("/workflows/{name}/run", status_code=202)
+async def run_workflow(request: Request, name: str, body: RunBody) -> dict:
+    """Start a run of ``name`` (active version, or ``version``). Returns the run
+    after its first advance: already ``waiting`` if the first node is an
+    approval, ``running`` while agent tasks are in flight. Admin-class roles
+    only for now: workflows carry no rbac of their own yet."""
+    require_roles(request, _admin_roles())
+    store = _store(request)
+    ref = f"{name}@{body.version}" if body.version else name
+    hit = await store.resolve("workflow", ref)
+    if hit is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no runnable version for '{ref}'")
+    _, version, raw = hit
+    spec = WorkflowSpec.model_validate(raw)
+    missing = [k for k in spec.inputs if k not in body.inputs]
+    if missing:
+        raise HTTPException(422, {"problems": [f"missing input '{k}'" for k in missing]})
+    ver = await store.get_version("workflow", name, version)
+    return await _engine(request).start(
+        name, version, spec, ver["spec_sha256"], inputs=body.inputs, caller=_caller(request)
+    )
+
+
+@app.get("/runs")
+async def list_runs(
+    request: Request,
+    workflow: str | None = None,
+    status_: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=500),
+) -> list[dict]:
+    return await _store(request).list_runs(workflow, status_, limit)
+
+
+@app.get("/runs/{run_id}")
+async def get_run(request: Request, run_id: str) -> dict:
+    return await _wrap(_store(request).get_run(run_id))
+
+
+@app.post("/runs/{run_id}/cancel")
+async def cancel_run(request: Request, run_id: str) -> dict:
+    require_roles(request, _admin_roles())
+    return await _wrap(_engine(request).cancel(run_id))
+
+
+@app.get("/approvals")
+async def list_approvals(
+    request: Request,
+    status_: str | None = Query(default="pending", alias="status"),
+    run: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[dict]:
+    """The approvals inbox. ``status=all`` lists every decision too."""
+    st = None if status_ in (None, "", "all") else status_
+    return await _store(request).list_approvals(st, run, limit)
+
+
+@app.get("/approvals/{ap_id}")
+async def get_approval(request: Request, ap_id: str) -> dict:
+    return await _wrap(_store(request).get_approval(ap_id))
+
+
+@app.post("/approvals/{ap_id}/decide")
+async def decide_approval(request: Request, ap_id: str, body: DecideBody) -> dict:
+    """A human decision. Needs one of the approval node's ``roles`` (or admin);
+    the decider is recorded and the run moves on (or ends ``rejected``)."""
+    store = _store(request)
+    ap = await _wrap(store.get_approval(ap_id))
+    require_roles(request, set(ap["roles"]) | _admin_roles())
+    return await _wrap(
+        _engine(request).decide(ap_id, body.decision, caller_sub(request), body.note)
+    )
+
+
+@app.get("/plans")
+async def list_plans(
+    request: Request, run: str | None = None, limit: int = Query(default=50, ge=1, le=500)
+) -> list[dict]:
+    return await _store(request).list_plans(run, limit)
+
+
+@app.get("/plans/{plan_id}")
+async def get_plan(request: Request, plan_id: str) -> dict:
+    return await _wrap(_store(request).get_plan(plan_id))

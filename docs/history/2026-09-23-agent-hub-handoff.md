@@ -88,11 +88,13 @@ untouched by all of this.
 | `rest.py` | two credentials: `request` (service, platform reads only) and `request_as(token)` (per-heartbeat OBO) |
 | `principal.py` | `mint_obo(user, agent, version, heartbeat_id, ttl)` |
 | `alerts.py` | D11 alert webhook: `Alerter` (fire-and-forget, signed, retried), `events_for(hb, mode)`, `findings_of`, `sign`/`verify`; `app.state.alerts`, stats on `/health` |
+| `exprs.py` | phase 3: `render()` (`${...}` templating over inputs + node results) and `evaluate()` (condition nodes, whitelisted AST, no `eval`) |
+| `engine.py` | phase 3: `Engine` persisted state machine over `agent_hub_runs`; `start`, `advance`, `decide`, `cancel`, `reconcile`, `tick`; node executors for all six types; `app.state.engine` |
 
-Tests: `packages/agent-hub/tests/test_hub_*.py` + `hub_testkit.py` (81 tests
-after 2026-09-23: `test_hub_alerts.py` and the watchdog test in
-`test_hub_store.py` joined the original 69, plus the `failure-triage` seed
-assertion in `test_hub_api.py`).
+Tests: `packages/agent-hub/tests/test_hub_*.py` + `hub_testkit.py` (117 tests
+after 2026-09-23: the original 69, plus `test_hub_alerts.py`, the watchdog
+test in `test_hub_store.py`, the `failure-triage` seed assertion in
+`test_hub_api.py`, `test_hub_exprs.py` and `test_hub_engine.py`).
 Module names are prefixed `test_hub_` on purpose: every package's suite runs in
 ONE pytest session and `test_api.py` already exists in insight-service.
 `from conftest import ...` is forbidden for the same reason; helpers live in
@@ -219,25 +221,35 @@ Phase 2 remainder:
    "re-queues" was corrected: a wake belongs to its trigger, so orphans fail
    instead of re-running.
 
-Phase 3 (workflow engine), suggested file plan:
+Phase 3 (workflow engine). Engine core done 2026-09-23:
 
-- `store.py` migration 3: `agent_hub_runs` (workflow_run: definition, version,
-  state, node_states jsonb, cursor, invoked_by, started/finished),
-  `agent_hub_approvals` (run, node, roles, decided_by, decision, expires_at),
-  `agent_hub_plans` (durable plan artifacts with provenance).
-- `engine.py`: persisted state machine; node executors for `agent_task`
-  (a heartbeat with the node's input, mode narrowed as declared), `tool`
-  (one `scoped_dispatch` under the invoking user), `condition`
-  (`${...}` expression over inputs + prior results, no eval: a tiny safe
-  evaluator), `approval` (row + wait), `parallel`/`join`. Redis lock per run
-  (`REDIS_URL` as the orchestrator uses it); reconcile pass on startup.
-- `main.py`: `POST /workflows/{name}/run`, `GET /runs`, `GET /runs/{id}`,
-  `POST /runs/{id}/cancel`, `GET /approvals`, `POST /approvals/{id}/decide`.
-- Reference workflows as seeds: `observer` (observe → review → gate) and
-  `certification-plan` (planner → reviewer → approval → apply in `full`).
-- Fold :8400 in (D2): move `assistant_service` session/chat routes into
-  agent-hub or retire them; keep `payprobe_common` as the single home.
-- Exit criteria in the ADR §Rollout.
+- `store.py` migration 3: `agent_hub_runs` (node_states + results jsonb, the
+  whole state), `agent_hub_approvals` (run, node, roles, context, decision,
+  expires_at), `agent_hub_plans` (plan artifacts with agent provenance).
+- `exprs.py`: `render()` for `${inputs.x}` / `${node.field}` templating and
+  `evaluate()` for `condition` nodes (whitelisted AST walk, no `eval`).
+- `engine.py`: persisted state machine; executors for all six node types;
+  `agent_task` goes through `main.launch_heartbeat` (the wake code path,
+  extracted from the route) with `on_done` re-entering the engine; startup
+  `reconcile()` re-attaches running tasks and retries deferred ones; a 30 s
+  tick expires approvals. Lock is per run, in process: no Redis (D6; a
+  cross-replica lock, if ever needed, is a Postgres advisory lock).
+- `main.py`: `POST /workflows/{name}/run`, `GET /runs[/{id}]`,
+  `POST /runs/{id}/cancel`, `GET /approvals[/{id}]` (inbox),
+  `POST /approvals/{id}/decide`, `GET /plans[/{id}]`.
+- `validate.py`: write/execute `tool` nodes outside mock need an approval
+  ancestor; edge `when` labels must match the source node's branches.
+- Seeds: `plan-executor` agent (full mode, admin-invoke only) and the
+  workflows `observer` (observe → review → gate) and `certification-plan`
+  (plan → review → verdict → gate → apply). `seed_builtin` now seeds
+  workflows after agents; existing registries get the missing ones on start.
+- Tests: `test_hub_exprs.py` (25) and `test_hub_engine.py` (11) cover the
+  three exit criteria under FakeLLM. 117 agent-hub tests in total.
+
+Still owed in phase 3: portal runs view + approvals inbox (API complete);
+fold :8400 in (D2): move `assistant_service` session/chat routes into
+agent-hub or retire them, keep `payprobe_common` as the single home; one run
+of each reference workflow against a real provider.
 
 Phase 4 and 5 remain as written in the ADR.
 

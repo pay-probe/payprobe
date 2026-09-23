@@ -36,6 +36,23 @@
 > default) and the restart watchdog (`reconcile_running`: orphaned `running`
 > rows become `failed` and alert). 81 agent-hub tests. Nothing from phase 2 is
 > owed except a browser click-through and a real provider call.
+>
+> **Phase 3, engine core (2026-09-23).** `agent_hub/engine.py`: a persisted
+> state machine over `agent_hub_runs` / `agent_hub_approvals` /
+> `agent_hub_plans` (migration 3). Node executors for all six types;
+> `agent_task` reuses the wake code path (`launch_heartbeat`, extracted from
+> the route) under a narrowed mode; `condition` uses a whitelisted-AST
+> evaluator (`exprs.py`, no `eval`); `approval` parks the run as `waiting`
+> and alerts `approval.requested`; plan-mode proposals become plan artifacts.
+> Routes: `POST /workflows/{name}/run`, `/runs`, cancel, `/approvals` inbox +
+> decide, `/plans`. Seeds: `plan-executor` agent (full, approval-gated) and
+> the reference workflows `observer` and `certification-plan`. Startup
+> reconcile re-attaches running agent tasks and expires timed-out approvals.
+> 117 agent-hub tests, including: human approval mid-flow, reviewer blocking a
+> bad plan before anyone is asked, approved plan applied by the executor, a
+> restart mid-run resumed from the row. Owed from phase 3: portal runs view +
+> approvals inbox, folding :8400 in (D2), a real provider run of both
+> reference workflows.
 
 Companions: [`../agentic-engine-evaluation.md`](../agentic-engine-evaluation.md)
 (Opus), [`../agentic-engine-evaluation-fable.md`](../agentic-engine-evaluation-fable.md)
@@ -224,6 +241,25 @@ be an unjournalled side effect), so an orphan can no longer block the agent's
 next wake. Implemented 2026-09-23 as `RegistryStore.reconcile_running`, run
 in the lifespan before the first request.
 
+**Engine (phase 3, implemented 2026-09-23).** `agent_hub_runs` holds
+`node_states` (per node: `pending | deferred | running | waiting | done |
+skipped | failed | cancelled`, plus heartbeat/approval/plan ids, journal for
+tool nodes) and `results` (per node, the `${node.field}` context). Every
+engine step is written before the next starts, so a killed process resumes
+from the row. A node is ready when all incoming edges are resolved and at
+least one fired; unfired nodes are skipped. `condition` branches on
+`when: true|false`, `approval` on `approved|rejected` (no `rejected` edge ⇒
+the run ends `rejected`). `agent_task` narrows the agent's mode, never
+escalates (validator and engine both enforce); a plan-mode task that proposed
+writes leaves an `agent_hub_plans` row the approval carries as context. A
+write- or execute-tier `tool` node outside `mock` needs an approval ancestor,
+the same D3 rule as a `full` task. Concurrency is a per-run asyncio lock in
+the single agent-hub process (D5: one container); a cross-replica lock is a
+phase-5 item if replicas ever arrive, and it would be a Postgres advisory
+lock, not Redis (D6: the platform Postgres is the only durable tier here).
+Approval `timeout_s` expires on a 30 s tick (`AGENT_HUB_ENGINE_TICK_S`) and
+fails the run.
+
 Approval policy defaults: `plan` / `advisor` need nothing; `full` on `mock`
 is journal only; `full` elsewhere, load above `AGENT_LOAD_APPROVAL_TPS`
 (default 100) and any certify or sign-off always pass an `approval` node;
@@ -269,7 +305,7 @@ Each phase ends in a commit and a review gate.
 - **Gate 0: this ADR accepted.** Passed 2026-09-22 (D1 to D4), D6 amended 2026-09-23.
 - **Phase 1: Registry.** Done in code; exit criteria: create → version → publish over HTTP; invalid tool refused at publish; RBAC enforced; `/status` shows `agent-hub`; portal Agents page + host `npm run build`; host `make test`; committed.
 - **Phase 2: Heartbeat runner.** Done: scoped toolkit, OBO tokens minted in agent-hub with the shared secret (no new auth-service endpoint needed), FakeLLM, provenance (`spec_sha256`, model, `act` claim) on every heartbeat, heartbeat records with cancel/revert, pause and budget stops. Portal heartbeat view, D11 alert webhook and restart watchdog all done 2026-09-23; phase 2 complete.
-- **Phase 3: Workflow engine.** State machine, node types, approvals inbox, reference workflows `observer` and `certification-plan`; fold :8400 in (D2). Exit: both workflows complete with a human approval mid-flow; container kill mid-workflow resumes; reviewer blocks a deliberately bad plan.
+- **Phase 3: Workflow engine.** State machine, node types, approvals inbox, reference workflows `observer` and `certification-plan`; fold :8400 in (D2). Exit: both workflows complete with a human approval mid-flow; container kill mid-workflow resumes; reviewer blocks a deliberately bad plan. Status 2026-09-23: engine, routes, seeds and all three exit criteria covered by tests under FakeLLM (`test_hub_engine.py`); the approvals inbox exists as an API, the portal page and the :8400 fold are owed, and the exit criteria still want one run against a real provider.
 - **Phase 4: Triggers and exposure.** Run-lifecycle events, schedules via the existing scheduler, webhook trigger, MCP catalog entries, insight-service as a tool. Exit: a failing scheduled regression wakes `observer` unattended and a finding with evidence reaches a human.
 - **Phase 5: Hardening and handover.** Injection pack, `agent-golden` CI, egress allowlist, quotas, ATLAS + CLAUDE.md invariants (D12), operator skill `payprobe-agents`, status flip to Accepted, :8400 alias removed. Exit: security review + Go/No-Go by David.
 
