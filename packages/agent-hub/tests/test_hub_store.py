@@ -119,6 +119,43 @@ async def test_migrations_are_recorded_and_idempotent(store):
         await other.close()
 
 
+async def test_restart_watchdog_fails_only_orphaned_running_rows(store):
+    """A `running` row older than its version's wall_clock_s (+ grace) belongs
+    to a dead process; a fresh one is left alone (it may be mid-flight)."""
+    await store.create("agent", "a1", agent_spec())
+    await store.publish("agent", "a1", 1)
+    ver = await store.get_version("agent", "a1", 1)
+
+    def hb(hb_id: str) -> dict:
+        return {
+            "id": hb_id,
+            "agent": "a1",
+            "version": 1,
+            "spec_sha256": ver["spec_sha256"],
+            "wake": "manual",
+        }
+
+    fresh = await store.start_heartbeat(hb("fresh"))
+    assert fresh["status"] == "running"
+    assert await store.reconcile_running() == []  # inside its wall clock: untouched
+
+    # a second running row for the same agent is impossible (coalescing index),
+    # so finish the fresh one, then plant a stale running row and backdate it
+    await store.record_heartbeat(
+        "fresh", "done", steps=[], proposed=[], journal=[], tokens={}, result="ok", error=None
+    )
+    await store.start_heartbeat(hb("stale"))
+    await store._pool.execute(
+        "UPDATE agent_hub_heartbeats SET started_at = NOW() - interval '1 hour' WHERE id='stale'"
+    )
+    orphaned = await store.reconcile_running()
+    assert [o["id"] for o in orphaned] == ["stale"]
+    assert orphaned[0]["status"] == "failed" and orphaned[0]["error"] == "orphaned by restart"
+    assert orphaned[0]["finished_at"]
+    assert await store.running_heartbeat("a1") is None  # the agent can wake again
+    assert (await store.get_heartbeat("fresh"))["status"] == "done"  # finished rows untouched
+
+
 async def test_one_active_version_is_enforced_by_the_database(store):
     """Belt and braces: even a buggy code path cannot leave two actives."""
     import asyncpg

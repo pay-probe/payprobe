@@ -38,6 +38,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from . import rest
+from .alerts import Alerter
 from .auth import caller_sub, require_auth, require_roles
 from .llm import ProviderLLMBackend, resolve_llm
 from .models import NAME_RE, AgentSpec, WorkflowSpec
@@ -72,11 +73,17 @@ async def lifespan(app: FastAPI):
     app.state.llm_factory = _default_llm_factory
     app.state.backend_factory = _default_backend_factory
     app.state.tasks = set()
+    app.state.alerts = Alerter.from_env()
+    # Restart watchdog: a row still `running` from a previous process can never
+    # finish, and while it stands every wake of that agent coalesces onto it.
+    for hb in await app.state.store.reconcile_running():
+        app.state.alerts.emit_for(hb, mode=None)
     try:
         yield
     finally:
         for t in list(app.state.tasks):
             t.cancel()
+        app.state.alerts.cancel()
         await app.state.store.close()
 
 
@@ -268,11 +275,13 @@ async def health(request: Request) -> dict:
     store: RegistryStore | None = getattr(request.app.state, "store", None)
     if store is None:
         return {"status": "ok", "service": "agent-hub", "paused": None}
+    alerts: Alerter | None = getattr(request.app.state, "alerts", None)
     return {
         "status": "ok",
         "service": "agent-hub",
         "paused": (await store.paused())["paused"],
         "schema_version": await store.schema_version(),
+        "alerts": alerts.stats() if alerts else None,
     }
 
 
@@ -389,11 +398,11 @@ async def wake_agent(request: Request, name: str, body: WakeBody) -> dict | JSON
         return JSONResponse(await store.refuse_heartbeat(hb, "paused", "agents are paused"))
     budget = spec.budget.daily_tokens
     if budget and await store.tokens_today(name) >= budget:
-        return JSONResponse(
-            await store.refuse_heartbeat(
-                hb, "budget_exceeded", f"daily token budget ({budget}) spent; hard stop"
-            )
+        refused = await store.refuse_heartbeat(
+            hb, "budget_exceeded", f"daily token budget ({budget}) spent; hard stop"
         )
+        request.app.state.alerts.emit_for(refused, mode=spec.mode)
+        return JSONResponse(refused)
     running = await store.running_heartbeat(name)
     if running:
         return JSONResponse({**running, "coalesced": True})
@@ -421,7 +430,7 @@ async def wake_agent(request: Request, name: str, body: WakeBody) -> dict | JSON
             )
         except Exception as exc:  # noqa: BLE001 — never leave a row 'running'
             out = Outcome(status="failed", error=f"{type(exc).__name__}: {exc}")
-        await store.record_heartbeat(
+        finished = await store.record_heartbeat(
             hb["id"],
             out.status,
             steps=out.steps,
@@ -431,6 +440,7 @@ async def wake_agent(request: Request, name: str, body: WakeBody) -> dict | JSON
             result=out.result,
             error=out.error,
         )
+        request.app.state.alerts.emit_for(finished, mode=spec.mode)
 
     task = asyncio.create_task(execute())
     request.app.state.tasks.add(task)

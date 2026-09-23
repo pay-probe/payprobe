@@ -26,9 +26,16 @@
 > claim; `agent_hub_heartbeats` (migration 2) with coalescing enforced by a
 > partial unique index; `POST /agents/{name}/wake`, `/heartbeats`, cancel and
 > revert; pause and daily-budget refusals recorded as heartbeats; `FakeLLMBackend`
-> for CI. 69 agent-hub tests, 529 across four packages in one session. Owed
-> from phase 2: the outbound alert webhook and a heartbeat view in the portal
-> (the API is complete; the page is next).
+> for CI. 69 agent-hub tests, 529 across four packages in one session. The
+> portal heartbeat view followed the same day (Configure → Agents, under the
+> selected agent: list, step waterfall, proposed plan, Wake / Cancel / Revert,
+> PollHealth; host production build green, browser click-through owed), then
+> the D11 alert webhook (`agent_hub/alerts.py`: signed, retried, fire-and-forget
+> POST on `failed` / `budget_exceeded` / `timed_out` heartbeats and on advisor
+> findings at `warn`+, `AGENT_HUB_ALERT_WEBHOOK_URL` + `_SECRET`, off by
+> default) and the restart watchdog (`reconcile_running`: orphaned `running`
+> rows become `failed` and alert). 81 agent-hub tests. Nothing from phase 2 is
+> owed except a browser click-through and a real provider call.
 
 Companions: [`../agentic-engine-evaluation.md`](../agentic-engine-evaluation.md)
 (Opus), [`../agentic-engine-evaluation-fable.md`](../agentic-engine-evaluation-fable.md)
@@ -177,7 +184,9 @@ task outside `mock` needs an `approval` ancestor (D3); executor ≠ reviewer.
 
 **Seeds (builtin, published on first start):** `config`, `scenario-author`,
 `observer` (advise-only, timer + `run.failed` / `gate.failed` wakes),
-`certification-planner` (plan-then-execute), `reviewer` (read-only).
+`certification-planner` (plan-then-execute), `reviewer` (read-only),
+`failure-triage` (advise-only root-cause triage of one failed run, woken by
+`run.failed`; added 2026-09-23).
 
 **API:** `/agents` and `/workflows` with versions, `/validate` dry run,
 `/publish`, `/retire`, `/catalog`, `/pause`, `/health` (reports schema
@@ -208,8 +217,12 @@ journal ref, result, status), `agent_hub_plans` (durable plan artifacts with
 provenance: `authored_by`, agent version hash, journal id), `agent_hub_runs`
 (workflow state machine: node states, cursor), `agent_hub_approvals`,
 `agent_hub_budgets`, `agent_hub_incidents`. Wakeups on an already-running agent
-coalesce. A watchdog re-queues heartbeats stuck past their wall clock and
-raises a stranded notice rather than retrying forever.
+coalesce. A restart watchdog marks heartbeats still `running` past their wall
+clock (plus a grace period) as `failed` with `orphaned by restart` and alerts
+on them; it never re-queues (a wake belongs to its trigger, and a re-run would
+be an unjournalled side effect), so an orphan can no longer block the agent's
+next wake. Implemented 2026-09-23 as `RegistryStore.reconcile_running`, run
+in the lifespan before the first request.
 
 Approval policy defaults: `plan` / `advisor` need nothing; `full` on `mock`
 is journal only; `full` elsewhere, load above `AGENT_LOAD_APPROVAL_TPS`
@@ -255,7 +268,7 @@ Each phase ends in a commit and a review gate.
 
 - **Gate 0: this ADR accepted.** Passed 2026-09-22 (D1 to D4), D6 amended 2026-09-23.
 - **Phase 1: Registry.** Done in code; exit criteria: create → version → publish over HTTP; invalid tool refused at publish; RBAC enforced; `/status` shows `agent-hub`; portal Agents page + host `npm run build`; host `make test`; committed.
-- **Phase 2: Heartbeat runner.** Done: scoped toolkit, OBO tokens minted in agent-hub with the shared secret (no new auth-service endpoint needed), FakeLLM, provenance (`spec_sha256`, model, `act` claim) on every heartbeat, heartbeat records with cancel/revert, pause and budget stops. Owed: alert webhook, portal heartbeat view, restart reconcile of `running` rows (phase 3 watchdog).
+- **Phase 2: Heartbeat runner.** Done: scoped toolkit, OBO tokens minted in agent-hub with the shared secret (no new auth-service endpoint needed), FakeLLM, provenance (`spec_sha256`, model, `act` claim) on every heartbeat, heartbeat records with cancel/revert, pause and budget stops. Portal heartbeat view, D11 alert webhook and restart watchdog all done 2026-09-23; phase 2 complete.
 - **Phase 3: Workflow engine.** State machine, node types, approvals inbox, reference workflows `observer` and `certification-plan`; fold :8400 in (D2). Exit: both workflows complete with a human approval mid-flow; container kill mid-workflow resumes; reviewer blocks a deliberately bad plan.
 - **Phase 4: Triggers and exposure.** Run-lifecycle events, schedules via the existing scheduler, webhook trigger, MCP catalog entries, insight-service as a tool. Exit: a failing scheduled regression wakes `observer` unattended and a finding with evidence reaches a human.
 - **Phase 5: Hardening and handover.** Injection pack, `agent-golden` CI, egress allowlist, quotas, ATLAS + CLAUDE.md invariants (D12), operator skill `payprobe-agents`, status flip to Accepted, :8400 alias removed. Exit: security review + Go/No-Go by David.
@@ -263,8 +276,10 @@ Each phase ends in a commit and a review gate.
 ## Action items
 
 1. [x] Phase 1 registry service, tests, compose, CI, Makefile, `/status` probe.
-2. [ ] Host `make test` and `test_observability` run (sandbox cannot import `iso8583`).
-3. [x] Portal Agents page (list, versions, publish, pause), Settings → Endpoints entry, nginx `/api/agents/` routes; built in the sandbox. Owed: host build with fonts + click-through.
-4. [ ] Apply the `.github/workflows/ci.yml` hunk by hand (protected path).
+2. [x] Host test run (2026-09-23, per package, Python 3.13): all seven suites green; the combined `make test` session misreports (see CLAUDE.md) and is not what CI runs.
+3. [x] Portal Agents page, Settings → Endpoints entry, nginx `/api/agents/` in all three confs (the dev conf was missed by phase 1 and fixed 2026-09-23), host production build with fonts. Owed: browser click-through of the Agents page and heartbeat view.
+4. [x] `.github/workflows/ci.yml` carries the "Test agent-hub" step. Not yet exercised: the `adr-0010` branch has never been pushed, so CI has not run it.
 5. [ ] ATLAS §11: add agent-hub with a pointer to this ADR.
 6. [ ] Decide `AGENT_LOAD_APPROVAL_TPS` and the daily budget defaults for compose.
+7. [ ] Push the branch and get one green CI run before phase 3 lands on top.
+8. [ ] Phase 2 loose ends: a real provider call through `ProviderLLMBackend`; the `nats-demo-net` driver still points at a deleted scenario (`scn-0039c642`); `delete_scenario` has no "referenced by a network" guard (pre-existing, outside this ADR).

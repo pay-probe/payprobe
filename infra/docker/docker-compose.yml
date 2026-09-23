@@ -345,6 +345,10 @@ services:
       SCENARIO_API_URL: http://scenario-service:8000
       RUN_API_URL: http://orchestrator:8100
       INSIGHT_API_URL: http://insight-service:8500
+      # D11 alert webhook (unset = off): failed / budget_exceeded / timed_out
+      # heartbeats and advisor findings at warn+, HMAC-signed when a secret is set.
+      AGENT_HUB_ALERT_WEBHOOK_URL: ${AGENT_HUB_ALERT_WEBHOOK_URL:-}
+      AGENT_HUB_ALERT_WEBHOOK_SECRET: ${AGENT_HUB_ALERT_WEBHOOK_SECRET:-}
       ASSIST_LLM_PROVIDER: ${ASSIST_LLM_PROVIDER:-openai}
       ASSIST_LLM_API_KEY: ${ASSIST_LLM_API_KEY:-}
       ASSIST_LLM_MODEL: ${ASSIST_LLM_MODEL:-}

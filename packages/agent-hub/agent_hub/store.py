@@ -651,3 +651,21 @@ class RegistryStore:
                 agent,
             )
         )
+
+    async def reconcile_running(self, grace_s: int = 60) -> list[dict]:
+        """Restart watchdog. A row still ``running`` past its version's
+        ``wall_clock_s`` (+ grace) belongs to a process that is gone: no runner
+        will ever finish it, and while it stands the agent's wakes coalesce onto
+        it forever. Mark such rows ``failed`` and return them (for alerts)."""
+        rows = await self._pool.fetch(
+            "UPDATE agent_hub_heartbeats h SET status='failed', "
+            "error='orphaned by restart', finished_at=NOW() "
+            "FROM agent_hub_versions v "
+            "WHERE h.status='running' AND v.kind='agent' AND v.name=h.agent "
+            "AND v.version=h.version "
+            "AND h.started_at + make_interval(secs => "
+            "COALESCE((v.spec->'limits'->>'wall_clock_s')::int, 300) + $1) < NOW() "
+            "RETURNING h.*",
+            int(grace_s),
+        )
+        return [self._hb_row(r) for r in rows]

@@ -263,6 +263,38 @@ Drift check:
 
 ---
 
+## 7.6 Agent-hub (`packages/agent-hub`, port 8600) — ADR-0010
+
+Registry of agent principals and workflows plus the heartbeat runner.
+PostgreSQL only (D6): no file or in-memory fallback, a missing DSN fails
+startup. Compose defaults every knob; `deploy/.env` gained no lines.
+
+| Var | Default | Effect | Tier | Where read |
+|---|---|---|---|---|
+| `AGENT_HUB_DATABASE_URL` (or `DATABASE_URL`) | required (compose: `postgresql://payprobe:payprobe@postgres:5432/payprobe`) | Registry + heartbeat tables (`agent_hub_*`, numbered migrations at startup). | prod | `agent_hub/store.py:dsn_from_env` |
+| `AGENT_HUB_POOL_MAX` | `5` | asyncpg pool size. | prod | `agent_hub/store.py:RegistryStore.connect` |
+| `AGENT_HUB_SEED` | `1` | `0` skips seeding the builtins (`config`, `scenario-author`, `observer`, `certification-planner`, `reviewer`, `failure-triage`); missing builtins are added on any later start. | prod | `agent_hub/main.py:_seed_enabled` |
+| `AGENT_HUB_ADMIN_ROLES` | `admin` | Roles that may create, publish, retire, pause, revert (or a definition's own `rbac.edit`). | prod | `agent_hub/main.py:_admin_roles` |
+| `AGENT_HUB_MODEL_ALLOWLIST` | unset | Comma list restricting `spec.model` at publish time. | prod | `agent_hub/validate.py` |
+| `AGENT_HUB_ALERT_WEBHOOK_URL` | unset (off) | D11 alert webhook: signed, retried, fire-and-forget POST on `failed` / `budget_exceeded` / `timed_out` heartbeats (budget refusals and restart orphans included) and on advisor findings at `warn`+. Stats under `/health.alerts`. | prod | `agent_hub/alerts.py:Alerter.from_env` |
+| `AGENT_HUB_ALERT_WEBHOOK_SECRET` | unset (unsigned) | `X-PayProbe-Signature: t=<ts>,v1=<HMAC-SHA256("<ts>.<body>")>`, the Stripe scheme the ADR-0009 simulators also emit. | prod | `agent_hub/alerts.py:sign` |
+| `AGENT_HUB_ALERT_TIMEOUT_S` | `5` | Per-attempt HTTP timeout; 3 attempts with 1 s / 4 s backoff on 5xx or transport error, 4xx is final. | prod | `agent_hub/alerts.py:_httpx_transport` |
+| `SCENARIO_API_URL` / `RUN_API_URL` / `INSIGHT_API_URL` | `http://localhost:8000` / `:8100` / `:8500` | Where heartbeats reach the platform through the shared REST backend, under a per-heartbeat on-behalf-of JWT (`act` claim, never `svc`). | prod | `agent_hub/rest.py` |
+| `ASSIST_LLM_PROVIDER` / `_API_KEY` / `_MODEL` / `_BASE_URL` | unset (then Settings → AI assistant) | The one platform LLM provider (D4); no provider ⇒ wake returns 503, nothing recorded. | prod | `agent_hub/llm.py:resolve_llm` |
+| `ASSIST_SETTINGS_LLM` | `1` | `0` ignores the Settings → AI assistant provider config and uses env only (same switch as the assistant). | prod | `agent_hub/llm.py:resolve_llm` |
+| `AGENT_HUB_JWT_TTL` | `3600` | Lifetime of the service JWT agent-hub mints for its own platform reads (not the per-heartbeat OBO token, whose TTL is `wall_clock_s` + 60). | prod | `agent_hub/rest.py` |
+| caller gate | `PAYPROBE_ENV` / `API_TOKEN` / `AUTH_JWT_SECRET` | Same fail-closed gate as every service; `/health` public. | prod | `agent_hub/auth.py` |
+| `AGENT_HUB_TEST_DATABASE_URL` | `postgresql://payprobe:payprobe@localhost:5432/payprobe` | Tests only. Unreachable ⇒ the conftest skips **every test in the pytest session**, not just agent-hub's; compose does not publish 5432, forward it first. | test | `agent-hub/tests/hub_testkit.py` |
+
+Consumers: portal `agentHubApiBase` (dev `http://localhost:8600`, prod
+`/api/agents`, proxied by all three nginx confs), orchestrator `/status`
+(`AGENT_HUB_API_URL`).
+
+Drift check:
+`grep -rn "environ" packages/agent-hub/agent_hub --include="*.py"`
+
+---
+
 ## 8. Portal (`packages/portal`)
 
 No server-side env vars — configuration is (a) build-time, (b) browser-runtime.

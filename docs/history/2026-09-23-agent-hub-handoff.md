@@ -64,8 +64,8 @@ Confirmed by David, recorded as D1 to D12 in the ADR:
   differ.
 - D9 tool access enforced in the tool layer only (`scoped_dispatch`).
 - D10 per-heartbeat on-behalf-of JWT (`act` claim, never `svc`).
-- D11 provenance stamp and alert webhook are Stage 0 (provenance is done;
-  webhook owed).
+- D11 provenance stamp and alert webhook are Stage 0 (both done; the webhook
+  landed 2026-09-23 as `agent_hub/alerts.py`).
 - D12 invariants 9 and 10 in CLAUDE.md (done with phase 2).
 
 ATLAS roadmap #5 (scenario-service `/agent` routes stay a deprecated shim) is
@@ -80,15 +80,19 @@ untouched by all of this.
 | `models.py` | `AgentSpec`, `WorkflowSpec`, `Node`, `Edge`, `Trigger`, `Limits`, `Budget`, `WriteScope`, `Rbac`; `MODE_RANK`; `parse_ref` |
 | `validate.py` | publish-time rules: unknown tool, advisor read-only, full needs write scope, model allowlist, DAG acyclic, refs resolvable, no mode escalation, D3 approval ancestor, executor ≠ reviewer; `tool_catalog()` |
 | `store.py` | asyncpg `RegistryStore`; `MIGRATIONS` (1: definitions/versions/meta, 2: heartbeats); lifecycle draft → active → superseded / retired; `resolve("name")`, `resolve("name@N")`; pause flag; heartbeat CRUD; `reset()` for tests |
-| `seed.py` | builtins `config`, `scenario-author`, `observer`, `certification-planner`, `reviewer`; published on first start; cannot be retired |
+| `seed.py` | builtins `config`, `scenario-author`, `observer`, `certification-planner`, `reviewer`, `failure-triage` (added 2026-09-23); published on first start, missing ones added on later starts; cannot be retired |
 | `auth.py` | the platform bearer gate (copy of the assistant's) + `require_roles`, `caller_sub` |
 | `main.py` | FastAPI app; `/agents` and `/workflows` CRUD with versions, `/validate`, `/publish`, `/retire`; `/catalog`; `/pause`; `/health`; phase 2: `POST /agents/{name}/wake`, `GET /heartbeats`, `GET /heartbeats/{id}`, `POST .../cancel`, `POST .../revert`; test seams `app.state.llm_factory`, `app.state.backend_factory` |
 | `runner.py` | `run_heartbeat(spec, input, backend, llm, flags)` → `Outcome`; sync, pure w.r.t. the store; `MODE_PREAMBLE`; plan-mode writes become `proposed` |
 | `llm.py` | `FakeLLMBackend` (scripted), `ProviderLLMBackend` (shared `payprobe_common.llm_provider`), `resolve_llm()` with the assistant's precedence |
 | `rest.py` | two credentials: `request` (service, platform reads only) and `request_as(token)` (per-heartbeat OBO) |
 | `principal.py` | `mint_obo(user, agent, version, heartbeat_id, ttl)` |
+| `alerts.py` | D11 alert webhook: `Alerter` (fire-and-forget, signed, retried), `events_for(hb, mode)`, `findings_of`, `sign`/`verify`; `app.state.alerts`, stats on `/health` |
 
-Tests: `packages/agent-hub/tests/test_hub_*.py` + `hub_testkit.py` (69 tests).
+Tests: `packages/agent-hub/tests/test_hub_*.py` + `hub_testkit.py` (81 tests
+after 2026-09-23: `test_hub_alerts.py` and the watchdog test in
+`test_hub_store.py` joined the original 69, plus the `failure-triage` seed
+assertion in `test_hub_api.py`).
 Module names are prefixed `test_hub_` on purpose: every package's suite runs in
 ONE pytest session and `test_api.py` already exists in insight-service.
 `from conftest import ...` is forbidden for the same reason; helpers live in
@@ -122,7 +126,9 @@ image in `scripts/publish-images.sh`; `make test-agent-hub`; CI step in
 
 Env: `AGENT_HUB_DATABASE_URL` (required), `AGENT_HUB_POOL_MAX`,
 `AGENT_HUB_SEED`, `AGENT_HUB_ADMIN_ROLES` (default `admin`),
-`AGENT_HUB_MODEL_ALLOWLIST`, `SCENARIO_API_URL`, `RUN_API_URL`,
+`AGENT_HUB_MODEL_ALLOWLIST`, `AGENT_HUB_ALERT_WEBHOOK_URL`,
+`AGENT_HUB_ALERT_WEBHOOK_SECRET`, `AGENT_HUB_ALERT_TIMEOUT_S`,
+`SCENARIO_API_URL`, `RUN_API_URL`,
 `INSIGHT_API_URL`, `ASSIST_LLM_PROVIDER|API_KEY|MODEL|BASE_URL`, plus the
 platform auth vars (`PAYPROBE_ENV`, `API_TOKEN`, `AUTH_JWT_SECRET`).
 
@@ -160,28 +166,58 @@ common modules; prettier on the portal files; portal
 inlining disabled locally (Google Fonts unreachable; `angular.json` untouched);
 all three compose files parse; orchestrator `main.py` compiles.
 
-Not verified anywhere yet: `make test-orchestrator` (`iso8583` would not import
-in the sandbox), a portal build with fonts, a click-through of the Agents page
-against a live agent-hub, a real provider call (`ProviderLLMBackend` is
-written to the assistant's pattern and exercised only through the shared code
-path), and the CI workflow hunk.
+Verified on David's host, 2026-09-23 (Python 3.13, per-package runs, the
+authoritative mode since CI also runs per package): orchestrator 383,
+scenario-service 328 (+2 that only fail while the live stack occupies
+localhost:8100/8500; they pass with those URLs pointed at a closed port),
+mcp-server 91, payprobe-assistant 63, insight-service 67, agent-hub 69, worker
+462 (+6 designed skips). Portal `ng build --configuration production` exit 0
+with fonts after a clean `npm ci` (the old node_modules carried another
+platform's esbuild). The portal image was rebuilt and the new chunk serves the
+heartbeat view. Two incidental fixes fell out: `infra/nginx/nginx.dev.conf`
+(the conf the infra compose files mount) lacked the `/api/agents/` route that
+phase 1 added only to `infra/nginx/nginx.conf` and `deploy/nginx/nginx.conf`,
+so the Agents page showed "agent-hub is not reachable"; and
+`TcpResponder.stop()` awaited `Server.wait_closed()` before closing client
+sockets, a deadlock on Python 3.12+ (the images are 3.12) that CI on 3.11
+never saw.
+
+Still not verified: a browser click-through of the Agents page and heartbeat
+view, a real provider call (`ProviderLLMBackend` is written to the assistant's
+pattern and exercised only through the shared code path), and the CI workflow
+hunk.
 
 ## 7. Next tasks, in order
 
 Phase 2 remainder:
 
-1. **Portal heartbeat view.** On the Agents page (or `/agents/:name/heartbeats`):
-   list from `GET /heartbeats?agent=`, detail with the step waterfall
-   (reuse the execution-trace viewer style), `proposed` calls rendered as a
-   plan, Cancel and Revert buttons, PollHealth on the poll. API needs nothing.
-2. **Alert webhook (D11).** `AGENT_HUB_ALERT_WEBHOOK_URL` (+ HMAC secret):
-   POST on `failed`, `budget_exceeded`, `timed_out`, and on every advisor
-   finding with severity ≥ warn. Signed payload, retries with backoff, never
-   blocks the heartbeat. Mirror the Stripe-webhook emission pattern from
-   ADR-0009 if it fits.
-3. **Restart watchdog.** On startup, rows still `running` older than their
-   `wall_clock_s` become `failed` with error `orphaned by restart`. Coalescing
-   depends on this: without it an orphan blocks the agent forever.
+1. **Portal heartbeat view.** Done 2026-09-23:
+   `portal/src/app/agents/heartbeats.component.ts` (`app-agent-heartbeats`),
+   embedded under the selected agent on the Agents page. List from
+   `GET /heartbeats?agent=`, detail with a cumulative-ms step waterfall (the
+   runner is sequential, so durations are the exact timeline), `proposed`
+   calls rendered as a numbered plan, Wake (input box; coalesce and refusals
+   surfaced as toasts), Cancel and Revert with confirms, own PagePoll (5 s) and
+   PollHealth chip. Client methods on `AgentHubApiService`. Browser
+   click-through still owed.
+2. **Alert webhook (D11).** Done 2026-09-23: `agent_hub/alerts.py`
+   (`Alerter`, `events_for`, `sign`/`verify`). `AGENT_HUB_ALERT_WEBHOOK_URL`
+   (unset = off) + `AGENT_HUB_ALERT_WEBHOOK_SECRET` (`X-PayProbe-Signature:
+   t=<ts>,v1=<HMAC-SHA256>`, the ADR-0009 Stripe scheme) +
+   `AGENT_HUB_ALERT_TIMEOUT_S`. POST on `failed` / `budget_exceeded` /
+   `timed_out` (including budget refusals that never ran and watchdog
+   orphans) and on advisor findings at `warn`+ (`result` parsed as a list or
+   `{"findings": [...]}`, fenced JSON tolerated). Fire-and-forget task, three
+   attempts with 1 s / 4 s backoff on 5xx or transport error, 4xx final; stats
+   under `/health.alerts`; transport injectable (`app.state.alerts`). Ten
+   tests in `test_hub_alerts.py`. Knobs default empty in all three compose
+   files.
+3. **Restart watchdog.** Done 2026-09-23: `RegistryStore.reconcile_running`
+   (called in the lifespan before serving) marks `running` rows older than
+   their version's `limits.wall_clock_s` + 60 s grace as `failed` /
+   `orphaned by restart` and alerts on each. The ADR sentence that said
+   "re-queues" was corrected: a wake belongs to its trigger, so orphans fail
+   instead of re-running.
 
 Phase 3 (workflow engine), suggested file plan:
 

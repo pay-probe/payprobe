@@ -32,6 +32,9 @@ AUTH_JWT_SECRET=... uvicorn agent_hub.main:app --port 8600
 | `AGENT_HUB_SEED` | `0` disables seeding the five builtins on first start |
 | `AGENT_HUB_ADMIN_ROLES` | roles that may create/publish/pause (default `admin`) |
 | `AGENT_HUB_MODEL_ALLOWLIST` | optional comma list restricting `spec.model` |
+| `AGENT_HUB_ALERT_WEBHOOK_URL` | D11 alert webhook: POSTed on `failed` / `budget_exceeded` / `timed_out` heartbeats and on advisor findings at `warn` or above; unset = disabled |
+| `AGENT_HUB_ALERT_WEBHOOK_SECRET` | signs each POST as `X-PayProbe-Signature: t=<ts>,v1=<HMAC-SHA256("<ts>.<body>")>` (the Stripe scheme); unset = unsigned |
+| `AGENT_HUB_ALERT_TIMEOUT_S` | per-attempt timeout (default 5; 3 attempts, backoff 1 s then 4 s) |
 | `PAYPROBE_ENV`, `API_TOKEN`, `AUTH_JWT_SECRET` / `AUTH_JWT_PUBLIC_KEY` | the platform auth gate (fails closed outside dev) |
 
 ## Test

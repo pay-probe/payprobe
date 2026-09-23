@@ -45,15 +45,21 @@ in `docs/adr/`.
   `make test`, `make test-<pkg>`). Sibling packages import each other
   (`worker`, `payprobe_common`, `report_service`) by path, not installation.
 - Python deps that are NOT installed by default:
-  `structlog httpx iso8583 "mcp[cli]" aiohttp pycryptodome pytest pytest-asyncio`
+  `structlog httpx "mcp[cli]" aiohttp pycryptodome pyjwt asyncpg pytest pytest-asyncio`
   (+ `fakeredis` for the Redis-path tests; `nats-py` for the ADR-0006 NATS
-  tests). Missing `pycryptodome` fails every EMV/ARQC/payShield/VISA crypto test
+  tests). Do NOT `pip install iso8583`: the worker ships its own codec and the
+  PyPI name resolves to an unrelated project whose sdist does not build.
+  Missing `pycryptodome` fails every EMV/ARQC/payShield/VISA crypto test
   with ModuleNotFoundError — that is **environmental, not a regression**. Same
   for missing `aiohttp` (test_cybersource_sim collection) and missing `nats-py`
   (the NATS adapter/responder/flow suites — they skip, not fail, on absence).
 - If cross-package collection ever produces import collisions, run suites **per
-  package** — that is the known-safe mode. `test_payshield_e2e` can flake when
-  run with the whole worker suite (shared simulator state); it passes alone.
+  package** — that is the known-safe mode (and what CI does). `test_payshield_e2e`
+  can flake when run with the whole worker suite (shared simulator state); it
+  passes alone. In one combined session the agent-hub conftest skips **every**
+  collected test when its PostgreSQL is unreachable: a fast "N skipped" run is
+  "database down", never green. The agent-hub and insight-service suites need
+  a reachable Postgres (compose does not publish 5432; forward it first).
 - The MCP registry has a **generated portal catalog**: after touching
   `mcp_server/registry.py` or `prompts.py`, run
   `python packages/mcp-server/scripts/gen_catalog.py` or
