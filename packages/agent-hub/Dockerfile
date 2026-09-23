@@ -25,6 +25,16 @@ ENV AGENT_HUB_HOST=0.0.0.0 \
     AGENT_HUB_PORT=8600 \
     AGENT_HUB_DATABASE_URL=postgresql://payprobe:payprobe@postgres:5432/payprobe
 
+# The service holds no files of its own (registry and heartbeats live in
+# PostgreSQL, the assistant's stores in Redis or memory), so it runs unprivileged.
+RUN useradd --system --uid 10001 --no-create-home agenthub
+USER agenthub
+
 EXPOSE 8600
+
+# /health is public (no bearer) and reports the store's schema version, so a
+# passing check means the app is up AND its database answered.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import os,urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('AGENT_HUB_PORT','8600'), timeout=4).status == 200 else 1)"
 
 CMD ["sh", "-c", "uvicorn agent_hub.main:app --host ${AGENT_HUB_HOST} --port ${AGENT_HUB_PORT}"]
