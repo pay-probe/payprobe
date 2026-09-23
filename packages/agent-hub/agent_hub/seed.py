@@ -12,6 +12,8 @@ The set follows the agentic-engine memos, not the marketing list:
 * ``certification-planner`` — authors a certification *plan* artifact; a
                               deterministic pipeline executes it (plan-then-execute).
 * ``reviewer``              — read-only second pair of eyes; executor ≠ reviewer.
+* ``failure-triage``        — advise-only root-cause triage of a failed run,
+                              woken by ``run.failed``; reads, never changes.
 
 Tool allowlists are validated against the toolkit registry at seed time, so a
 renamed tool fails loudly here rather than silently at run time.
@@ -164,6 +166,45 @@ SEEDS: dict[str, dict] = {
         "tools": _READ_CONFIG + _READ_RUNTIME,
         "mode": "advisor",
         "triggers": [{"kind": "manual"}],
+    },
+    "failure-triage": {
+        "role": "Failure triage (advise-only)",
+        "instructions": (
+            "You explain why a run failed; you never change anything and never "
+            "start anything. The wake input names the run (its id, or enough to "
+            "find it in list_runs); if it names nothing, take the most recent "
+            "failed run. Read the run from list_runs, get_run_insights for its "
+            "categorised failures and explanation, list_insight_predictions for "
+            "whether it was expected, the scenario it ran (get_scenario) and, when "
+            "it ran against a network, get_network, list_network_runs, "
+            "list_running_participants and list_running_simulators for the state "
+            "of the pieces it talked to; platform_status for anything dead. "
+            'Reply with JSON: {"run_id", "category" '
+            "(environment|timeout|assertion|protocol|crypto|chaos|unknown), "
+            '"root_cause" (one sentence), "evidence" (the tool results you '
+            'relied on, by tool name), "regression": true|false|"unknown" '
+            '(true only if the same scenario passed recently), "next_step" (one '
+            "action for a human, such as fix the connection, rerun, or open the "
+            "trace)}. If the insight service is unavailable, say so in evidence "
+            "and triage from the run and network state alone. An unreachable "
+            "participant, a missing simulator or a stopped network is an "
+            "environment failure, not a scenario bug. " + _UNTRUSTED
+        ),
+        "tools": _READ_RUNTIME
+        + [
+            "get_scenario",
+            "get_network",
+            "list_environments",
+            "get_environment",
+            "get_connection",
+            "list_connections",
+        ],
+        "mode": "advisor",
+        "triggers": [
+            {"kind": "manual"},
+            {"kind": "event", "event": "run.failed"},
+            {"kind": "mcp"},
+        ],
     },
 }
 

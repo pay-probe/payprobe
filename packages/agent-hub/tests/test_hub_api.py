@@ -23,6 +23,15 @@ def test_seeds_are_published_builtins(client):
     assert {t["kind"] for t in obs["triggers"]} == {"manual", "schedule", "event"}
 
 
+def test_failure_triage_seed_is_read_only_and_wakes_on_run_failed(client):
+    spec = client.get("/agents/failure-triage").json()["spec"]
+    tiers = {t["name"]: t["tier"] for t in client.get("/catalog").json()["tools"]}
+    assert spec["mode"] == "advisor"
+    assert {tiers[t] for t in spec["tools"]} == {"read"}
+    assert {"get_run_insights", "list_runs", "get_scenario", "get_network"} <= set(spec["tools"])
+    assert {t.get("event") for t in spec["triggers"] if t["kind"] == "event"} == {"run.failed"}
+
+
 def test_seed_can_be_disabled(monkeypatch):
     import asyncio
 
