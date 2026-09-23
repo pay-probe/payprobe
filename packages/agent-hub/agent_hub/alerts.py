@@ -29,6 +29,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -93,21 +94,45 @@ def _heartbeat_payload(hb: dict) -> dict:
     }
 
 
+_FENCE = re.compile(r"```(?:json|JSON)?\s*\n(.*?)```", re.DOTALL)
+
+
+def extract_json(text: str | None) -> Any:
+    """The JSON an agent's final answer carries, or None.
+
+    Models rarely answer with bare JSON even when told to: the observer's real
+    first wake wrapped its findings in a markdown report with a heading, a
+    fenced ``json`` block and a prose summary. So: the whole text first, then
+    every fenced block in order, then the outermost ``[...]`` / ``{...}``
+    slice. Only a dict or list counts; nothing here ever raises.
+    """
+    s = (text or "").strip()
+    if not s:
+        return None
+    candidates = [s]
+    candidates += [m.group(1).strip() for m in _FENCE.finditer(s)]
+    for opener, closer in (("[", "]"), ("{", "}")):
+        i, j = s.find(opener), s.rfind(closer)
+        if 0 <= i < j:
+            candidates.append(s[i : j + 1])
+    for cand in candidates:
+        if not cand or cand[0] not in "[{":
+            continue
+        try:
+            data = json.loads(cand)
+        except ValueError:
+            continue
+        if isinstance(data, (dict, list)):
+            return data
+    return None
+
+
 def findings_of(result: str | None) -> list[dict]:
-    """Parse an advisor's final answer as a findings list. Tolerates a bare
-    list, ``{"findings": [...]}`` and a fenced code block; anything else is
-    no findings (the model did not follow its output contract, which the
-    heartbeat record already shows)."""
-    text = (result or "").strip()
-    if not text:
-        return []
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1] if "\n" in text else ""
-        text = text.rsplit("```", 1)[0].strip()
-    try:
-        data = json.loads(text)
-    except ValueError:
-        return []
+    """Parse an advisor's final answer as a findings list: a bare list or
+    ``{"findings": [...]}``, wherever :func:`extract_json` finds it. Anything
+    else is no findings (the model did not follow its output contract, which
+    the heartbeat record already shows)."""
+    data = extract_json(result)
     if isinstance(data, dict):
         data = data.get("findings")
     if not isinstance(data, list):
@@ -254,4 +279,12 @@ class Alerter:
         }
 
 
-__all__ = ["ALERT_STATUSES", "Alerter", "events_for", "findings_of", "sign", "verify"]
+__all__ = [
+    "ALERT_STATUSES",
+    "Alerter",
+    "events_for",
+    "extract_json",
+    "findings_of",
+    "sign",
+    "verify",
+]

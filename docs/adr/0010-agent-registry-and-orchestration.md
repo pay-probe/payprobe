@@ -88,6 +88,16 @@
 > insight-service as a first-class tool, and the unattended end-to-end proof
 > against a real provider (a failing scheduled regression waking `observer`
 > and a finding reaching a human through the alert webhook).
+>
+> **First real run (2026-09-23 13:23 UTC).** Thirty seconds after the phase-4
+> deploy, the scheduler woke `observer` unattended against the configured
+> provider (`claude-haiku-4-5`, key from Settings): 12 steps, 9 read-only tool
+> calls, 27.5k tokens in / 2k out, 23 s, status `done`, and two correct
+> critical findings (a scenario failing 25 consecutive runs on one assertion;
+> a 93% next-failure prediction). It also answered as a markdown report with
+> a fenced JSON block, not bare JSON, which the finding parser would have
+> missed; `extract_json` now finds fenced or embedded JSON in both the alert
+> path and the engine's `${node.json}` context, with that output as the test.
 
 Companions: [`../agentic-engine-evaluation.md`](../agentic-engine-evaluation.md)
 (Opus), [`../agentic-engine-evaluation-fable.md`](../agentic-engine-evaluation-fable.md)

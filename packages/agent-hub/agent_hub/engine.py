@@ -43,7 +43,7 @@ from typing import Any
 
 from payprobe_common import agent_toolkit as tk
 
-from .alerts import Alerter
+from .alerts import Alerter, extract_json
 from .exprs import ExpressionError, evaluate, render
 from .models import END, MODE_RANK, AgentSpec, Edge, Node, WorkflowSpec
 from .store import Conflict, NotFound, RegistryStore
@@ -65,17 +65,9 @@ def _now() -> str:
 
 
 def _json_maybe(text: str | None) -> Any:
-    """Parse an agent's final answer as JSON when it is JSON (fences tolerated)."""
-    s = (text or "").strip()
-    if s.startswith("```"):
-        s = s.split("\n", 1)[-1] if "\n" in s else ""
-        s = s.rsplit("```", 1)[0].strip()
-    if not s or s[0] not in "[{":
-        return None
-    try:
-        return json.loads(s)
-    except ValueError:
-        return None
+    """The JSON an agent's final answer carries (bare, fenced, or embedded in
+    a markdown report), so ``${node.json.field}`` works on real model output."""
+    return extract_json(text)
 
 
 class Engine:

@@ -186,10 +186,17 @@ so the Agents page showed "agent-hub is not reachable"; and
 sockets, a deadlock on Python 3.12+ (the images are 3.12) that CI on 3.11
 never saw.
 
-Still not verified: a browser click-through of the Agents page and heartbeat
-view, a real provider call (`ProviderLLMBackend` is written to the assistant's
-pattern and exercised only through the shared code path), and the CI workflow
-hunk.
+Real provider call verified 2026-09-23 13:23 UTC: the first scheduled
+`observer` wake ran unattended through `ProviderLLMBackend` (Anthropic,
+`claude-haiku-4-5`, key from Settings), 12 steps, 27.5k/2k tokens, `done`,
+two correct critical findings. Its markdown-wrapped answer drove the
+`extract_json` fix (`test_hub_json_extract.py`).
+
+Still not verified: a browser click-through of the Agents page, heartbeat
+view, workflows tab and inbox; a real-provider run of the two reference
+workflows (the agent path is proven, the engine path only under FakeLLM); and
+the CI workflow hunk (CI runs on PRs to main, the branch alone triggers
+nothing).
 
 ## 7. Next tasks, in order
 
