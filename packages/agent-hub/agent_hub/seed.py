@@ -42,6 +42,11 @@ _READ_RUNTIME = [
     "get_load_run",
     "get_run_insights",
     "list_insight_predictions",
+    "insight_status",
+    "get_scenario_prediction",
+    "list_insight_categories",
+    "run_trend",
+    "run_flakiness",
 ]
 _READ_CONFIG = [
     "list_connections",
@@ -118,7 +123,10 @@ SEEDS: dict[str, dict] = {
         "instructions": (
             "You watch the running platform and report; you never change "
             "anything. On each wake, read platform_status, recent runs, network "
-            "runs, load runs and insight predictions. Produce findings as a JSON "
+            "runs, load runs and insight predictions; cite run_trend and "
+            "run_flakiness (deterministic history) before any prediction, and "
+            "check insight_status before leaning on the insight service. "
+            "Produce findings as a JSON "
             "list, each with: severity (info|warn|critical), subject (run or "
             "network id), headline, evidence (tool results you relied on) and a "
             "suggested next step for a human. Availability problems (a dead "
@@ -150,7 +158,7 @@ SEEDS: dict[str, dict] = {
             "new scenarios with create_scenario in plan mode; a reviewer and a "
             "human approve before anything executes. " + _UNTRUSTED
         ),
-        "tools": _READ_CONFIG + _READ_RUNTIME + ["create_scenario"],
+        "tools": _READ_CONFIG + _READ_RUNTIME + ["create_scenario", "train_insights"],
         "mode": "plan",
         "budget": {"daily_tokens": 500000},
         "write_scope": {"projects": ["*"], "environments": []},
@@ -226,7 +234,8 @@ SEEDS: dict[str, dict] = {
             "summary of what was applied. Never touch anything the plan does not "
             "name. " + _UNTRUSTED
         ),
-        "tools": _WRITE_CONFIG + ["get_scenario", "get_connection", "list_connections"],
+        "tools": _WRITE_CONFIG
+        + ["get_scenario", "get_connection", "list_connections", "train_insights"],
         "mode": "full",
         "budget": {"daily_tokens": 300000},
         "write_scope": {"projects": ["*"], "environments": ["*"]},

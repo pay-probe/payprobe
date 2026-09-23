@@ -216,6 +216,32 @@ class RestBackend:
         q = f"?environment={urllib.parse.quote(environment)}" if environment else ""
         return self.request("GET", self.i(f"/insights/predictions{q}"))
 
+    def insight_status(self) -> dict:
+        return self.request("GET", self.i("/status"))
+
+    def get_scenario_prediction(self, scenario_id: str,
+                                environment: str | None = None) -> dict | None:
+        q = f"?environment={urllib.parse.quote(environment)}" if environment else ""
+        return self._get_or_none(
+            self.i(f"/insights/predictions/{self.seg(scenario_id)}{q}"))
+
+    def list_insight_categories(self) -> Any:
+        return self.request("GET", self.i("/insights/categories"))
+
+    def train_insights(self) -> dict:
+        return self.request("POST", self.i("/train"), {})
+
+    # -- run history (orchestrator; deterministic) -------------------------------
+    def run_trend(self, days: int = 30, label: str | None = None) -> list[dict]:
+        q = f"?days={int(days)}" + (f"&label={urllib.parse.quote(label)}" if label else "")
+        return self.request("GET", self.r(f"/runs/trend{q}"))
+
+    def run_flakiness(self, days: int = 30, label: str | None = None,
+                      min_runs: int = 3) -> list[dict]:
+        q = f"?days={int(days)}&min_runs={int(min_runs)}"
+        q += f"&label={urllib.parse.quote(label)}" if label else ""
+        return self.request("GET", self.r(f"/runs/flakiness{q}"))
+
     # -- playground (orchestrator, ADR-0007: ad-hoc execution by reference) ------
     def playground_targets(self) -> dict:
         return self.request("GET", self.r("/playground/targets"))

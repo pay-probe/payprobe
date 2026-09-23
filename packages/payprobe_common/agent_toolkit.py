@@ -124,6 +124,19 @@ class Backend(Protocol):
     def get_run_insights(self, run_id: str) -> dict | None: ...
     def list_insight_predictions(
         self, environment: str | None = None) -> dict: ...
+    # ADR-0010: the insight service as a first-class agent tool — its status,
+    # one scenario's prediction, the learned taxonomy, and (execute tier) a
+    # training pass that writes only to the insight service's own model store
+    def insight_status(self) -> dict: ...
+    def get_scenario_prediction(
+        self, scenario_id: str, environment: str | None = None) -> dict | None: ...
+    def list_insight_categories(self) -> Any: ...
+    def train_insights(self) -> dict: ...
+    # deterministic run history from the orchestrator (ADR-0010): per-day
+    # trend and per-scenario flakiness, the evidence an observer cites
+    def run_trend(self, days: int = 30, label: str | None = None) -> list[dict]: ...
+    def run_flakiness(self, days: int = 30, label: str | None = None,
+                      min_runs: int = 3) -> list[dict]: ...
     # playground (orchestrator, ADR-0007): ad-hoc execution BY REFERENCE —
     # the orchestrator resolves the target server-side (connection ⊕ override
     # matrix; secrets never round-trip) and echoes masked payloads.
@@ -652,6 +665,73 @@ def _list_insight_predictions(ctx: ToolContext, args: dict) -> Any:
         args.get("environment") or None)
 
 
+@_tool("insight_status", "read",
+       "Health of the ADVISORY insight service: corpus size (runs ingested), "
+       "the active learned categorizer and when it was trained, prediction "
+       "calibration. Call before trusting get_run_insights or predictions: a "
+       "thin corpus means weak advice.",
+       _obj({}))
+def _insight_status(ctx: ToolContext, args: dict) -> Any:
+    return ctx.backend.insight_status()
+
+
+@_tool("get_scenario_prediction", "read",
+       "ADVISORY outcome prediction for ONE scenario: `p_fail_next`, "
+       "`p_flaky`, `n_history` and `top_factors`, optionally for one "
+       "environment. Use for 'is this scenario likely to fail again'; never "
+       "a reason to skip a run.",
+       _obj({"scenario_id": _STR, "environment": _STR}, ["scenario_id"]))
+def _get_scenario_prediction(ctx: ToolContext, args: dict) -> Any:
+    out = ctx.backend.get_scenario_prediction(
+        args["scenario_id"], args.get("environment") or None)
+    if out is None:
+        raise ToolError(
+            f"no recorded outcomes for scenario '{args['scenario_id']}'")
+    return out
+
+
+@_tool("list_insight_categories", "read",
+       "The failure taxonomy the insight service learned from run history: "
+       "category id, label, size, example messages. Use it to name a failure "
+       "category the way the platform already does.",
+       _obj({}))
+def _list_insight_categories(ctx: ToolContext, args: dict) -> Any:
+    return ctx.backend.list_insight_categories()
+
+
+@_tool("train_insights", "execute",
+       "Ingest newly completed runs into the insight corpus and (re)fit the "
+       "learned categorizer. Incremental and idempotent; writes only to the "
+       "insight service's own model store, never to scenarios, runs or "
+       "config. Call it when get_run_insights says the corpus is stale.",
+       _obj({}))
+def _train_insights(ctx: ToolContext, args: dict) -> Any:
+    return ctx.backend.train_insights()
+
+
+@_tool("run_trend", "read",
+       "Per-day run-outcome trend from the platform's run history: runs, "
+       "passed/failed and the scenario pass-rate per day (most recent `days`, "
+       "default 30; optional run `label` to narrow). Deterministic evidence "
+       "for 'is the network getting better or worse'.",
+       _obj({"days": {"type": "integer"}, "label": _STR}))
+def _run_trend(ctx: ToolContext, args: dict) -> Any:
+    return ctx.backend.run_trend(int(args.get("days") or 30), args.get("label") or None)
+
+
+@_tool("run_flakiness", "read",
+       "Scenarios that both passed and failed within the window, ranked by "
+       "flip score (1.0 = alternating every run), with runs/passed/failed "
+       "counts and last status. Deterministic, from run history; a scenario "
+       "that always fails is a regression (see get_run_regression), not flaky.",
+       _obj({"days": {"type": "integer"}, "label": _STR,
+             "min_runs": {"type": "integer"}}))
+def _run_flakiness(ctx: ToolContext, args: dict) -> Any:
+    return ctx.backend.run_flakiness(
+        int(args.get("days") or 30), args.get("label") or None,
+        int(args.get("min_runs") or 3))
+
+
 # =============================================================================
 # WRITE tools (journalled, guard-railed)
 # =============================================================================
@@ -932,7 +1012,9 @@ UNTRUSTED_RESULT_TOOLS: frozenset[str] = frozenset({
     "platform_status", "list_runs", "get_run_regression", "list_network_runs",
     "list_running_participants", "list_running_simulators",
     "list_load_runs", "get_load_run", "get_run_insights",
-    "list_insight_predictions", "playground_targets", "playground_execute",
+    "list_insight_predictions", "insight_status", "get_scenario_prediction",
+    "list_insight_categories", "train_insights", "run_trend", "run_flakiness",
+    "playground_targets", "playground_execute",
 })
 
 #: Arg names that name a project or an environment (top level, or one level

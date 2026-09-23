@@ -289,6 +289,37 @@ class StoresBackend:
              if environment else "")
         return _insight_api_get(f"/insights/predictions{q}") or {"predictions": []}
 
+    def insight_status(self) -> dict:
+        return _insight_api_get("/status") or {}
+
+    def get_scenario_prediction(self, scenario_id: str,
+                                environment: str | None = None) -> dict | None:
+        import urllib.parse
+        q = (f"?environment={urllib.parse.quote(environment)}"
+             if environment else "")
+        return _insight_api_get(
+            f"/insights/predictions/{urllib.parse.quote(scenario_id, safe='')}{q}")
+
+    def list_insight_categories(self) -> Any:
+        return _insight_api_get("/insights/categories") or []
+
+    def train_insights(self) -> dict:
+        return _insight_api_get("/train", body={}) or {}
+
+    # -- run history (orchestrator; deterministic) ------------------------------
+
+    def run_trend(self, days: int = 30, label: str | None = None) -> list[dict]:
+        import urllib.parse
+        q = f"?days={int(days)}" + (f"&label={urllib.parse.quote(label)}" if label else "")
+        return _run_api_get(f"/runs/trend{q}")
+
+    def run_flakiness(self, days: int = 30, label: str | None = None,
+                      min_runs: int = 3) -> list[dict]:
+        import urllib.parse
+        q = f"?days={int(days)}&min_runs={int(min_runs)}"
+        q += f"&label={urllib.parse.quote(label)}" if label else ""
+        return _run_api_get(f"/runs/flakiness{q}")
+
     # -- playground (orchestrator, ADR-0007: ad-hoc execution by reference) ----
 
     def playground_targets(self) -> dict:
@@ -302,11 +333,12 @@ class StoresBackend:
             "message_format_id": message_format_id, "label": label})
 
 
-def _insight_api_get(path: str) -> Any:
-    """Authenticated GET against the insight service (INSIGHT_API_URL, default
-    localhost:8500). Same credential scheme as :func:`_run_api_get`; a 404 maps
-    to ``None`` (per the Backend get_* convention). The insight service is an
-    OPTIONAL deployment, so unreachable raises a ToolError that says so."""
+def _insight_api_get(path: str, body: dict | None = None) -> Any:
+    """Authenticated GET (or POST when ``body`` is given) against the insight
+    service (INSIGHT_API_URL, default localhost:8500). Same credential scheme
+    as :func:`_run_api_get`; a 404 maps to ``None`` (per the Backend get_*
+    convention). The insight service is an OPTIONAL deployment, so unreachable
+    raises a ToolError that says so."""
     import json as _json
     import os
     import time
@@ -332,9 +364,14 @@ def _insight_api_get(path: str) -> Any:
             headers["Authorization"] = f"Bearer {jwt.encode(claims, secret, algorithm='HS256')}"
         except ImportError:
             pass
-    req = urllib.request.Request(base + path, headers=headers)
+    data = None
+    if body is not None:
+        data = _json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(base + path, data=data, headers=headers,
+                                 method="POST" if body is not None else "GET")
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=60 if body is not None else 15) as resp:
             return _json.loads(resp.read().decode() or "null")
     except urllib.error.HTTPError as exc:
         if exc.code == 404:

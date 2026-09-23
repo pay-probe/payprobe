@@ -87,6 +87,31 @@ class FakeBackend:
         self.calls.append(("get_run_regression", run_id))
         return self.regression.get(run_id)
 
+    # insight service + run history (ADR-0010 first-class tools)
+    def insight_status(self) -> dict:
+        self.calls.append(("insight_status",))
+        return {"status": "ok", "advisory_only": True, "corpus_size": 12}
+
+    def get_scenario_prediction(self, scenario_id: str, environment=None) -> dict | None:
+        self.calls.append(("get_scenario_prediction", scenario_id, environment))
+        return {"scenario_id": scenario_id, "p_fail_next": 0.4, "n_history": 5}
+
+    def list_insight_categories(self) -> list[dict]:
+        self.calls.append(("list_insight_categories",))
+        return [{"id": "timeout", "label": "timeout", "size": 3}]
+
+    def train_insights(self) -> dict:
+        self.calls.append(("train_insights",))
+        return {"synced": 2, "trained": True}
+
+    def run_trend(self, days=30, label=None) -> list[dict]:
+        self.calls.append(("run_trend", days, label))
+        return [{"day": "2026-09-23", "runs": 3, "passed": 2, "failed": 1, "pass_rate": 0.8}]
+
+    def run_flakiness(self, days=30, label=None, min_runs=3) -> list[dict]:
+        self.calls.append(("run_flakiness", days, label, min_runs))
+        return [{"scenario_id": "scn-1", "name": "purchase", "score": 0.5, "runs": 4}]
+
     def list_connections(self) -> list[dict]:
         return [{"name": k, **v} for k, v in self.connections.items()]
 

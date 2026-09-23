@@ -370,6 +370,19 @@ the rest 500k); the live registry keeps its v1 builtins with `budget: null`
 until someone publishes v2. Knobs in all three compose files with the
 defaults; rows in `payprobe-config-and-flags` §7.6. `test_hub_quotas.py`.
 
+Insight service as a first-class tool (same day, the phase-4 leftover): six
+toolkit tools with primitives in `RestBackend`, `StoresBackend`
+(`_insight_api_get` now takes an optional POST body) and the test
+`FakeBackend`: `insight_status`, `get_scenario_prediction`,
+`list_insight_categories`, `run_trend`, `run_flakiness` (read, untrusted,
+in `_READ_RUNTIME`) and `train_insights` (execute tier; granted to
+`certification-planner` and `plan-executor` only; the scenario-service
+tiering test enumerates execute tools and was updated). Observer
+instructions cite trend/flakiness before predictions and check
+`insight_status` first. `test_hub_insight_tools.py`. Not done: no MCP
+catalog change (the MCP server already had `train_insights` and the insight
+reads of its own), no new knobs.
+
 ## 8. Gotchas learned this session
 
 - Postgres in the sandbox stopped between turns; a run that shows "49 skipped"
