@@ -181,6 +181,23 @@ model to _misuse the nearest tool and confidently report nonsense_ (happened
 with environments, then networks, then runtime state). The fix is always a
 real tool with a description that disambiguates, added once in the toolkit.
 
+**2026-09-23, the pattern generalised: agent-hub (ADR-0010, `packages/agent-hub`,
+:8600).** The config assistant became one of several *agent principals*:
+versioned, immutable-once-published definitions (role, instructions, tool
+allowlist from the same toolkit, mode `advisor | plan | full`, write scope,
+per-heartbeat limits, daily budget, triggers, RBAC) run as bounded
+*heartbeats* that end in a durable record, composed into JSON-DAG
+*workflows* with human approval nodes. Six builtins (`config`,
+`scenario-author`, `observer`, `certification-planner`, `reviewer`,
+`failure-triage`, plus `plan-executor` as the only `full`-mode one, reachable
+only behind an approval) and two reference workflows. The standalone :8400
+assistant is mounted inside agent-hub at `/assistant`; the container is a
+deprecated alias for one release. What carried over unchanged: one toolkit,
+guardrails in dispatch not prompts, reversibility from data. What was added:
+the untrusted-data envelope on runtime reads, an LLM egress allowlist, and
+the rule that no agent side effect happens without a journal and a gate
+(CLAUDE.md invariants 9 and 10). Operate it with the `payprobe-agents` skill.
+
 ## 7. Security model
 
 Fail-closed JWT gate on every service (`PAYPROBE_ENV=dev|test` opens it for
@@ -197,6 +214,17 @@ sandboxed in a netns.
 **Closed 2026-07-07:** the standalone assistant now runs the same fail-closed
 caller gate as every other service (`assistant_service/auth.py`); it only ever
 lacked it historically — do not remove it when touching main.py.
+
+**Agents (2026-09-23, ADR-0010):** a heartbeat acts under an on-behalf-of JWT
+for the invoking user (`act` claim, never `svc`); event-, schedule- and
+webhook-woken agents act under a roleless principal, so downstream RBAC refuses
+their writes until a workflow's approval node carries a human's authority. The
+MCP server's minted JWT carries `svc`, which only agent-hub's gate reads. Two
+fences exist nowhere else: the LLM egress allowlist (`agent_hub/egress.py`: a
+prompt may only leave for the official provider hosts, the operator's
+`ASSIST_LLM_BASE_URL` host, or `AGENT_HUB_EGRESS_ALLOW`), and inbound
+webhooks credentialed by an HMAC over the body instead of a bearer. The
+injection pack (`agent-hub/tests/test_hub_injection.py`) is the security case.
 
 ## 8. The portal
 
@@ -384,6 +412,20 @@ honest gate — if `error`/`unknown` stays under ~15% of failures the learned
 layer never earns its keep and the heuristics win; that outcome is a
 success, not a failure.
 
+Also (added 2026-09-23): **agents (ADR-0010) follow-through.** Phases 1 to 4
+are built and deployed in one day (registry, heartbeat runner, workflow
+engine with approvals, events / schedules / MCP / inbound webhooks, alert
+webhook, egress allowlist, injection pack, `agent-golden` CI step); the first
+unattended scheduled `observer` wake against a real provider produced correct
+findings. Still owed, in order: a PR to `main` so CI runs the agent-hub steps
+at all (the branch alone triggers nothing), quotas beyond the per-agent daily
+budget and David's defaults for `AGENT_LOAD_APPROVAL_TPS` / budgets,
+insight-service as a first-class agent tool, retiring the `assistant` alias
+container, the ADR status flip to Accepted after David's security review and
+Go/No-Go. The honest gate here is the same as insight-service's: if the
+agents' findings are not acted on within a few weeks of running, the schedule
+is a cost with no reader and should be turned off, not defended.
+
 **Eventually (re-evaluate, don't assume):** 12. ADR-0004 Option C (single flow document) — only if the three stores start
 duplicating logic. 13. k8s substrate for the fleet — only if bus+hosts hit real limits; the
 endpoint registry carries over either way.
@@ -459,12 +501,17 @@ built; host-build verify owed), 0008 proxy-tap TLS (proposed — closes 0002's
 deferred half), 0009 payment-provider integration (implemented, phases 0–5 —
 Stripe/Adyen/PayPal simulators + packs + the generic `mcp` client adapter +
 signed webhook emission + a diagnostics providers layer; portal presets owed a
-host build). The finished build specs of the major
+host build), 0010 agent registry + orchestration (proposed; phases 1 to 4
+built 2026-09-23 on branch `adr-0010`: registry, heartbeats, workflow engine
+with approvals, wake sources, alert webhook, egress allowlist, injection pack;
+status flips to Accepted after David's review; handoff in
+`docs/history/2026-09-23-agent-hub-handoff.md`). The finished build specs of the major
 subsystems live in `docs/history/`, in the order they landed;
 `docs/history/PROGRESS.md` and `docs/history/project-review.md` capture the
 mid-project hardening pass. The
-`.claude/skills/` pair is kept operationally accurate and is the fastest
-answer to "which env flag / which endpoint".
+`.claude/skills/` operator trio (`payprobe-run-and-operate`,
+`payprobe-config-and-flags`, `payprobe-agents`) is kept operationally accurate
+and is the fastest answer to "which env flag / which endpoint / which agent".
 
 ---
 

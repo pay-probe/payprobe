@@ -30,7 +30,7 @@ product.
 | `packages/auth-service` | JWT auth + users/roles | 8300 |
 | `packages/payprobe-assistant` | LLM-gateway assistant (REST-backed); since 2026-09-23 mounted inside agent-hub at `/assistant` (ADR-0010 D2), the standalone :8400 container is a deprecated alias until phase 5 | 8400 |
 | `packages/insight-service` | Advisory ML insights: failure categorization + explanation + outcome prediction (ADR-0005; read-only, advise-only) | 8500 |
-| `packages/agent-hub` | Agent registry + heartbeat runner: versioned agent principals, JSON-DAG workflows, bounded scoped wakes with journal/revert; PostgreSQL only (ADR-0010 phases 1–2; workflow engine in phase 3) | 8600 |
+| `packages/agent-hub` | Agents (ADR-0010): registry of versioned agent principals and JSON-DAG workflows, heartbeat runner with journal/revert, workflow engine with human approvals, wake sources (portal, MCP, schedule, orchestrator events, signed inbound webhooks), alert webhook, LLM egress allowlist; also serves the folded-in assistant at `/assistant`; PostgreSQL only (phases 1 to 4 built, phase 5 hardening in progress) | 8600 |
 | `packages/payprobe_common` | Shared: `agent_toolkit` (tool layer + scoped dispatch), `rest_backend`, `llm_provider`, `crypto` (SecretBox) | — |
 | `packages/report_service` | Shared report/gates/provenance library (orchestrator imports it) | — |
 | `packages/portal` | Angular 22 UI (standalone components, signals, `pp-*` design system) | 4200 |
@@ -166,13 +166,16 @@ in `docs/adr/`.
   2026-07-16 but still owed a host build + click-through, 0009 (payment-provider
   integration — PSP simulators/packs + generic `mcp` client adapter + signed
   webhook emission) implemented, portal presets owed a host build, 0010 (agent
-  registry + orchestration) proposed with phase 1 (the registry + portal
-  Agents page) implemented, host click-through owed; statuses in the files are kept truthful.
-- `.claude/skills/payprobe-run-and-operate` and `payprobe-config-and-flags`
-  — operator-grade API/env-flag reference, kept current.
+  registry + orchestration) proposed, phases 1 to 4 built 2026-09-23 (registry,
+  heartbeats, workflow engine + approvals, wake sources, alert webhook, egress
+  allowlist, injection pack), phase 5 hardening in progress, status flips to
+  Accepted after David's review; statuses in the files are kept truthful.
+- `.claude/skills/payprobe-run-and-operate`, `payprobe-config-and-flags` and
+  `payprobe-agents` — operator-grade API/env-flag/agent reference, kept current.
 - `docs/history/` — finished build specs, plans and working notes (accurate at
   the time of build; the code has moved past some of them).
 - `docs/history/project-review.md` — the hardening review and what it changed.
 - `docs/history/2026-09-23-agent-hub-handoff.md` — ADR-0010 (agent-hub)
-  state of play: what phases 1–2 built, what is verified, the next tasks in
-  order. Start there before touching `packages/agent-hub`.
+  state of play: what phases 1 to 4 built, what is verified (including the
+  first real-provider wake), what is owed in order. Start there before touching
+  `packages/agent-hub`; operate it with the `payprobe-agents` skill.

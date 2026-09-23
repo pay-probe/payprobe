@@ -321,11 +321,12 @@ stays user content, forged upstream approval still waits at the gate, no
 material/secret tool exists); CI step `agent-golden` runs
 `test_hub_engine.py` + `test_hub_injection.py` by name. Egress allowlist
 (`agent_hub/egress.py`, hooked in `llm._post_json`; `AGENT_HUB_EGRESS_ALLOW`;
-`/health.egress`; `test_hub_egress.py`, 12 tests) done the same day. Owed:
-quotas beyond the per-agent daily budget, ATLAS §11, operator skill
-`payprobe-agents`, remove the `assistant` alias (service, image publish, CI
-step, dev `assistantApiBase`), ADR status to Accepted, David's security
-review and Go/No-Go.
+`/health.egress`; `test_hub_egress.py`, 12 tests) done the same day. ATLAS
+(§6, §7, §11, §13) and the operator skill `.claude/skills/payprobe-agents`
+(registered in the skills README) written the same day. Owed: quotas beyond
+the per-agent daily budget, remove the `assistant` alias (service, image
+publish, CI step, dev `assistantApiBase`), ADR status to Accepted, David's
+security review and Go/No-Go.
 
 ## 8. Gotchas learned this session
 

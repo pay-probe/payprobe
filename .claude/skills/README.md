@@ -1,12 +1,13 @@
 # PayProbe Skill Library — Index
 
-Sixteen skills that let a zero-context engineer or AI session debug, extend, validate,
-and advance PayProbe. Authored 2026-07-03, reviewed and fixed 2026-07-06. Authoring
+Seventeen skills that let a zero-context engineer or AI session debug, extend, validate,
+and advance PayProbe. Authored 2026-07-03, reviewed and fixed 2026-07-06; `payprobe-agents`
+added 2026-09-23 with ADR-0010. Authoring
 rules and provenance: `_AUTHORING-BRIEF.md` (maintainers only). Every skill ends with a
 "Provenance and maintenance" section — run its re-verification commands before trusting
 volatile facts (counts, flags, line numbers drift).
 
-## The 16 skills
+## The 17 skills
 
 | Skill | One-line scope |
 |---|---|
@@ -26,6 +27,7 @@ volatile facts (counts, flags, line numbers drift).
 | payprobe-proof-and-analysis-toolkit | HOW to measure/prove: first-principles recipes with worked examples from repo history |
 | payprobe-research-frontier | Four SOTA ambitions: why SOTA fails, PayProbe's asset, first three steps, falsifiable milestones |
 | payprobe-research-methodology | WHEN a claim counts as proven: evidence bar, hypothesis-predicts-numbers, idea lifecycle |
+| payprobe-agents | Operating the agents (agent-hub, ADR-0010): builtins, heartbeats and their output, workflows + approvals inbox, wake sources, alert webhook, the safety model, symptom table |
 
 ## Routing by question (resolves the known ties)
 
@@ -49,6 +51,8 @@ volatile facts (counts, flags, line numbers drift).
 | "Work on ADR-0001 / distributed topology" | payprobe-distributed-topology-campaign |
 | "Write an ADR/spec/doc" | payprobe-docs-and-writing |
 | "What gates this change? Do I need a test/ADR/flag?" | payprobe-change-control |
+| "Wake an agent / read its output / approve a workflow step / agents are spending tokens" | payprobe-agents |
+| — what an `AGENT_HUB_*` knob means | payprobe-config-and-flags |
 
 ## Non-negotiables (full rationale in payprobe-change-control)
 
