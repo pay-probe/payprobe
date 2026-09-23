@@ -164,12 +164,11 @@ class TcpResponder:
         return None
 
     async def stop(self) -> None:
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
         # Drop every live client connection so callers see the socket close and
         # reconnect to the next instance instead of lingering on a dead handler.
+        # Must happen BEFORE wait_closed(): since Python 3.12 that call blocks
+        # until every active connection is gone, so closing clients afterwards
+        # deadlocks stop() whenever a client is still attached.
         for writer in list(self._conns):
             try:
                 writer.close()
@@ -177,6 +176,10 @@ class TcpResponder:
                 log.debug("responder: error closing client socket on stop: %s", exc)
         self._conns.clear()
         self._conn_meta.clear()
+        if self._server is not None:
+            self._server.close()
+            await self._server.wait_closed()
+            self._server = None
 
     async def serve_forever(self) -> None:
         assert self._server is not None
