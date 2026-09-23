@@ -45,6 +45,13 @@ class RestBackend:
     def i(self, path: str) -> str:
         return f"{self._i}{path}"
 
+    @staticmethod
+    def seg(value: Any) -> str:
+        """One percent-encoded path segment. Ids come from a model: a run label
+        with spaces passed as a scenario id must become a clean 404 from the
+        service, not an ``InvalidURL`` escaping the tool layer."""
+        return urllib.parse.quote(str(value), safe="")
+
     def request(self, method: str, url: str, body: dict | None = None, **kw: Any) -> Any:
         return self._request(method, url, body, **kw)
 
@@ -62,44 +69,44 @@ class RestBackend:
         return self.request("GET", self.s("/connections"))
 
     def get_connection(self, name: str) -> dict | None:
-        return self._get_or_none(self.s(f"/connections/{name}"))
+        return self._get_or_none(self.s(f"/connections/{self.seg(name)}"))
 
     def put_connection(self, name: str, config: dict) -> dict:
-        return self.request("PUT", self.s(f"/connections/{name}"), config or {})
+        return self.request("PUT", self.s(f"/connections/{self.seg(name)}"), config or {})
 
     def delete_connection(self, name: str) -> None:
-        self.request("DELETE", self.s(f"/connections/{name}"))
+        self.request("DELETE", self.s(f"/connections/{self.seg(name)}"))
 
     # -- environments ------------------------------------------------------------
     def list_environments(self) -> list[dict]:
         return self.request("GET", self.s("/environments"))
 
     def get_environment(self, name: str) -> dict | None:
-        return self._get_or_none(self.s(f"/environments/{name}"))
+        return self._get_or_none(self.s(f"/environments/{self.seg(name)}"))
 
     # -- catalog / formats -------------------------------------------------------
     def list_catalog(self) -> list[dict]:
         return self.request("GET", self.s("/catalog"))
 
     def list_formats(self, protocol: str | None = None) -> list[dict]:
-        url = self.s("/formats" + (f"?protocol={protocol}" if protocol else ""))
+        url = self.s("/formats" + (f"?protocol={self.seg(protocol)}" if protocol else ""))
         return self.request("GET", url)
 
     def get_format(self, fid: str) -> dict | None:
-        return self._get_or_none(self.s(f"/formats/{fid}"))
+        return self._get_or_none(self.s(f"/formats/{self.seg(fid)}"))
 
     # -- tables ------------------------------------------------------------------
     def list_tables(self) -> list[dict]:
         return self.request("GET", self.s("/tables"))
 
     def get_table(self, name: str) -> dict | None:
-        return self._get_or_none(self.s(f"/tables/{name}"))
+        return self._get_or_none(self.s(f"/tables/{self.seg(name)}"))
 
     def put_table(self, name: str, draft: dict) -> dict:
-        return self.request("PUT", self.s(f"/tables/{name}"), draft or {})
+        return self.request("PUT", self.s(f"/tables/{self.seg(name)}"), draft or {})
 
     def delete_table(self, name: str) -> None:
-        self.request("DELETE", self.s(f"/tables/{name}"))
+        self.request("DELETE", self.s(f"/tables/{self.seg(name)}"))
 
     # -- global variables --------------------------------------------------------
     def get_global_variables(self) -> dict:
@@ -114,7 +121,7 @@ class RestBackend:
         return self.request("GET", self.s("/starter-flows"))
 
     def get_starter_flow(self, fid: str) -> dict | None:
-        return self._get_or_none(self.s(f"/starter-flows/{fid}"))
+        return self._get_or_none(self.s(f"/starter-flows/{self.seg(fid)}"))
 
     def create_starter_flow(self, draft: dict, fid: str | None = None) -> dict:
         # NOTE: the REST surface mints ids server-side; ``fid`` (used when
@@ -124,7 +131,7 @@ class RestBackend:
 
     def delete_starter_flow(self, fid: str) -> None:
         try:
-            self.request("DELETE", self.s(f"/starter-flows/{fid}"))
+            self.request("DELETE", self.s(f"/starter-flows/{self.seg(fid)}"))
         except RuntimeError as exc:
             if "HTTP 400" in str(exc):            # builtin flows are refused
                 raise GuardrailError(f"cannot delete starter flow '{fid}' (builtin)")
@@ -132,22 +139,22 @@ class RestBackend:
 
     # -- scenarios ---------------------------------------------------------------
     def list_scenarios(self, project_id: str | None = None) -> list[dict]:
-        url = self.s("/scenarios" + (f"?project_id={project_id}" if project_id else ""))
+        url = self.s("/scenarios" + (f"?project_id={self.seg(project_id)}" if project_id else ""))
         return self.request("GET", url)
 
     def get_scenario(self, sid: str) -> dict | None:
-        return self._get_or_none(self.s(f"/scenarios/{sid}"))
+        return self._get_or_none(self.s(f"/scenarios/{self.seg(sid)}"))
 
     def create_scenario(self, draft: dict, project_id: str | None, comment: str) -> dict:
         return self.request("POST", self.s("/scenarios"), {
             "scenario": draft, "project_id": project_id, "comment": comment})
 
     def update_scenario(self, sid: str, draft: dict, comment: str) -> dict:
-        return self.request("PUT", self.s(f"/scenarios/{sid}"), {
+        return self.request("PUT", self.s(f"/scenarios/{self.seg(sid)}"), {
             "scenario": draft, "comment": comment})
 
     def delete_scenario(self, sid: str) -> None:
-        self.request("DELETE", self.s(f"/scenarios/{sid}"))
+        self.request("DELETE", self.s(f"/scenarios/{self.seg(sid)}"))
 
     def validate_scenario(self, draft: dict) -> dict:
         return self.request("POST", self.s("/validate"), draft or {})
@@ -157,19 +164,19 @@ class RestBackend:
         return self.request("GET", self.s("/network-flows"))
 
     def get_network(self, nid: str) -> dict | None:
-        return self._get_or_none(self.s(f"/network-flows/{nid}"))
+        return self._get_or_none(self.s(f"/network-flows/{self.seg(nid)}"))
 
     def put_network(self, nid: str, draft: dict) -> dict:
-        return self.request("PUT", self.s(f"/network-flows/{nid}"), draft or {})
+        return self.request("PUT", self.s(f"/network-flows/{self.seg(nid)}"), draft or {})
 
     def delete_network(self, nid: str) -> None:
-        self.request("DELETE", self.s(f"/network-flows/{nid}"))
+        self.request("DELETE", self.s(f"/network-flows/{self.seg(nid)}"))
 
     def validate_network(self, draft: dict) -> dict:
         return self.request("POST", self.s("/network-flows/validate"), draft or {})
 
     def plan_network(self, nid: str) -> dict | None:
-        return self._get_or_none(self.s(f"/network-flows/{nid}/plan"))
+        return self._get_or_none(self.s(f"/network-flows/{self.seg(nid)}/plan"))
 
     # -- runtime visibility (orchestrator, read-only) ----------------------------
     def platform_status(self) -> dict:

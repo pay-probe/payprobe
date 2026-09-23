@@ -167,7 +167,15 @@ def run_heartbeat(
                     stopped = True
                     break
                 t1 = now()
-                res = tk.scoped_dispatch(ctx, scope, call["name"], call.get("args") or {})
+                try:
+                    res = tk.scoped_dispatch(ctx, scope, call["name"], call.get("args") or {})
+                except Exception as exc:  # noqa: BLE001 — a tool failure is data, never a dead wake
+                    res = {
+                        "tool": call["name"],
+                        "ok": False,
+                        "guardrail": False,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
                 proposed = (
                     not res.get("ok")
                     and res.get("guardrail")
@@ -205,6 +213,9 @@ def run_heartbeat(
         else:
             out.status = "budget_exceeded"
             out.error = f"max_steps ({spec.limits.max_steps}) reached without a final answer"
+    except Exception as exc:  # noqa: BLE001 — keep the steps and usage already recorded
+        out.status = "failed"
+        out.error = f"runner: {type(exc).__name__}: {exc}"
     finally:
         out.journal = ctx.journal.dump()
         out.tokens = llm.usage

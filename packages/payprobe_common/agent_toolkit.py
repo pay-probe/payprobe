@@ -358,6 +358,11 @@ def dispatch(ctx: ToolContext, name: str, args: dict | None = None,
         return {"tool": name, "ok": False, "error": str(exc), "guardrail": True}
     except (ToolError, ValueError, KeyError, RuntimeError) as exc:
         return {"tool": name, "ok": False, "error": str(exc), "guardrail": False}
+    except Exception as exc:  # noqa: BLE001 — any other failure is data for the model too
+        # e.g. http.client.InvalidURL from an id a model invented: the loop
+        # must see an error envelope and carry on, never lose the heartbeat.
+        return {"tool": name, "ok": False, "guardrail": False,
+                "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _issue_errors(check: dict) -> list[str]:
