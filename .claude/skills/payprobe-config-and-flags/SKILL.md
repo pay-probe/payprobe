@@ -217,13 +217,15 @@ Drift check:
 
 ---
 
-## 7. Assistant (`packages/payprobe-assistant`, port 8400)
+## 7. Assistant (`packages/payprobe-assistant`, mounted in agent-hub at `/assistant`)
 
-Since 2026-09-23 (ADR-0010 D2) this app is also mounted inside agent-hub at
-`/assistant`, which is where nginx (`/api/assistant/`) and the orchestrator
-probe now point; every variable below is read identically there (agent-hub's
-compose block carries them, plus `REDIS_URL`). The standalone :8400 container
-is a deprecated alias until phase 5.
+Since 2026-09-23 (ADR-0010 D2) this app runs inside agent-hub at
+`/assistant`, which is where nginx (`/api/assistant/`), the orchestrator
+probe and the portal (dev `http://localhost:8600/assistant`) point; every
+variable below is read there (agent-hub's compose block carries them, plus
+`REDIS_URL`). The standalone :8400 container, its image and `ASSIST_PORT`
+were removed the same day; `packages/payprobe-assistant` is a library with
+its own test suite.
 
 The unified LLM gateway — the ONLY service meant to hold provider keys.
 
@@ -368,7 +370,6 @@ Drift check:
 | scenario-service | `SCENARIO_PORT` | 8000 | 8000 |
 | auth-service | `AUTH_PORT` | 8300 | 8300 |
 | mcp-server | `MCP_PORT` | 8200 | 8200 |
-| assistant | `ASSIST_PORT` | 8400 | 8400 |
 | insight-service | `INSIGHT_PORT` | 8500 | 8500 |
 | prometheus | `PROMETHEUS_PORT` | 9090 | 9090 |
 | grafana | `GRAFANA_PORT` | 3000 | 3000 |

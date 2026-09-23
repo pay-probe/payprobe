@@ -122,7 +122,7 @@ See [docs/getting-started/showcase.md](docs/getting-started/showcase.md) for the
 | Orchestrator | http://localhost:8100 | runs, listeners, networks, simulators, load, reports |
 | MCP server | http://localhost:8200 | FastMCP proxy over the platform APIs |
 | Auth service | http://localhost:8300 | JWT auth, users & roles |
-| Assistant | http://localhost:8400 | standalone LLM-gateway config assistant |
+| Assistant | http://localhost:8600/assistant | LLM-gateway config assistant, mounted inside agent-hub |
 | Insight service | http://localhost:8500 | advisory ML insights (read-only) |
 
 The stack also brings up Postgres, Redis, a 3-node NATS JetStream cluster,
@@ -206,7 +206,7 @@ payprobe/
 │   ├── orchestrator/        # Runtime: runs, networks, simulators, load, reports (8100)
 │   ├── scenario-service/    # Config registry + in-process assistant (8000)
 │   ├── auth-service/        # JWT auth + users/roles (8300)
-│   ├── payprobe-assistant/  # Standalone LLM-gateway assistant (8400)
+│   ├── payprobe-assistant/  # LLM-gateway assistant, mounted in agent-hub (/assistant)
 │   ├── insight-service/     # Advisory ML insights (8500)
 │   ├── mcp-server/          # FastMCP proxy over the platform (8200)
 │   ├── payprobe_common/     # Shared: assistant tool layer, crypto (SecretBox)

@@ -56,7 +56,7 @@ only so old references don't break. Compose project name is `payprobe`.
 | orchestrator | 8100 | 8100 (`ORCH_PORT`) | runs, load runs, simulators, network flows |
 | mcp-server | 8200 | 8200 (`MCP_PORT`) | MCP Streamable HTTP at `/mcp`, health at `/healthz` |
 | auth-service | 8300 | 8300 (`AUTH_PORT`) | JWT issuance: `POST /token` |
-| assistant | 8400 | 8400 (`ASSIST_PORT`) | config agent + LLM gateway |
+| assistant | (inside agent-hub) | `/api/assistant/` → `agent-hub:8600/assistant` | config agent + LLM gateway; no container of its own since 2026-09-23 (ADR-0010 D2) |
 | insight-service | 8500 | 8500 (`INSIGHT_PORT`) | advisory ML insights (ADR-0005): failure categorization/explanation, outcome prediction; read-only, never gates |
 | postgres | 5432 | **not published** | schema in `infra/postgres/init.sql`; see gotcha #3 |
 | redis | 6379 | **not published** | event backbone + load bus; see gotcha #4 |

@@ -61,7 +61,8 @@ jobs:
       - name: Test mcp-server
         run: cd packages/mcp-server && pip install -e ".[dev]" && pytest tests/ -v
       - name: Test payprobe-assistant
-        # the assistant's tool layer is the shared payprobe_common toolkit.
+        # A library since ADR-0010 D2 (mounted inside agent-hub at /assistant;
+        # no image of its own). Its tool layer is the shared payprobe_common toolkit.
         run: |
           pip install -e packages/payprobe_common
           cd packages/payprobe-assistant && pip install -e ".[dev]" && pytest tests/ -v

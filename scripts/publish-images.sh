@@ -48,7 +48,6 @@ SERVICES=(
   "scenario-service|packages|packages/scenario-service/Dockerfile"
   "orchestrator|.|packages/orchestrator/Dockerfile"
   "mcp-server|packages/mcp-server|packages/mcp-server/Dockerfile"
-  "assistant|packages|packages/payprobe-assistant/Dockerfile"
   "insight-service|packages|packages/insight-service/Dockerfile"
   "agent-hub|packages|packages/agent-hub/Dockerfile"
   "portal|packages/portal|packages/portal/Dockerfile"

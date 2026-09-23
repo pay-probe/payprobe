@@ -169,7 +169,7 @@ services:
       SCENARIO_API_URL: http://scenario-service:8000
       AUTH_API_URL: http://auth-service:8300
       MCP_API_URL: http://mcp-server:8200
-      # Folded into agent-hub (ADR-0010 D2); the standalone :8400 is a deprecated alias.
+      # Folded into agent-hub (ADR-0010 D2); the standalone :8400 container is gone.
       ASSIST_API_URL: http://agent-hub:8600/assistant
       INSIGHT_API_URL: http://insight-service:8500
       AGENT_HUB_API_URL: http://agent-hub:8600
@@ -216,29 +216,8 @@ services:
         condition: service_started
     <<: *restart
 
-  assistant:
-    image: ${PAYPROBE_NS:-datikos}/payprobe-assistant:${PAYPROBE_TAG:-latest}
-    environment:
-      SCENARIO_API_URL: http://scenario-service:8000
-      RUN_API_URL: http://orchestrator:8100
-      INSIGHT_API_URL: http://insight-service:8500
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
-      ASSIST_LLM_PROVIDER: ${ASSIST_LLM_PROVIDER:-openai}
-      ASSIST_LLM_API_KEY: ${ASSIST_LLM_API_KEY:-}
-      ASSIST_LLM_MODEL: ${ASSIST_LLM_MODEL:-}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
-      PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
-    ports:
-      - "${ASSIST_PORT:-8400}:8400"
-    depends_on:
-      scenario-service:
-        condition: service_started
-      orchestrator:
-        condition: service_started
-      redis:
-        condition: service_healthy
-    <<: *restart
+  # The configuration assistant runs inside agent-hub at /assistant (ADR-0010
+  # D2); the standalone `assistant` container (:8400) was removed 2026-09-23.
 
   agent-hub:
     image: ${PAYPROBE_NS:-datikos}/payprobe-agent-hub:${PAYPROBE_TAG:-latest}
@@ -316,7 +295,7 @@ services:
     depends_on:
       - scenario-service
       - orchestrator
-      - assistant
+      - agent-hub
     <<: *restart
 
   # ---- observability (opt-in) --------------------------------------------

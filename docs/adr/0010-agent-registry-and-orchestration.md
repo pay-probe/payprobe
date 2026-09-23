@@ -218,6 +218,22 @@
 > flakiness before any prediction); `train_insights` is granted to
 > `certification-planner` (proposes) and `plan-executor` (applies).
 > `test_hub_insight_tools.py` (6). 185 agent-hub tests.
+>
+> **D2, second half: the `assistant` alias removed (2026-09-23).** The
+> standalone container is gone from the three compose files (the portal now
+> `depends_on` agent-hub), from `scripts/publish-images.sh`, the
+> `publish-images` workflow and `scripts/PUBLISHING.md`; its Dockerfile is
+> deleted and `ASSIST_PORT` dropped from `deploy/.env.example`.
+> `packages/payprobe-assistant` stays as the library agent-hub mounts at
+> `/assistant`, with its own CI test step. The portal's dev
+> `assistantApiBase` is `http://localhost:8600/assistant` and the dashboard's
+> "assistant" endpoint probe is the agent-hub address (prod `/api/assistant`
+> unchanged, nginx already routed it to agent-hub). Chat turns do **not**
+> become `config`-agent heartbeats: that is a UX and cost decision (every
+> chat turn would be a journalled, budgeted, alertable record) and stays
+> deferred on purpose; the chat keeps its own session store inside the
+> mounted app. Upgrading an existing stack: `docker compose up -d
+> --remove-orphans` removes the stopped `payprobe-assistant-1`.
 
 Companions: [`../agentic-engine-evaluation.md`](../agentic-engine-evaluation.md)
 (Opus), [`../agentic-engine-evaluation-fable.md`](../agentic-engine-evaluation-fable.md)

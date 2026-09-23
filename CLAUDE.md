@@ -28,7 +28,7 @@ product.
 | `packages/worker` | Execution engine + adapters + simulators; also `load_worker` / `flow_host` fleet roles | — |
 | `packages/mcp-server` | FastMCP proxy over both services (HTTP + stdio) | 8200 |
 | `packages/auth-service` | JWT auth + users/roles | 8300 |
-| `packages/payprobe-assistant` | LLM-gateway assistant (REST-backed); since 2026-09-23 mounted inside agent-hub at `/assistant` (ADR-0010 D2), the standalone :8400 container is a deprecated alias until phase 5 | 8400 |
+| `packages/payprobe-assistant` | LLM-gateway assistant (REST-backed), a library mounted inside agent-hub at `/assistant` (ADR-0010 D2); the standalone :8400 container was removed 2026-09-23, nginx `/api/assistant/` → agent-hub | (8600) |
 | `packages/insight-service` | Advisory ML insights: failure categorization + explanation + outcome prediction (ADR-0005; read-only, advise-only) | 8500 |
 | `packages/agent-hub` | Agents (ADR-0010): registry of versioned agent principals and JSON-DAG workflows, heartbeat runner with journal/revert, workflow engine with human approvals, wake sources (portal, MCP, schedule, orchestrator events, signed inbound webhooks), alert webhook, LLM egress allowlist; also serves the folded-in assistant at `/assistant`; PostgreSQL only (phases 1 to 4 built, phase 5 hardening in progress) | 8600 |
 | `packages/payprobe_common` | Shared: `agent_toolkit` (tool layer + scoped dispatch), `rest_backend`, `llm_provider`, `crypto` (SecretBox) | — |

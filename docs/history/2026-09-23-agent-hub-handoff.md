@@ -383,6 +383,22 @@ instructions cite trend/flakiness before predictions and check
 catalog change (the MCP server already had `train_insights` and the insight
 reads of its own), no new knobs.
 
+D2, second half (same day): the `assistant` alias is removed from the three
+compose files (portal `depends_on` → agent-hub), `scripts/publish-images.sh`,
+`.github/workflows/publish-images.yml`, `scripts/PUBLISHING.md`,
+`deploy/.env.example` (`ASSIST_PORT`); `packages/payprobe-assistant/Dockerfile`
+deleted. The CI "Test payprobe-assistant" step stays (it tests the library).
+Portal: dev `assistantApiBase` → `http://localhost:8600/assistant`, the
+dashboard "assistant" endpoint entry is parsed from it (falls back to
+localhost:8600), comments in `runtime-config.service.ts` and
+`environment.prod.ts` updated. Docs: CLAUDE.md row, ATLAS §6 and the #5
+roadmap note, README, config skill §7 and the port table, run-and-operate,
+diagnostics, build-and-env. Decision recorded in the ADR: chat turns stay
+chat turns, not `config`-agent heartbeats. On David's stack:
+`docker compose ... up -d --remove-orphans` drops the old container; the
+portal image needs a rebuild for the dev base change only if serving the dev
+bundle (prod uses `/api/assistant`, unchanged).
+
 ## 8. Gotchas learned this session
 
 - Postgres in the sandbox stopped between turns; a run that shows "49 skipped"

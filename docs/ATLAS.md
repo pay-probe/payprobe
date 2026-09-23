@@ -190,9 +190,10 @@ per-heartbeat limits, daily budget, triggers, RBAC) run as bounded
 *workflows* with human approval nodes. Six builtins (`config`,
 `scenario-author`, `observer`, `certification-planner`, `reviewer`,
 `failure-triage`, plus `plan-executor` as the only `full`-mode one, reachable
-only behind an approval) and two reference workflows. The standalone :8400
-assistant is mounted inside agent-hub at `/assistant`; the container is a
-deprecated alias for one release. What carried over unchanged: one toolkit,
+only behind an approval) and two reference workflows. The assistant
+(`packages/payprobe-assistant`) is mounted inside agent-hub at `/assistant`;
+the standalone :8400 container was removed 2026-09-23, so `/api/assistant/`
+is agent-hub's. What carried over unchanged: one toolkit,
 guardrails in dispatch not prompts, reversibility from data. What was added:
 the untrusted-data envelope on runtime reads, an LLM egress allowlist, and
 the rule that no agent side effect happens without a journal and a gate
@@ -285,7 +286,9 @@ debt.
 the other services; `PAYPROBE_ENV=dev` opens it locally). 5. Standalone-assistant cutover — **flip DONE 2026-07-07**: portal
 `assistantApiBase` now defaults to the standalone (dev `:8400`, prod
 `/api/assistant`); a Settings → Endpoints override can still point back at
-the shim during transition. Provider config (revised 2026-07-13): the
+the shim during transition. (Superseded 2026-09-23: the standalone container
+is gone, the same app is mounted inside agent-hub, dev `:8600/assistant`,
+prod `/api/assistant` unchanged; see §6.) Provider config (revised 2026-07-13): the
 standalone is still the LLM egress boundary — only it calls providers —
 but the key is managed in ONE place again: `ASSIST_LLM_*` env wins when
 set (prod override); otherwise the service pulls the Settings →

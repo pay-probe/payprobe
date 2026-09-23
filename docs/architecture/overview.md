@@ -17,9 +17,9 @@ behind the shape — what was decided, what was rejected and why — lives in
      ┌──────────┬───────────────┼──────────────┬─────────────┬───────────┐
      ▼          ▼               ▼              ▼             ▼           ▼
 ┌─────────┐┌───────────┐┌──────────────┐┌──────────┐┌───────────┐┌──────────┐
-│  auth   ││ scenario- ││ orchestrator ││   mcp-   ││ assistant ││ insight- │
-│ service ││  service  ││              ││  server  ││           ││ service  │
-│  :8300  ││   :8000   ││    :8100     ││  :8200   ││   :8400   ││  :8500   │
+│  auth   ││ scenario- ││ orchestrator ││   mcp-   ││ agent-hub ││ insight- │
+│ service ││  service  ││              ││  server  ││ +assistant││ service  │
+│  :8300  ││   :8000   ││    :8100     ││  :8200   ││   :8600   ││  :8500   │
 └─────────┘└─────┬─────┘└──────┬───────┘└──────────┘└───────────┘└──────────┘
                  │             │
           ┌──────▼─────────────▼───────┐     ┌────────────────────────────┐
@@ -118,8 +118,10 @@ prompts and read-only resources. HTTP (streamable) and stdio transports; a
 generated catalog page in the portal documents every tool. This is what lets
 Claude (or any MCP client) configure and drive the platform end to end.
 
-### Assistant (`packages/payprobe-assistant`, :8400)
-The standalone multi-turn config assistant (SSE streaming, sessions). The
+### Assistant (`packages/payprobe-assistant`, mounted in agent-hub at `/assistant`)
+The multi-turn config assistant (SSE streaming, sessions); since ADR-0010 D2
+it runs inside agent-hub (:8600, `/api/assistant/` in nginx), the standalone
+:8400 container was removed 2026-09-23. The
 tool layer lives ONCE in `payprobe_common/agent_toolkit.py` against a
 `Backend` protocol — REST backend here, stores backend in scenario-service —
 so both stay in parity. Every write is journalled and reversible
