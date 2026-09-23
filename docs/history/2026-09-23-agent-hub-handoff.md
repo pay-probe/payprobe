@@ -419,9 +419,13 @@ advances the baseline, so two certifies of one run never hash equal),
 `annotations` key; both renderers treat that as "no section".
 
 PR opened 2026-09-23: https://github.com/pay-probe/payprobe/pull/2 (29
-commits, `adr-0010` → `main`). Its CI run is the first ever for the agent-hub
-steps; check the "Test agent-hub" and `agent-golden` jobs there before
-anything else. The remaining list is David's: security review, Go/No-Go,
+commits, `adr-0010` → `main`). Its CI run was the first ever for the agent-hub
+steps and is green on `f1eff727`: Test agent-hub 185, agent-golden 21, worker,
+portal, e2e, mock integration, all Trivy scans. The one thing CI caught that
+the host did not: Trivy code scanning fails a PR on *new* Dockerfile findings,
+so `packages/agent-hub/Dockerfile` gained a non-root `USER` (uid 10001) and a
+`HEALTHCHECK` on `/health`; the other images carry the same findings as
+pre-existing alerts. The remaining list is David's: security review, Go/No-Go,
 ADR status flip to Accepted, browser click-through (Agents page, heartbeat
 waterfall incl. the `postcheck` step, workflows, inbox, run-report verdict
 panel, sign-off "Agent verdicts" section), and an alert-webhook URL.
