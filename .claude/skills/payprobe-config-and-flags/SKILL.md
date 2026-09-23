@@ -84,6 +84,7 @@ Drift check:
 | `MCP_API_URL` | `""` (not probed) | MCP server base; probed by `/status` only when set. | `packages/orchestrator/api/main.py:MCP_API_URL` |
 | `ASSIST_API_URL` | `""` (not probed; compose: `http://agent-hub:8600/assistant` since ADR-0010 D2) | Assistant base; probed by `/status` only when set (`<base>/health`). | `packages/orchestrator/api/main.py:ASSIST_API_URL` |
 | `INSIGHT_API_URL` | `""` (not probed) | Insight-service base; probed by `/status` only when set. | `packages/orchestrator/api/main.py:INSIGHT_API_URL` |
+| `AGENT_HUB_API_URL` | `""` (compose: `http://agent-hub:8600`) | agent-hub base: probed by `/status` and, since ADR-0010 phase 4, the target of fire-and-forget `POST /events` (`run.completed` / `run.failed` when a run ends, `gate.failed` on a non-GO certify verdict). Unset = agents are never woken by the orchestrator. | `packages/orchestrator/api/main.py:AGENT_HUB_API_URL`, `_notify_agent_hub` |
 | `SCENARIO_API_TOKEN` | unset | Outbound credential for orchestrator→scenario-service (wins over `API_TOKEN`; else falls back to minting a JWT from `AUTH_JWT_SECRET`). All tiers: prod. | `packages/orchestrator/api/main.py` (~line 399, `_scenario_auth_header`-style helper) |
 
 ### 2.3 Feature flags and escape hatches
@@ -285,7 +286,8 @@ startup. Compose defaults every knob; `deploy/.env` gained no lines.
 | `AGENT_HUB_ALERT_WEBHOOK_URL` | unset (off) | D11 alert webhook: signed, retried, fire-and-forget POST on `failed` / `budget_exceeded` / `timed_out` heartbeats (budget refusals and restart orphans included) and on advisor findings at `warn`+. Stats under `/health.alerts`. | prod | `agent_hub/alerts.py:Alerter.from_env` |
 | `AGENT_HUB_ALERT_WEBHOOK_SECRET` | unset (unsigned) | `X-PayProbe-Signature: t=<ts>,v1=<HMAC-SHA256("<ts>.<body>")>`, the Stripe scheme the ADR-0009 simulators also emit. | prod | `agent_hub/alerts.py:sign` |
 | `AGENT_HUB_ALERT_TIMEOUT_S` | `5` | Per-attempt HTTP timeout; 3 attempts with 1 s / 4 s backoff on 5xx or transport error, 4xx is final. | prod | `agent_hub/alerts.py:_httpx_transport` |
-| `AGENT_HUB_ENGINE_TICK_S` | `30` | Workflow-engine housekeeping tick: expires approvals past `timeout_s` (the run fails and alerts `run.failed`). Startup always runs one reconcile pass regardless. | prod | `agent_hub/main.py:lifespan` |
+| `AGENT_HUB_ENGINE_TICK_S` | `30` | Housekeeping tick: expires approvals past `timeout_s` (the run fails and alerts `run.failed`) and wakes due `schedule` triggers. Startup always runs one reconcile pass regardless. | prod | `agent_hub/main.py:lifespan` |
+| `AGENT_HUB_SCHEDULER` | `1` | `0` disables the schedule ticker (`interval_sec` / `daily_at` triggers never fire); `POST /events` keeps working. Nothing is scheduled while agents are paused. | prod | `agent_hub/main.py:lifespan`, `agent_hub/triggers.py` |
 | `SCENARIO_API_URL` / `RUN_API_URL` / `INSIGHT_API_URL` | `http://localhost:8000` / `:8100` / `:8500` | Where heartbeats reach the platform through the shared REST backend, under a per-heartbeat on-behalf-of JWT (`act` claim, never `svc`). | prod | `agent_hub/rest.py` |
 | `ASSIST_LLM_PROVIDER` / `_API_KEY` / `_MODEL` / `_BASE_URL` | unset (then Settings → AI assistant) | The one platform LLM provider (D4); no provider ⇒ wake returns 503, nothing recorded. | prod | `agent_hub/llm.py:resolve_llm` |
 | `ASSIST_SETTINGS_LLM` | `1` | `0` ignores the Settings → AI assistant provider config and uses env only (same switch as the assistant). | prod | `agent_hub/llm.py:resolve_llm` |

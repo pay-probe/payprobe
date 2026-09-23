@@ -274,7 +274,21 @@ change; separate decision). `test_hub_assistant_mount.py` covers the mount.
 Still owed in phase 3: one run of each reference workflow against a real
 provider.
 
-Phase 4 and 5 remain as written in the ADR.
+Phase 4, first slice, done 2026-09-23: `agent_hub/triggers.py` (`WakeSources`:
+`on_event`, `tick_schedules`, pure `agents_for_event` / `schedule_due`),
+`POST /events` in `main.py` (service token or admin; `EventBody` = event,
+subject, at), schedule ticker on the engine cadence (`AGENT_HUB_SCHEDULER=0`
+off; nothing scheduled while paused), `store.active_specs` /
+`store.last_wake_at`. Orchestrator side: `_agent_hub_event_for`,
+`_notify_agent_hub`, `_notify_run_terminal` (both run engines' `finally`),
+`gate.failed` from `certify_run`; all fire-and-forget behind
+`AGENT_HUB_API_URL`. Tests: `test_hub_events.py` (agent-hub) and
+`orchestrator/tests/test_agent_hub_events.py`. Owed in phase 4: webhook
+trigger, MCP catalog entries (wake, heartbeats, runs, approvals),
+insight-service as a first-class tool, and the unattended proof against a
+real provider.
+
+Phase 5 remains as written in the ADR.
 
 ## 8. Gotchas learned this session
 

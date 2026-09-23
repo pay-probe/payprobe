@@ -36,6 +36,7 @@ import os
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
@@ -53,6 +54,7 @@ from .principal import mint_obo
 from .runner import Outcome, run_heartbeat
 from .seed import seed_builtin
 from .store import Conflict, Guardrail, NotFound, RegistryStore
+from .triggers import WakeSources
 from .validate import tool_catalog, validate_agent_spec, validate_workflow_spec
 
 log = logging.getLogger(__name__)
@@ -96,7 +98,14 @@ async def lifespan(app: FastAPI):
         tool_backend=lambda run: app.state.backend_factory(_run_token(run)),
     )
     await app.state.engine.reconcile()
-    app.state.engine.start_ticker(float(os.environ.get("AGENT_HUB_ENGINE_TICK_S") or 30))
+    tick_s = float(os.environ.get("AGENT_HUB_ENGINE_TICK_S") or 30)
+    app.state.engine.start_ticker(tick_s)
+    # Phase 4: platform events (POST /events) and schedule triggers wake agents
+    # through the same heartbeat code path. AGENT_HUB_SCHEDULER=0 keeps the
+    # schedule ticker off (events still work).
+    app.state.wakes = WakeSources(app.state.store, launch=lambda **kw: launch_heartbeat(app, **kw))
+    if (os.environ.get("AGENT_HUB_SCHEDULER") or "1").lower() not in ("0", "false", "no"):
+        app.state.wakes.start_ticker(tick_s)
     try:
         # D2: the folded-in assistant keeps its own session/chat stores; a
         # mounted app's lifespan does not run by itself, so run it from here.
@@ -106,6 +115,7 @@ async def lifespan(app: FastAPI):
                 await stack.enter_async_context(sub.router.lifespan_context(sub))
             yield
     finally:
+        app.state.wakes.stop()
         app.state.engine.stop()
         for t in list(app.state.tasks):
             t.cancel()
@@ -669,6 +679,31 @@ async def list_plans(
 @app.get("/plans/{plan_id}")
 async def get_plan(request: Request, plan_id: str) -> dict:
     return await _wrap(_store(request).get_plan(plan_id))
+
+
+# -- platform events (phase 4) --------------------------------------------------------------
+
+
+class EventBody(BaseModel):
+    event: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_.-]*$")
+    subject: dict[str, Any] = Field(default_factory=dict)
+    at: str | None = None
+
+
+@app.post("/events", status_code=202)
+async def post_event(request: Request, body: EventBody) -> dict:
+    """A run-lifecycle event from the platform (the orchestrator's service
+    token, or an admin). Every active agent with a matching ``event`` trigger
+    gets one heartbeat with the event as input; coalescing and refusals apply
+    as for any wake. Unknown events wake nobody and are still 202."""
+    require_roles(request, _admin_roles())
+    payload = {
+        "event": body.event,
+        "at": body.at or datetime.now(UTC).isoformat(),
+        **body.subject,
+    }
+    woken = await request.app.state.wakes.on_event(body.event, payload)
+    return {"event": body.event, "woken": woken}
 
 
 # -- D2: the standalone :8400 assistant, folded in --------------------------------------

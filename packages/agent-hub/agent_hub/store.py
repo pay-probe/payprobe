@@ -419,6 +419,24 @@ class RegistryStore:
             out.append(d)
         return out
 
+    async def active_specs(self, kind: Kind) -> list[tuple[str, int, dict]]:
+        """Every active definition's active spec (wake sources scan these)."""
+        rows = await self._pool.fetch(
+            "SELECT v.name, v.version, v.spec FROM agent_hub_versions v "
+            "JOIN agent_hub_definitions d ON d.kind=v.kind AND d.name=v.name "
+            "WHERE v.kind=$1 AND v.status='active' AND d.status='active' ORDER BY v.name",
+            kind,
+        )
+        return [(r["name"], r["version"], _loads(r["spec"])) for r in rows]
+
+    async def last_wake_at(self, agent: str, wake: str) -> Any:
+        """Newest ``started_at`` of a heartbeat with that wake source (tz-aware), or None."""
+        return await self._pool.fetchval(
+            "SELECT MAX(started_at) FROM agent_hub_heartbeats WHERE agent=$1 AND wake=$2",
+            agent,
+            wake,
+        )
+
     # -- versions ------------------------------------------------------------------------
 
     async def add_version(self, kind: Kind, name: str, spec: dict, by: str = "") -> dict:

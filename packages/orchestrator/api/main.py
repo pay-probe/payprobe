@@ -543,6 +543,56 @@ async def _http_post_json(url: str, body: dict) -> Any:
         return resp.json()
 
 
+def _agent_hub_event_for(status: str) -> str | None:
+    """Run-lifecycle event name for a terminal run status (ADR-0010 phase 4);
+    None for outcomes agents should not be woken for (cancelled, pending)."""
+    if status in ("passed", "completed"):
+        return "run.completed"
+    if status in ("failed", "error"):
+        return "run.failed"
+    return None
+
+
+def _notify_agent_hub(event: str, subject: dict) -> None:
+    """Tell agent-hub about a platform event so agents with a matching trigger
+    wake (ADR-0010 phase 4). Fire-and-forget: never blocks or fails the caller;
+    a no-op when AGENT_HUB_API_URL is unset (agent-hub is optional)."""
+    if not AGENT_HUB_API_URL:
+        return
+    from datetime import UTC, datetime
+
+    body = {"event": event, "subject": subject, "at": datetime.now(UTC).isoformat()}
+
+    async def send() -> None:
+        try:
+            await _http_post_json(f"{AGENT_HUB_API_URL.rstrip('/')}/events", body)
+        except Exception as exc:  # noqa: BLE001 — an undelivered event is a log line
+            log.warning("agent-hub event %s not delivered: %s", event, exc)
+
+    try:
+        asyncio.get_running_loop().create_task(send())
+    except RuntimeError:  # no loop (sync unit tests): nothing to schedule on
+        pass
+
+
+def _notify_run_terminal(rec: "RunRecord") -> None:
+    """Emit run.completed / run.failed for a finished run (both the functional
+    and the flow-debug engines end here)."""
+    event = _agent_hub_event_for(rec.status)
+    if not event:
+        return
+    summary = rec.summary if isinstance(rec.summary, dict) else {}
+    _notify_agent_hub(event, {
+        "run_id": rec.id,
+        "status": rec.status,
+        "environment": rec.env.get("name") if isinstance(rec.env, dict) else None,
+        "scenario_ids": [s.get("id") for s in rec.scenarios if isinstance(s, dict)],
+        "error": summary.get("error"),
+        "summary": {k: summary[k] for k in ("status", "passed", "failed", "total",
+                                            "duration_ms") if k in summary},
+    })
+
+
 async def _http_json(method: str, url: str, body: dict | None = None) -> Any:
     """Generic authenticated JSON request to a sibling service (PUT/DELETE)."""
     import httpx
@@ -1215,6 +1265,7 @@ async def _run_engine(rec: RunRecord) -> None:
         await run_control.unregister(rec.id)
         RUNS_INFLIGHT.dec()
         RUNS_TOTAL.inc(status=rec.status)
+        _notify_run_terminal(rec)
 
 
 # -- REST ---------------------------------------------------------------------
@@ -1323,6 +1374,7 @@ async def _run_flow_debug(
         await run_control.unregister(rec.id)
         RUNS_INFLIGHT.dec()
         RUNS_TOTAL.inc(status=rec.status)
+        _notify_run_terminal(rec)
 
 
 @app.post("/flows/debug-run", response_model=CreateRunResponse)
@@ -4783,6 +4835,11 @@ async def certify_run(run_id: str, body: CertifyRequest, request: Request) -> di
     baseline = run_store.get(baseline_id) if baseline_id else None
 
     gate = _evaluate_gates(detail, policy=body.policy, pack=pack, baseline=baseline)
+    if str(gate.get("verdict") or "").upper() != "GO":
+        _notify_agent_hub("gate.failed", {
+            "run_id": run_id, "project": body.project, "pack": body.pack,
+            "environment": env, "verdict": gate.get("verdict"), "gate_result": gate,
+        })
     prov = _provenance(detail, {
         "pack": {"id": pack.get("id"), "version": pack.get("version")},
         "endpoints": _signoff_endpoints(detail),

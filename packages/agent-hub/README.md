@@ -35,7 +35,8 @@ AUTH_JWT_SECRET=... uvicorn agent_hub.main:app --port 8600
 | `AGENT_HUB_ALERT_WEBHOOK_URL` | D11 alert webhook: POSTed on `failed` / `budget_exceeded` / `timed_out` heartbeats and on advisor findings at `warn` or above; unset = disabled |
 | `AGENT_HUB_ALERT_WEBHOOK_SECRET` | signs each POST as `X-PayProbe-Signature: t=<ts>,v1=<HMAC-SHA256("<ts>.<body>")>` (the Stripe scheme); unset = unsigned |
 | `AGENT_HUB_ALERT_TIMEOUT_S` | per-attempt timeout (default 5; 3 attempts, backoff 1 s then 4 s) |
-| `AGENT_HUB_ENGINE_TICK_S` | workflow engine housekeeping interval (default 30): expires timed-out approvals |
+| `AGENT_HUB_ENGINE_TICK_S` | housekeeping interval (default 30): expires timed-out approvals, wakes due `schedule` triggers |
+| `AGENT_HUB_SCHEDULER` | `0` turns the schedule ticker off (events via `POST /events` still wake agents) |
 
 Workflow runs (phase 3): `POST /workflows/{name}/run` (inputs, optional
 `version`), `GET /runs[?workflow=&status=]`, `GET /runs/{id}`,
@@ -49,6 +50,13 @@ Folded-in assistant (ADR-0010 D2): the former :8400 service is mounted under
 its own gate and stores (`REDIS_URL` for sessions and history, memory when
 unset). `/assistant/health` is public and answered by agent-hub. The
 `assistant` compose service is a deprecated alias for one release.
+
+Wake sources (phase 4): `POST /events` (`{"event": "run.failed", "subject":
+{...}}`, platform service token or admin) wakes every active agent with a
+matching `event` trigger, one heartbeat each with the event as input; the
+orchestrator emits `run.completed`, `run.failed` and `gate.failed` when
+`AGENT_HUB_API_URL` is set. `schedule` triggers (`interval_sec`, `daily_at`
+UTC) are woken by agent-hub's own tick, never while agents are paused.
 | `PAYPROBE_ENV`, `API_TOKEN`, `AUTH_JWT_SECRET` / `AUTH_JWT_PUBLIC_KEY` | the platform auth gate (fails closed outside dev) |
 
 ## Test

@@ -69,6 +69,25 @@
 > revertable heartbeat); that changes the assistant UX and is a separate
 > decision. Owed from phase 3: a real provider run of both reference
 > workflows.
+>
+> **Phase 4, wake sources (2026-09-23).** `agent_hub/triggers.py`: `POST
+> /events` (platform service token or admin) wakes every active agent whose
+> spec declares a matching `event` trigger, one heartbeat each with the event
+> as input under the principal `event:<name>` (no roles, so an event-woken
+> agent can read but any write is refused downstream until a workflow with an
+> approval carries a human's authority); a 30 s tick wakes `schedule`
+> triggers (`interval_sec`, `daily_at` UTC) as `scheduler`, never while
+> paused (`AGENT_HUB_SCHEDULER=0` disables). The orchestrator emits
+> `run.completed` / `run.failed` when a functional or flow-debug run ends and
+> `gate.failed` when a certification verdict is not GO, fire-and-forget,
+> only when `AGENT_HUB_API_URL` is set. Seeds already declare these wakes:
+> `observer` (15 min schedule + `run.failed` + `gate.failed`),
+> `failure-triage` (`run.failed`), `certification-planner`
+> (`run.completed`). 124 agent-hub tests, 386 orchestrator tests. Owed from
+> phase 4: the webhook trigger, MCP catalog entries for wake/heartbeats/runs,
+> insight-service as a first-class tool, and the unattended end-to-end proof
+> against a real provider (a failing scheduled regression waking `observer`
+> and a finding reaching a human through the alert webhook).
 
 Companions: [`../agentic-engine-evaluation.md`](../agentic-engine-evaluation.md)
 (Opus), [`../agentic-engine-evaluation-fable.md`](../agentic-engine-evaluation-fable.md)
@@ -322,7 +341,7 @@ Each phase ends in a commit and a review gate.
 - **Phase 1: Registry.** Done in code; exit criteria: create → version → publish over HTTP; invalid tool refused at publish; RBAC enforced; `/status` shows `agent-hub`; portal Agents page + host `npm run build`; host `make test`; committed.
 - **Phase 2: Heartbeat runner.** Done: scoped toolkit, OBO tokens minted in agent-hub with the shared secret (no new auth-service endpoint needed), FakeLLM, provenance (`spec_sha256`, model, `act` claim) on every heartbeat, heartbeat records with cancel/revert, pause and budget stops. Portal heartbeat view, D11 alert webhook and restart watchdog all done 2026-09-23; phase 2 complete.
 - **Phase 3: Workflow engine.** State machine, node types, approvals inbox, reference workflows `observer` and `certification-plan`; fold :8400 in (D2). Exit: both workflows complete with a human approval mid-flow; container kill mid-workflow resumes; reviewer blocks a deliberately bad plan. Status 2026-09-23: engine, routes, seeds and all three exit criteria covered by tests under FakeLLM (`test_hub_engine.py`); the approvals inbox and runs view are in the portal (host build green, click-through owed), the :8400 assistant is mounted inside agent-hub with nginx and the orchestrator probe repointed (the standalone container is the deprecated alias until phase 5), and the exit criteria still want one run against a real provider.
-- **Phase 4: Triggers and exposure.** Run-lifecycle events, schedules via the existing scheduler, webhook trigger, MCP catalog entries, insight-service as a tool. Exit: a failing scheduled regression wakes `observer` unattended and a finding with evidence reaches a human.
+- **Phase 4: Triggers and exposure.** Run-lifecycle events, schedules via the existing scheduler, webhook trigger, MCP catalog entries, insight-service as a tool. Exit: a failing scheduled regression wakes `observer` unattended and a finding with evidence reaches a human. Status 2026-09-23: events (`POST /events`, emitted by the orchestrator for run and gate outcomes) and schedules (agent-hub's own tick, not the orchestrator scheduler: the trigger vocabulary is shared, the timer is local so agent-hub stays self-contained) are built and tested; webhook trigger, MCP entries, insight-service as a tool and the real-provider proof are owed.
 - **Phase 5: Hardening and handover.** Injection pack, `agent-golden` CI, egress allowlist, quotas, ATLAS + CLAUDE.md invariants (D12), operator skill `payprobe-agents`, status flip to Accepted, :8400 alias removed. Exit: security review + Go/No-Go by David.
 
 ## Action items
