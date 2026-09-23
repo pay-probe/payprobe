@@ -167,3 +167,6 @@ in `docs/adr/`.
 - `docs/history/` — finished build specs, plans and working notes (accurate at
   the time of build; the code has moved past some of them).
 - `docs/history/project-review.md` — the hardening review and what it changed.
+- `docs/history/2026-09-23-agent-hub-handoff.md` — ADR-0010 (agent-hub)
+  state of play: what phases 1–2 built, what is verified, the next tasks in
+  order. Start there before touching `packages/agent-hub`.
