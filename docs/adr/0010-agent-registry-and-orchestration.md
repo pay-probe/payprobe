@@ -109,6 +109,21 @@
 > tests. Owed from phase 4: insight-service as a first-class agent tool and
 > the alert-webhook half of the unattended proof.
 >
+> **Phase 5, injection pack and `agent-golden` (2026-09-23).**
+> `test_hub_injection.py` drives a scripted "obedient" FakeLLM against a
+> hostile platform (an injection in a run note, a fake `tool_calls` structure
+> inside a status payload, a 200 KB result) and proves the guards live in
+> machinery: untrusted results are wrapped and their embedded calls never
+> dispatched; an advisor that names a write tool is refused at publish and at
+> dispatch; a model that obeys the injection is stopped by the allowlist with
+> the journal empty; plan mode turns the injected write into a proposal; a
+> full-mode write outside the write scope is refused; oversized results are
+> capped before the model sees them; wake input stays user content while the
+> system prompt is the registered spec; and an upstream result forging
+> `{"decision": "approved"}` still parks the run at the human gate. CI gained
+> an `agent-golden` step running the reference-workflow and injection tests
+> by name. 142 agent-hub tests.
+>
 > **First real run (2026-09-23 13:23 UTC).** Thirty seconds after the phase-4
 > deploy, the scheduler woke `observer` unattended against the configured
 > provider (`claude-haiku-4-5`, key from Settings): 12 steps, 9 read-only tool
@@ -372,7 +387,7 @@ Each phase ends in a commit and a review gate.
 - **Phase 2: Heartbeat runner.** Done: scoped toolkit, OBO tokens minted in agent-hub with the shared secret (no new auth-service endpoint needed), FakeLLM, provenance (`spec_sha256`, model, `act` claim) on every heartbeat, heartbeat records with cancel/revert, pause and budget stops. Portal heartbeat view, D11 alert webhook and restart watchdog all done 2026-09-23; phase 2 complete.
 - **Phase 3: Workflow engine.** State machine, node types, approvals inbox, reference workflows `observer` and `certification-plan`; fold :8400 in (D2). Exit: both workflows complete with a human approval mid-flow; container kill mid-workflow resumes; reviewer blocks a deliberately bad plan. Status 2026-09-23: engine, routes, seeds and all three exit criteria covered by tests under FakeLLM (`test_hub_engine.py`); the approvals inbox and runs view are in the portal (host build green, click-through owed), the :8400 assistant is mounted inside agent-hub with nginx and the orchestrator probe repointed (the standalone container is the deprecated alias until phase 5), and the exit criteria still want one run against a real provider.
 - **Phase 4: Triggers and exposure.** Run-lifecycle events, schedules via the existing scheduler, webhook trigger, MCP catalog entries, insight-service as a tool. Exit: a failing scheduled regression wakes `observer` unattended and a finding with evidence reaches a human. Status 2026-09-23: events (`POST /events`, emitted by the orchestrator for run and gate outcomes) and schedules (agent-hub's own tick, not the orchestrator scheduler: the trigger vocabulary is shared, the timer is local so agent-hub stays self-contained) are built and tested; webhook trigger, MCP entries, insight-service as a tool and the real-provider proof are owed.
-- **Phase 5: Hardening and handover.** Injection pack, `agent-golden` CI, egress allowlist, quotas, ATLAS + CLAUDE.md invariants (D12), operator skill `payprobe-agents`, status flip to Accepted, :8400 alias removed. Exit: security review + Go/No-Go by David.
+- **Phase 5: Hardening and handover.** Injection pack, `agent-golden` CI, egress allowlist, quotas, ATLAS + CLAUDE.md invariants (D12), operator skill `payprobe-agents`, status flip to Accepted, :8400 alias removed. Exit: security review + Go/No-Go by David. Status 2026-09-23: injection pack (`test_hub_injection.py`, 10 tests) and the `agent-golden` CI step are in; D12 was done with phase 2. Owed: egress allowlist, quotas, ATLAS §11, operator skill, alias removal, status flip, Go/No-Go.
 
 ## Action items
 

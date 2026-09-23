@@ -75,6 +75,16 @@ jobs:
         run: |
           pip install -e packages/payprobe_common
           cd packages/agent-hub && pip install -e ".[dev]" && pytest tests/ -v
+      - name: agent-golden (ADR-0010 reference workflows + injection pack)
+        # The security case for the agents, kept visible as its own step: the
+        # two reference workflows complete under FakeLLM with a human approval
+        # mid-flow, a reviewer blocks a bad plan, a kill mid-run resumes, and
+        # hostile tool results / inputs never move an agent off its allowlist,
+        # past its mode or outside its write scope. Same database as above.
+        env:
+          AGENT_HUB_TEST_DATABASE_URL: postgresql://payprobe:test@localhost:5432/payprobe_test
+        run: |
+          cd packages/agent-hub && pytest tests/test_hub_engine.py tests/test_hub_injection.py -v
       - name: Guard the showcase demo (offline)
         # scripts/showcase.py has no importer of its own — this test locks its
         # generated docs + API-call shapes against the real models/services.

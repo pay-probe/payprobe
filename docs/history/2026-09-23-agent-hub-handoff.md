@@ -313,7 +313,17 @@ all three compose files. `test_hub_webhooks.py`.
 Owed in phase 4: insight-service as a first-class agent tool, the alert
 webhook half of the unattended proof (needs a URL).
 
-Phase 5 remains as written in the ADR.
+Phase 5, started 2026-09-23: `test_hub_injection.py` (10 tests: untrusted
+wrapping and never-dispatched embedded calls, allowlist stop of an obedient
+model, advisor write refused at publish and dispatch, plan-mode injection
+becomes a proposal, out-of-scope full write refused, result cap, wake input
+stays user content, forged upstream approval still waits at the gate, no
+material/secret tool exists); CI step `agent-golden` runs
+`test_hub_engine.py` + `test_hub_injection.py` by name. Owed: egress
+allowlist for the provider caller, quotas beyond the per-agent daily budget,
+ATLAS §11, operator skill `payprobe-agents`, remove the `assistant` alias
+(service, image publish, CI step, dev `assistantApiBase`), ADR status to
+Accepted, David's security review and Go/No-Go.
 
 ## 8. Gotchas learned this session
 
