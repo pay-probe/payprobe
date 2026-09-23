@@ -97,6 +97,18 @@
 > `observer` and a finding reaching a human through the alert webhook; the
 > first half is already observed, the webhook half needs a URL configured).
 >
+> **Inbound webhook trigger (2026-09-23).** `POST /webhooks/events/{event}`
+> (wakes agents with a matching `event` trigger, body = subject) and
+> `POST /webhooks/agents/{name}` (direct wake, body = input, opt-in via a new
+> `webhook` trigger kind, else 409), both credentialed by an HMAC signature
+> over the body (`AGENT_HUB_WEBHOOK_SECRET`, the same `t=,v1=` scheme and
+> verifier as the outbound alerts, 5 min tolerance, 64 KB cap); the bearer
+> gate skips `/webhooks/` and the routes answer 503 while no secret is set.
+> Principals are `event:<name>` / `webhook:<agent>` with no roles, so the
+> same downstream RBAC fence applies as for platform events. 132 agent-hub
+> tests. Owed from phase 4: insight-service as a first-class agent tool and
+> the alert-webhook half of the unattended proof.
+>
 > **First real run (2026-09-23 13:23 UTC).** Thirty seconds after the phase-4
 > deploy, the scheduler woke `observer` unattended against the configured
 > provider (`claude-haiku-4-5`, key from Settings): 12 steps, 9 read-only tool

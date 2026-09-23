@@ -10,7 +10,7 @@ export type RegistryKind = "agent" | "workflow";
 export type AgentMode = "advisor" | "plan" | "full";
 
 export interface AgentTrigger {
-  kind: "manual" | "schedule" | "event" | "mcp";
+  kind: "manual" | "schedule" | "event" | "mcp" | "webhook";
   interval_sec?: number | null;
   daily_at?: string | null;
   event?: string | null;
@@ -139,7 +139,7 @@ export type HeartbeatStatus =
   | "cancelled"
   | "paused";
 
-export type WakeKind = "manual" | "schedule" | "event" | "mcp";
+export type WakeKind = "manual" | "schedule" | "event" | "mcp" | "webhook";
 
 /** One heartbeat as listed (`GET /heartbeats`): counts instead of bodies. */
 export interface HeartbeatSummary {

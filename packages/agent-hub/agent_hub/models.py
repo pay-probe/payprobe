@@ -64,7 +64,9 @@ class WriteScope(BaseModel):
 
 
 class Trigger(BaseModel):
-    kind: Literal["manual", "schedule", "event", "mcp"] = "manual"
+    #: webhook: opt-in to being woken by a signed ``POST /webhooks/agents/{name}``
+    #: (the request body becomes the wake input); event webhooks need no opt-in
+    kind: Literal["manual", "schedule", "event", "mcp", "webhook"] = "manual"
     #: schedule: one of interval_sec / daily_at (HH:MM UTC), same vocabulary as
     #: the orchestrator's schedule_store so the timer wake source can reuse it
     interval_sec: int | None = Field(default=None, ge=30)
@@ -88,7 +90,9 @@ class Trigger(BaseModel):
             raise ValueError("schedule trigger needs interval_sec or daily_at")
         if self.kind == "event" and not self.event:
             raise ValueError("event trigger needs an event name")
-        if self.kind in ("manual", "mcp") and (self.interval_sec or self.daily_at or self.event):
+        if self.kind in ("manual", "mcp", "webhook") and (
+            self.interval_sec or self.daily_at or self.event
+        ):
             raise ValueError(f"{self.kind} trigger takes no schedule/event fields")
         return self
 

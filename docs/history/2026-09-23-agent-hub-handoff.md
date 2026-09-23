@@ -303,8 +303,15 @@ and three resources, and the minted service JWT carries `svc: mcp-server`
 catalog regenerated (`scripts/gen_catalog.py`); `tests/test_agent_hub_tools.py`.
 Compose gives mcp-server `AGENT_HUB_API_URL` in all three files.
 
-Owed in phase 4: webhook trigger, insight-service as a first-class agent
-tool, the alert webhook half of the unattended proof (needs a URL).
+Inbound webhooks (same day): `POST /webhooks/events/{event}` and
+`POST /webhooks/agents/{name}` in `main.py`, signed with
+`AGENT_HUB_WEBHOOK_SECRET` (`alerts.verify`, 5 min tolerance, 64 KB cap),
+the bearer gate skipping `/webhooks/` (`auth.py`); new `webhook` trigger kind
+(models, catalog, portal types) as the opt-in for direct agent wakes. Knob in
+all three compose files. `test_hub_webhooks.py`.
+
+Owed in phase 4: insight-service as a first-class agent tool, the alert
+webhook half of the unattended proof (needs a URL).
 
 Phase 5 remains as written in the ADR.
 

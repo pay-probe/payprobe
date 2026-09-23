@@ -31,8 +31,10 @@ The LLM key is not here: agent-hub reads the same source as the assistant
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -45,7 +47,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from . import rest
-from .alerts import Alerter
+from .alerts import Alerter, verify
 from .auth import caller_sub, require_auth, require_roles
 from .engine import Engine
 from .llm import ProviderLLMBackend, resolve_llm
@@ -335,7 +337,7 @@ def catalog() -> dict:
         "tools": tool_catalog(),
         "modes": ["advisor", "plan", "full"],
         "node_types": ["agent_task", "tool", "condition", "approval", "parallel", "join"],
-        "trigger_kinds": ["manual", "schedule", "event", "mcp"],
+        "trigger_kinds": ["manual", "schedule", "event", "mcp", "webhook"],
     }
 
 
@@ -704,6 +706,87 @@ async def post_event(request: Request, body: EventBody) -> dict:
     }
     woken = await request.app.state.wakes.on_event(body.event, payload)
     return {"event": body.event, "woken": woken}
+
+
+# -- inbound webhooks (phase 4) --------------------------------------------------------------
+#
+# For systems that hold no PayProbe token (CI, an external scheduler, a
+# monitoring tool): the body is signed with AGENT_HUB_WEBHOOK_SECRET using the
+# same ``t=<ts>,v1=<HMAC-SHA256("<ts>.<body>")>`` scheme the outbound alerts
+# use, so one secret and one verifier serve both directions. The bearer gate
+# skips ``/webhooks/``; these routes verify the signature themselves and
+# answer 503 while no secret is configured.
+
+_EVENT_RE = re.compile(r"^[a-z][a-z0-9_.-]*$")
+
+
+async def _verified_webhook_body(request: Request) -> bytes:
+    secret = (os.environ.get("AGENT_HUB_WEBHOOK_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "inbound webhooks are not configured (set AGENT_HUB_WEBHOOK_SECRET)",
+        )
+    raw = await request.body()
+    if len(raw) > 64_000:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "webhook body over 64 KB")
+    if not verify(
+        secret, raw.decode("utf-8", "replace"), request.headers.get("X-PayProbe-Signature", "")
+    ):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "bad or missing X-PayProbe-Signature")
+    return raw
+
+
+@app.post("/webhooks/events/{event}", status_code=202)
+async def webhook_event(request: Request, event: str) -> dict:
+    """A signed external event: wakes every agent with a matching ``event``
+    trigger, exactly like ``POST /events``; the JSON body is the subject."""
+    raw = await _verified_webhook_body(request)
+    if not _EVENT_RE.fullmatch(event) or len(event) > 64:
+        raise HTTPException(422, "event must match [a-z][a-z0-9_.-]* (max 64)")
+    subject: Any = {}
+    if raw.strip():
+        try:
+            subject = json.loads(raw)
+        except ValueError as exc:
+            raise HTTPException(422, "webhook body must be JSON") from exc
+        if not isinstance(subject, dict):
+            raise HTTPException(422, "webhook body must be a JSON object")
+    payload = {"event": event, "at": datetime.now(UTC).isoformat(), "source": "webhook", **subject}
+    woken = await request.app.state.wakes.on_event(event, payload)
+    return {"event": event, "woken": woken}
+
+
+@app.post("/webhooks/agents/{name}", status_code=202, response_model=None)
+async def webhook_agent(request: Request, name: str) -> dict | JSONResponse:
+    """A signed direct wake of one agent; the body (any text, JSON preferred)
+    is the heartbeat input. Opt-in: the agent's active spec must declare a
+    ``webhook`` trigger, otherwise 409. Same 202 / 200 semantics as wake."""
+    raw = await _verified_webhook_body(request)
+    store = _store(request)
+    hit = await store.resolve("agent", name)
+    if hit is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no runnable version for '{name}'")
+    _, version, spec_raw = hit
+    spec = AgentSpec.model_validate(spec_raw)
+    if not any(t.kind == "webhook" for t in spec.triggers):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"agent '{name}' does not declare a webhook trigger"
+        )
+    ver = await store.get_version("agent", name, version)
+    row = await launch_heartbeat(
+        request.app,
+        name=name,
+        version=version,
+        spec=spec,
+        spec_sha256=ver["spec_sha256"],
+        caller={"sub": f"webhook:{name}", "roles": []},
+        input_text=raw.decode("utf-8", "replace")[:20_000],
+        wake="webhook",
+    )
+    if row.get("coalesced") or row["status"] != "running":
+        return JSONResponse(row)
+    return row
 
 
 # -- D2: the standalone :8400 assistant, folded in --------------------------------------

@@ -113,6 +113,10 @@ async def require_auth(request: Request, authorization: str | None = Header(defa
     """FastAPI dependency. Public paths are allow-listed."""
     if request.url.path in PUBLIC_PATHS:
         return
+    # Inbound webhooks carry their own credential: an HMAC signature over the
+    # body (AGENT_HUB_WEBHOOK_SECRET), verified by the route itself.
+    if request.url.path.startswith("/webhooks/"):
+        return
     request.state.auth = _check(authorization)
 
 

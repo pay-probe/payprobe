@@ -37,6 +37,7 @@ AUTH_JWT_SECRET=... uvicorn agent_hub.main:app --port 8600
 | `AGENT_HUB_ALERT_TIMEOUT_S` | per-attempt timeout (default 5; 3 attempts, backoff 1 s then 4 s) |
 | `AGENT_HUB_ENGINE_TICK_S` | housekeeping interval (default 30): expires timed-out approvals, wakes due `schedule` triggers |
 | `AGENT_HUB_SCHEDULER` | `0` turns the schedule ticker off (events via `POST /events` still wake agents) |
+| `AGENT_HUB_WEBHOOK_SECRET` | HMAC secret for inbound `/webhooks/events/{event}` and `/webhooks/agents/{name}` (signature `X-PayProbe-Signature: t=<ts>,v1=<HMAC-SHA256("<ts>.<body>")>`); unset = those routes answer 503 |
 
 Workflow runs (phase 3): `POST /workflows/{name}/run` (inputs, optional
 `version`), `GET /runs[?workflow=&status=]`, `GET /runs/{id}`,
@@ -57,6 +58,13 @@ matching `event` trigger, one heartbeat each with the event as input; the
 orchestrator emits `run.completed`, `run.failed` and `gate.failed` when
 `AGENT_HUB_API_URL` is set. `schedule` triggers (`interval_sec`, `daily_at`
 UTC) are woken by agent-hub's own tick, never while agents are paused.
+
+Inbound webhooks (for systems without a PayProbe token): sign the raw body
+with `AGENT_HUB_WEBHOOK_SECRET` (`t=<unix ts>,v1=<hex HMAC-SHA256 of
+"<ts>.<body>">`, 5 min tolerance) and POST it to
+`/webhooks/events/{event}` (JSON object; wakes agents with that `event`
+trigger) or `/webhooks/agents/{name}` (any text, becomes the wake input; the
+agent must declare `{"kind": "webhook"}` in its triggers, else 409).
 | `PAYPROBE_ENV`, `API_TOKEN`, `AUTH_JWT_SECRET` / `AUTH_JWT_PUBLIC_KEY` | the platform auth gate (fails closed outside dev) |
 
 ## Test

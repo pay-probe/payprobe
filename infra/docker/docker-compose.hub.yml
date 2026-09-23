@@ -255,6 +255,9 @@ services:
       AGENT_HUB_ALERT_WEBHOOK_SECRET: ${AGENT_HUB_ALERT_WEBHOOK_SECRET:-}
       # D2: the folded-in assistant's session + chat history stores (memory if unset).
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # Phase 4 inbound webhooks (unset = 503): HMAC secret for /webhooks/events/{event}
+      # and /webhooks/agents/{name}; same t=,v1= scheme as the outbound alerts.
+      AGENT_HUB_WEBHOOK_SECRET: ${AGENT_HUB_WEBHOOK_SECRET:-}
       ASSIST_LLM_PROVIDER: ${ASSIST_LLM_PROVIDER:-openai}
       ASSIST_LLM_API_KEY: ${ASSIST_LLM_API_KEY:-}
       ASSIST_LLM_MODEL: ${ASSIST_LLM_MODEL:-}
