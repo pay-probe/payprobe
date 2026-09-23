@@ -516,5 +516,5 @@ Each phase ends in a commit and a review gate.
 4. [x] `.github/workflows/ci.yml` carries the "Test agent-hub" step. Not yet exercised: the `adr-0010` branch has never been pushed, so CI has not run it.
 5. [x] ATLAS: agent-hub in §6 (the pattern generalised), §7 (security), §11 (follow-through) and §13 (decision log); operator skill `.claude/skills/payprobe-agents`.
 6. [x] Decide `AGENT_LOAD_APPROVAL_TPS` and the daily budget defaults for compose (2026-09-23: 100 tps enforced in the tool layer; seed budgets 300k to 3M per agent; hub-wide `AGENT_HUB_DAILY_TOKENS` 5M and `AGENT_HUB_MAX_CONCURRENT` 4 in compose).
-7. [ ] Push the branch and get one green CI run before phase 3 lands on top.
+7. [~] Push the branch and get one green CI run: pushed throughout 2026-09-23, PR https://github.com/pay-probe/payprobe/pull/2 opened the same day (CI's first run of the agent-hub steps; green run still to be confirmed).
 8. [ ] Phase 2 loose ends: a real provider call through `ProviderLLMBackend`; the `nats-demo-net` driver still points at a deleted scenario (`scn-0039c642`); `delete_scenario` has no "referenced by a network" guard (pre-existing, outside this ADR).
