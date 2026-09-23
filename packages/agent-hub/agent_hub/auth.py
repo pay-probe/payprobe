@@ -37,7 +37,7 @@ from fastapi import Header, HTTPException, Request, status
 _DEV_ENVS = {"dev", "development", "test", "local"}
 
 #: Liveness + API reference stay open; everything else is gated.
-PUBLIC_PATHS: set[str] = {"/health", "/openapi.json", "/docs", "/redoc"}
+PUBLIC_PATHS: set[str] = {"/health", "/assistant/health", "/openapi.json", "/docs", "/redoc"}
 
 
 def _is_dev() -> bool:

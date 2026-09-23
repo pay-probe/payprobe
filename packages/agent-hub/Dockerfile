@@ -12,8 +12,13 @@ WORKDIR /app
 COPY agent-hub/pyproject.toml agent-hub/README.md ./
 COPY agent-hub/agent_hub ./agent_hub
 COPY payprobe_common ./payprobe_common
+# D2: the :8400 assistant is folded in, mounted under /assistant (its session
+# and chat stores use REDIS_URL when set, memory otherwise).
+COPY payprobe-assistant ./payprobe-assistant
 
 RUN pip install --no-cache-dir ./payprobe_common \
+ && pip install --no-cache-dir ./payprobe-assistant \
+ && pip install --no-cache-dir "redis>=5.0" \
  && pip install --no-cache-dir .
 
 ENV AGENT_HUB_HOST=0.0.0.0 \

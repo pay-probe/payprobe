@@ -35,7 +35,7 @@ import logging
 import os
 import uuid
 from collections.abc import Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
@@ -98,7 +98,13 @@ async def lifespan(app: FastAPI):
     await app.state.engine.reconcile()
     app.state.engine.start_ticker(float(os.environ.get("AGENT_HUB_ENGINE_TICK_S") or 30))
     try:
-        yield
+        # D2: the folded-in assistant keeps its own session/chat stores; a
+        # mounted app's lifespan does not run by itself, so run it from here.
+        async with AsyncExitStack() as stack:
+            sub = getattr(app.state, "assistant", None)
+            if sub is not None:
+                await stack.enter_async_context(sub.router.lifespan_context(sub))
+            yield
     finally:
         app.state.engine.stop()
         for t in list(app.state.tasks):
@@ -663,3 +669,37 @@ async def list_plans(
 @app.get("/plans/{plan_id}")
 async def get_plan(request: Request, plan_id: str) -> dict:
     return await _wrap(_store(request).get_plan(plan_id))
+
+
+# -- D2: the standalone :8400 assistant, folded in --------------------------------------
+#
+# The assistant's FastAPI app is mounted under ``/assistant`` unchanged (its own
+# auth gate, session and chat stores; its lifespan runs from ours). nginx and the
+# orchestrator probe point here; the ``assistant`` compose service stays one
+# release as a deprecated alias, then goes. ``/assistant/health`` is answered by
+# agent-hub itself, registered before the mount so it stays public (the mounted
+# gate sees the full path and would demand a token).
+
+
+@app.get("/assistant/health")
+async def assistant_health(request: Request) -> dict:
+    mounted = getattr(request.app.state, "assistant", None) is not None
+    return {
+        "status": "ok" if mounted else "unavailable",
+        "service": "assistant",
+        "via": "agent-hub",
+        "mounted": mounted,
+    }
+
+
+def _mount_assistant() -> Any | None:
+    try:
+        from assistant_service.main import app as assistant_app
+    except ImportError as exc:  # the image always ships it; dev checkouts may not
+        log.warning("assistant_service not importable (%s): /assistant not mounted", exc)
+        return None
+    app.mount("/assistant", assistant_app)
+    return assistant_app
+
+
+app.state.assistant = _mount_assistant()

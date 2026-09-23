@@ -25,9 +25,11 @@ from hub_testkit import TEST_DSN, truncate  # noqa: E402
 os.environ["AGENT_HUB_DATABASE_URL"] = TEST_DSN
 
 # agent_hub importable when running from packages/, and packages/ itself
-# importable (payprobe_common) when running from the package dir.
+# importable (payprobe_common) when running from the package dir. The folded-in
+# assistant (D2) lives in the sibling package, mounted under /assistant.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "payprobe-assistant"))
 
 import pytest
 from agent_hub.main import app

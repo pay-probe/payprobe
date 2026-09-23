@@ -82,7 +82,7 @@ Drift check:
 | `SCENARIO_API_URL` | `http://scenario-service:8000` | Where to fetch scenarios when a run is launched by id/project/set. | `packages/orchestrator/api/main.py:SCENARIO_API_URL` |
 | `AUTH_API_URL` | `http://auth-service:8300` | Auth-service base for `/status`. | `packages/orchestrator/api/main.py:AUTH_API_URL` |
 | `MCP_API_URL` | `""` (not probed) | MCP server base; probed by `/status` only when set. | `packages/orchestrator/api/main.py:MCP_API_URL` |
-| `ASSIST_API_URL` | `""` (not probed) | Assistant base; probed by `/status` only when set. | `packages/orchestrator/api/main.py:ASSIST_API_URL` |
+| `ASSIST_API_URL` | `""` (not probed; compose: `http://agent-hub:8600/assistant` since ADR-0010 D2) | Assistant base; probed by `/status` only when set (`<base>/health`). | `packages/orchestrator/api/main.py:ASSIST_API_URL` |
 | `INSIGHT_API_URL` | `""` (not probed) | Insight-service base; probed by `/status` only when set. | `packages/orchestrator/api/main.py:INSIGHT_API_URL` |
 | `SCENARIO_API_TOKEN` | unset | Outbound credential for orchestrator→scenario-service (wins over `API_TOKEN`; else falls back to minting a JWT from `AUTH_JWT_SECRET`). All tiers: prod. | `packages/orchestrator/api/main.py` (~line 399, `_scenario_auth_header`-style helper) |
 
@@ -216,6 +216,12 @@ Drift check:
 ---
 
 ## 7. Assistant (`packages/payprobe-assistant`, port 8400)
+
+Since 2026-09-23 (ADR-0010 D2) this app is also mounted inside agent-hub at
+`/assistant`, which is where nginx (`/api/assistant/`) and the orchestrator
+probe now point; every variable below is read identically there (agent-hub's
+compose block carries them, plus `REDIS_URL`). The standalone :8400 container
+is a deprecated alias until phase 5.
 
 The unified LLM gateway — the ONLY service meant to hold provider keys.
 

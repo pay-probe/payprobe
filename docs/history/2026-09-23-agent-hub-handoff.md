@@ -255,9 +255,24 @@ workflow: start with inputs, runs list, node-state table with heartbeat /
 plan / approval refs and journal counts, cancel). API client gained the run,
 approval and plan calls. Host production build green; click-through owed.
 
-Still owed in phase 3: fold :8400 in (D2): move `assistant_service`
-session/chat routes into agent-hub or retire them, keep `payprobe_common` as
-the single home; one run of each reference workflow against a real provider.
+D2, first half (same day): `assistant_service.main:app` is mounted inside
+agent-hub under `/assistant` (`main.py:_mount_assistant`, its lifespan run
+from agent-hub's via `AsyncExitStack`; `/assistant/health` is agent-hub's own
+public route, registered before the mount because the mounted gate sees the
+full path). The agent-hub image copies and installs `payprobe-assistant`
+(+ redis); the tests add that package dir to `sys.path`. All three nginx
+confs route `/api/assistant/` to `agent_hub/assistant/` (the `assistant_svc`
+upstream is gone, so nginx no longer needs the container to resolve);
+compose sets `ASSIST_API_URL=http://agent-hub:8600/assistant` and gives
+agent-hub `REDIS_URL`. The `assistant` service stays this release as the
+deprecated alias; remove it in phase 5 (also from `scripts/publish-images.sh`,
+CI's "Test payprobe-assistant" step, the portal's dev `assistantApiBase`).
+Deploy order once: rebuild agent-hub, then reload the portal's nginx.
+Deferred on purpose: turning chat turns into `config`-agent heartbeats (a UX
+change; separate decision). `test_hub_assistant_mount.py` covers the mount.
+
+Still owed in phase 3: one run of each reference workflow against a real
+provider.
 
 Phase 4 and 5 remain as written in the ADR.
 

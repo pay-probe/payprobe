@@ -216,7 +216,8 @@ services:
       # MCP server, so /status reports its reachability in the portal monitor.
       MCP_API_URL: http://mcp-server:8200
       # Config assistant, so /status (dashboard "System health") reports it too.
-      ASSIST_API_URL: http://assistant:8400
+      # Folded into agent-hub (ADR-0010 D2); the standalone :8400 is a deprecated alias.
+      ASSIST_API_URL: http://agent-hub:8600/assistant
       # Insight service (ADR-0005), same reason.
       INSIGHT_API_URL: http://insight-service:8500
       AGENT_HUB_API_URL: http://agent-hub:8600
@@ -349,6 +350,8 @@ services:
       # heartbeats and advisor findings at warn+, HMAC-signed when a secret is set.
       AGENT_HUB_ALERT_WEBHOOK_URL: ${AGENT_HUB_ALERT_WEBHOOK_URL:-}
       AGENT_HUB_ALERT_WEBHOOK_SECRET: ${AGENT_HUB_ALERT_WEBHOOK_SECRET:-}
+      # D2: the folded-in assistant's session + chat history stores (memory if unset).
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ASSIST_LLM_PROVIDER: ${ASSIST_LLM_PROVIDER:-openai}
       ASSIST_LLM_API_KEY: ${ASSIST_LLM_API_KEY:-}
       ASSIST_LLM_MODEL: ${ASSIST_LLM_MODEL:-}

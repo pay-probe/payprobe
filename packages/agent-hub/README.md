@@ -43,6 +43,12 @@ Workflow runs (phase 3): `POST /workflows/{name}/run` (inputs, optional
 `POST /approvals/{id}/decide` (`approved` / `rejected` + note, needs one of
 the node's roles or admin), `GET /plans[?run=]`. A run's `node_states` and
 `results` are the whole state; a restart resumes every active run from them.
+
+Folded-in assistant (ADR-0010 D2): the former :8400 service is mounted under
+`/assistant` (`/assistant/agent/chat`, `/assistant/agent/chats`, ...), with
+its own gate and stores (`REDIS_URL` for sessions and history, memory when
+unset). `/assistant/health` is public and answered by agent-hub. The
+`assistant` compose service is a deprecated alias for one release.
 | `PAYPROBE_ENV`, `API_TOKEN`, `AUTH_JWT_SECRET` / `AUTH_JWT_PUBLIC_KEY` | the platform auth gate (fails closed outside dev) |
 
 ## Test

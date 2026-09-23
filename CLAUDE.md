@@ -28,7 +28,7 @@ product.
 | `packages/worker` | Execution engine + adapters + simulators; also `load_worker` / `flow_host` fleet roles | — |
 | `packages/mcp-server` | FastMCP proxy over both services (HTTP + stdio) | 8200 |
 | `packages/auth-service` | JWT auth + users/roles | 8300 |
-| `packages/payprobe-assistant` | Standalone LLM-gateway assistant (REST-backed) | 8400 |
+| `packages/payprobe-assistant` | LLM-gateway assistant (REST-backed); since 2026-09-23 mounted inside agent-hub at `/assistant` (ADR-0010 D2), the standalone :8400 container is a deprecated alias until phase 5 | 8400 |
 | `packages/insight-service` | Advisory ML insights: failure categorization + explanation + outcome prediction (ADR-0005; read-only, advise-only) | 8500 |
 | `packages/agent-hub` | Agent registry + heartbeat runner: versioned agent principals, JSON-DAG workflows, bounded scoped wakes with journal/revert; PostgreSQL only (ADR-0010 phases 1–2; workflow engine in phase 3) | 8600 |
 | `packages/payprobe_common` | Shared: `agent_toolkit` (tool layer + scoped dispatch), `rest_backend`, `llm_provider`, `crypto` (SecretBox) | — |
