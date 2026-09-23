@@ -218,6 +218,107 @@ export interface WakeRequest {
   wake?: WakeKind;
 }
 
+// -- workflow runs (ADR-0010 phase 3) -----------------------------------------
+
+export type RunStatus =
+  | "running"
+  | "waiting"
+  | "done"
+  | "failed"
+  | "cancelled"
+  | "rejected";
+
+export type NodeStatus =
+  | "pending"
+  | "deferred"
+  | "running"
+  | "waiting"
+  | "done"
+  | "skipped"
+  | "failed"
+  | "cancelled";
+
+/** One node's persisted state inside a run. */
+export interface NodeState {
+  status: NodeStatus;
+  started_at?: string;
+  finished_at?: string;
+  error?: string;
+  /** agent_task */
+  agent?: string;
+  mode?: AgentMode;
+  heartbeat_id?: string;
+  plan_id?: string;
+  /** approval */
+  approval_id?: string;
+  /** tool: journalled writes (revertable) */
+  journal?: unknown[];
+  retry_at?: number;
+}
+
+export interface RunSummary {
+  id: string;
+  workflow: string;
+  version: number;
+  spec_sha256: string;
+  status: RunStatus;
+  invoked_by: string;
+  error: string | null;
+  cancel_requested: boolean;
+  started_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  n_done: number;
+  n_nodes: number;
+}
+
+export interface RunDetail extends Omit<RunSummary, "n_done" | "n_nodes"> {
+  inputs: Record<string, unknown>;
+  node_states: Record<string, NodeState>;
+  results: Record<string, unknown>;
+  principal: { sub?: string; roles?: string[] };
+}
+
+export type ApprovalStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "expired"
+  | "cancelled";
+
+export interface Approval {
+  id: string;
+  run_id: string;
+  node_id: string;
+  workflow: string;
+  roles: string[];
+  context: {
+    inputs?: Record<string, unknown>;
+    results?: Record<string, unknown>;
+    plans?: string[];
+  };
+  status: ApprovalStatus;
+  decided_by: string | null;
+  note: string | null;
+  requested_at: string;
+  expires_at: string | null;
+  decided_at: string | null;
+}
+
+export interface PlanArtifact {
+  id: string;
+  run_id: string | null;
+  node_id: string | null;
+  heartbeat_id: string | null;
+  agent: string;
+  version: number;
+  spec_sha256: string;
+  proposed: ProposedCall[];
+  result: string | null;
+  authored_by: string;
+  created_at: string;
+}
+
 /** The problems list agent-hub returns on 422 (shape or publish validation). */
 export function problemsOf(err: unknown): string[] {
   const detail = (err as { error?: { detail?: unknown } })?.error?.detail;
@@ -390,6 +491,84 @@ export class AgentHubApiService {
     return this.http.post<HeartbeatDetail>(
       `${this.base}/heartbeats/${encodeURIComponent(id)}/revert`,
       {},
+    );
+  }
+
+  // -- workflow runs (ADR-0010 phase 3) ----------------------------------------
+
+  /** 202 with the run after its first advance (may already be `waiting`). */
+  runWorkflow(
+    name: string,
+    inputs: Record<string, unknown>,
+    version?: number | null,
+  ): Observable<RunDetail> {
+    return this.http.post<RunDetail>(
+      `${this.base}/workflows/${encodeURIComponent(name)}/run`,
+      { inputs, version: version ?? null },
+    );
+  }
+
+  runs(
+    workflow?: string,
+    status?: string,
+    limit = 50,
+  ): Observable<RunSummary[]> {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (workflow) q.set("workflow", workflow);
+    if (status) q.set("status", status);
+    return this.http.get<RunSummary[]>(`${this.base}/runs?${q}`);
+  }
+
+  run(id: string): Observable<RunDetail> {
+    return this.http.get<RunDetail>(
+      `${this.base}/runs/${encodeURIComponent(id)}`,
+    );
+  }
+
+  cancelRun(id: string): Observable<RunDetail> {
+    return this.http.post<RunDetail>(
+      `${this.base}/runs/${encodeURIComponent(id)}/cancel`,
+      {},
+    );
+  }
+
+  /** The inbox: `status` defaults to pending on the server; "all" lists every decision. */
+  approvals(
+    status = "pending",
+    run?: string,
+    limit = 100,
+  ): Observable<Approval[]> {
+    const q = new URLSearchParams({ status, limit: String(limit) });
+    if (run) q.set("run", run);
+    return this.http.get<Approval[]>(`${this.base}/approvals?${q}`);
+  }
+
+  approval(id: string): Observable<Approval> {
+    return this.http.get<Approval>(
+      `${this.base}/approvals/${encodeURIComponent(id)}`,
+    );
+  }
+
+  decide(
+    id: string,
+    decision: "approved" | "rejected",
+    note = "",
+  ): Observable<Approval> {
+    return this.http.post<Approval>(
+      `${this.base}/approvals/${encodeURIComponent(id)}/decide`,
+      { decision, note },
+    );
+  }
+
+  plans(run?: string, limit = 50): Observable<PlanArtifact[]> {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (run) q.set("run", run);
+    return this.http.get<PlanArtifact[]>(`${this.base}/plans?${q}`);
+  }
+
+  plan(id: string): Observable<PlanArtifact> {
+    return this.http.get<PlanArtifact>(
+      `${this.base}/plans/${encodeURIComponent(id)}`,
     );
   }
 }

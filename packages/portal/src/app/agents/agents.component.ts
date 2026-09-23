@@ -30,7 +30,9 @@ import { UiService } from "../shared/ui.service";
 import { IconComponent } from "../shared/ui/icon.component";
 import { PageHeaderComponent } from "../shared/ui/page-header.component";
 import { StaleChipComponent } from "../shared/ui/stale-chip.component";
+import { ApprovalsInboxComponent } from "./approvals-inbox.component";
 import { AgentHeartbeatsComponent } from "./heartbeats.component";
+import { WorkflowRunsComponent } from "./workflow-runs.component";
 
 /** Starting spec for a new definition of each kind (valid against the seeds). */
 const TEMPLATES: Record<RegistryKind, AgentSpec | WorkflowSpec> = {
@@ -86,6 +88,8 @@ const POLL_MS = 15_000;
     StaleChipComponent,
     IconComponent,
     AgentHeartbeatsComponent,
+    ApprovalsInboxComponent,
+    WorkflowRunsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -137,11 +141,23 @@ const POLL_MS = 15_000;
           (click)="switchKind('workflow')"
         >
           Workflows
+          @if (pendingApprovals()) {
+            <span class="tab__badge" title="approvals waiting for a human">{{
+              pendingApprovals()
+            }}</span>
+          }
         </button>
         @if (paused()) {
           <span class="pill pill--warn">all agents paused</span>
         }
       </div>
+
+      @if (kind() === "workflow") {
+        <app-approvals-inbox
+          [isAdmin]="isAdmin()"
+          (pending)="pendingApprovals.set($event)"
+        />
+      }
 
       @if (unreachable()) {
         <div class="notice">
@@ -361,6 +377,12 @@ const POLL_MS = 15_000;
                 [canInvoke]="canInvoke(d)"
                 [isAdmin]="isAdmin()"
               />
+            } @else {
+              <app-workflow-runs
+                [workflow]="d.name"
+                [spec]="specWorkflow(d)"
+                [isAdmin]="isAdmin()"
+              />
             }
           } @else {
             <p class="muted">Select a {{ kind() }} to see its versions.</p>
@@ -432,6 +454,16 @@ const POLL_MS = 15_000;
         background: var(--brand, #5333ed);
         border-color: var(--brand, #5333ed);
         color: #fff;
+      }
+      .tab__badge {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 0 7px;
+        border-radius: 999px;
+        background: #d97706;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
       }
       .notice {
         border: 1px solid var(--pp-warn-border, #f59e0b);
@@ -669,6 +701,7 @@ export class AgentsComponent implements OnInit, OnDestroy {
   readonly creating = signal(false);
   readonly problems = signal<string[] | null>(null);
   readonly validatedOk = signal(false);
+  readonly pendingApprovals = signal(0);
 
   readonly paused = computed(() => this.pause()?.paused === true);
   readonly isAdmin = computed(() =>
@@ -682,6 +715,10 @@ export class AgentsComponent implements OnInit, OnDestroy {
     const mine = new Set(this.auth.user()?.roles ?? []);
     const invoke = (d.spec as AgentSpec | null)?.rbac?.invoke ?? [];
     return invoke.some((r) => mine.has(r));
+  }
+
+  specWorkflow(d: DefinitionDetail): WorkflowSpec | null {
+    return (d.spec as WorkflowSpec | null) ?? null;
   }
   readonly specAgent = computed<AgentSpec | null>(() => {
     const v = this.version();

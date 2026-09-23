@@ -117,7 +117,9 @@ ONE pytest session and `test_api.py` already exists in insight-service.
   `agent-hub` in `shared/runtime-config.service.ts`, route + nav entry,
   `agentHubApiBase` in both `environments/*.ts`, nginx `/api/agents/` in
   `deploy/nginx/nginx.conf` and `infra/nginx/nginx.conf`.
-- No heartbeat view yet (see §7).
+- Added 2026-09-23: `agents/heartbeats.component.ts` (under each agent),
+  `agents/approvals-inbox.component.ts` and `agents/workflow-runs.component.ts`
+  (Workflows tab), all polling through PollHealth.
 
 ### Deployment
 
@@ -246,10 +248,16 @@ Phase 3 (workflow engine). Engine core done 2026-09-23:
 - Tests: `test_hub_exprs.py` (25) and `test_hub_engine.py` (11) cover the
   three exit criteria under FakeLLM. 117 agent-hub tests in total.
 
-Still owed in phase 3: portal runs view + approvals inbox (API complete);
-fold :8400 in (D2): move `assistant_service` session/chat routes into
-agent-hub or retire them, keep `payprobe_common` as the single home; one run
-of each reference workflow against a real provider.
+Portal (same day): `agents/approvals-inbox.component.ts` (inbox above the
+Workflows tab, pending count as a tab badge, context, approve/reject with a
+note, role-gated) and `agents/workflow-runs.component.ts` (under the selected
+workflow: start with inputs, runs list, node-state table with heartbeat /
+plan / approval refs and journal counts, cancel). API client gained the run,
+approval and plan calls. Host production build green; click-through owed.
+
+Still owed in phase 3: fold :8400 in (D2): move `assistant_service`
+session/chat routes into agent-hub or retire them, keep `payprobe_common` as
+the single home; one run of each reference workflow against a real provider.
 
 Phase 4 and 5 remain as written in the ADR.
 
