@@ -20,7 +20,7 @@ from pathlib import Path
 
 os.environ.setdefault("PAYPROBE_ENV", "test")
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # hub_testkit
-from hub_testkit import TEST_DSN, truncate  # noqa: E402
+from hub_testkit import TEST_DSN, ensure_test_db, truncate  # noqa: E402
 
 os.environ["AGENT_HUB_DATABASE_URL"] = TEST_DSN
 
@@ -42,6 +42,7 @@ def _reachable() -> str | None:
     import asyncpg
 
     async def probe():
+        await ensure_test_db()  # the suite wipes its database: it must be its own
         con = await asyncpg.connect(TEST_DSN, timeout=3)
         await con.close()
 

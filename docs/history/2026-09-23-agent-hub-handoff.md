@@ -361,6 +361,15 @@ security review and Go/No-Go.
   quarantined: no mechanism was found. If it recurs, suspect the
   `_wait_stats(pending == 0)` poll racing the delivery task and make the
   test wait on `sent == 1` instead.
+- Incident (2026-09-23, mine): the test suite's default DSN was the platform's
+  `payprobe` database and the suite truncates every agent-hub table before
+  each test, so a day of host test runs through the forwarded port erased the
+  real heartbeat history (the first scheduled observer wakes, the triage) and
+  David's own `a1` agent. Builtins re-seeded themselves; the outputs survive
+  only in the session transcript and the ADR notes. Fix: `hub_testkit` now
+  defaults to `payprobe_test`, created on demand by `ensure_test_db()`; the
+  conftest probe calls it; README, CLAUDE.md and the skill say so. Test
+  leftovers (`hooked`) were deleted from the live registry by hand.
 
 ## 9. Suggested opening prompt for the Claude Code session
 

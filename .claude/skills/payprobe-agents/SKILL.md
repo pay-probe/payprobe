@@ -194,6 +194,7 @@ and full modes, size, wake input, forged approvals) and `tests/test_hub_egress.p
 | Rows stuck `running` after a restart | the watchdog marks rows past `wall_clock_s` + 60 s as `failed` / `orphaned by restart` at startup; inside the wall clock they are left alone |
 | `budget_exceeded` without running | daily token budget spent (hard stop) or `max_tokens` / `max_steps` inside the wake; see `error` |
 | Whole test suite "N skipped" in one combined session | agent-hub's conftest skips every test when its Postgres is unreachable; run per package, forward 5432 (compose does not publish it) |
+| Registry or heartbeat history vanished after running tests | the suite truncates the database it points at; it defaults to `payprobe_test` (created on demand) since 2026-09-23, so check `AGENT_HUB_TEST_DATABASE_URL` is not the platform's `payprobe` database. Builtins are re-seeded on the next start; user-created definitions and heartbeats are not recoverable |
 | Approval never decided, run `failed` "approval timed out" | `timeout_s` elapsed on the 30 s tick; rerun the workflow |
 | Event never woke anyone | orchestrator lacks `AGENT_HUB_API_URL`, or no active agent declares that `event` trigger (`GET /agents/{name}` → spec.triggers) |
 

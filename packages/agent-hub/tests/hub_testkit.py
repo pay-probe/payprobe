@@ -7,9 +7,31 @@ whichever loaded first. Helpers therefore live here under a unique name.
 
 import os
 
+#: The suite TRUNCATES the agent-hub tables before every test. It therefore
+#: never defaults to the platform database: it uses its own ``payprobe_test``
+#: (CI's name too), created on demand from the compose dev credentials. Point
+#: AGENT_HUB_TEST_DATABASE_URL elsewhere only at a database you are happy to
+#: wipe. (Lesson of 2026-09-23: the old default was the live dev database, and
+#: one afternoon of test runs erased a day of real heartbeat history.)
 TEST_DSN = os.environ.get(
-    "AGENT_HUB_TEST_DATABASE_URL", "postgresql://payprobe:payprobe@localhost:5432/payprobe"
+    "AGENT_HUB_TEST_DATABASE_URL", "postgresql://payprobe:payprobe@localhost:5432/payprobe_test"
 )
+
+
+async def ensure_test_db() -> None:
+    """Create the test database if it does not exist (idempotent). Connects to
+    the ``postgres`` maintenance database with the same credentials; a failure
+    here surfaces as the conftest's normal 'unreachable, skipping' path."""
+    import asyncpg
+
+    name = TEST_DSN.rsplit("/", 1)[-1].split("?")[0]
+    admin = TEST_DSN.rsplit("/", 1)[0] + "/postgres"
+    con = await asyncpg.connect(admin, timeout=3)
+    try:
+        if not await con.fetchval("SELECT 1 FROM pg_database WHERE datname=$1", name):
+            await con.execute(f'CREATE DATABASE "{name}"')
+    finally:
+        await con.close()
 
 
 async def truncate() -> None:

@@ -82,5 +82,10 @@ cd packages && PYTHONPATH=. pytest agent-hub/tests -q       # or: make test-agen
 ```
 
 Needs a reachable Postgres at `AGENT_HUB_TEST_DATABASE_URL` (default: the
-compose dev credentials on localhost); without one the suite skips with a
-reason rather than silently passing against a file.
+compose dev credentials on localhost, database **`payprobe_test`**, created on
+demand); without one the suite skips with a reason rather than silently
+passing against a file. The suite truncates every agent-hub table before each
+test, so never point it at a database holding a real registry: the old default
+(the platform's `payprobe` database) erased a day of heartbeat history on
+2026-09-23. Compose does not publish 5432; forward it first (a `socat`
+sidecar on the compose network, or a compose override).

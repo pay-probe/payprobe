@@ -59,7 +59,10 @@ in `docs/adr/`.
   passes alone. In one combined session the agent-hub conftest skips **every**
   collected test when its PostgreSQL is unreachable: a fast "N skipped" run is
   "database down", never green. The agent-hub and insight-service suites need
-  a reachable Postgres (compose does not publish 5432; forward it first).
+  a reachable Postgres (compose does not publish 5432; forward it first). The
+  agent-hub suite **truncates its database before every test**: it defaults to
+  its own `payprobe_test` (created on demand); never set
+  `AGENT_HUB_TEST_DATABASE_URL` to the platform's `payprobe` database.
 - The MCP registry has a **generated portal catalog**: after touching
   `mcp_server/registry.py` or `prompts.py`, run
   `python packages/mcp-server/scripts/gen_catalog.py` or
