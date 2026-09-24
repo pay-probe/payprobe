@@ -1,0 +1,11 @@
+# Offline portal image: the Angular app is built outside (ng build) and copied in.
+# nginx.conf is mounted at run time (infra/nginx/nginx.minimal.conf). Context = kit root.
+# Runs as the image's nginx user: the config listens on 8443 (unprivileged) and
+# keeps its pid and temp files under /tmp, so nothing needs root.
+FROM nginx:alpine
+COPY portal-dist/ /usr/share/nginx/html
+RUN mkdir -p /tmp/nginx && chown -R nginx:nginx /tmp/nginx /usr/share/nginx/html
+USER nginx
+EXPOSE 8443
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q --no-check-certificate -O /dev/null https://127.0.0.1:8443/ || exit 1

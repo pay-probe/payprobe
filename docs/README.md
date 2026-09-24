@@ -10,7 +10,7 @@ by what you're trying to do, not by how the code is structured. Four modes:
 | Mode | When you're… | Where |
 |---|---|---|
 | **Tutorial** | learning by doing, start to finish | [Quick start](getting-started/quick-start.md) · [Showcase network](getting-started/showcase.md) · in‑app **Docs** page |
-| **How‑to guide** | getting one specific job done | [Writing an adapter](adapters/writing-an-adapter.md) · [gRPC adapter](adapters/grpc.md) · [Code step](scenarios/code-step.md) · [Participant flows end to end](participant-flow-end-to-end-guide.md) · [Authoring a provider pack](authoring-a-provider-pack.md) · [Load test runbook](operations/load-test-runbook.md) |
+| **How‑to guide** | getting one specific job done | [Writing an adapter](adapters/writing-an-adapter.md) · [gRPC adapter](adapters/grpc.md) · [Code step](scenarios/code-step.md) · [Participant flows end to end](participant-flow-end-to-end-guide.md) · [Authoring a provider pack](authoring-a-provider-pack.md) · [Load test runbook](operations/load-test-runbook.md) · [Offline minimal deployment](operations/offline-minimal-deployment.md) |
 | **Reference** | looking a fact up | [Configuration](operations/configuration.md) · [payShield 10K simulator](simulators/payshield-10k.md) · [payShield HSM commands](simulators/payshield-hsm-reference.md) · [VISA scheme simulator](simulators/visa-scheme.md) · **interactive API reference** (below); scenario shape: ["Adding a scenario" in the README](../README.md#adding-a-scenario) |
 | **Explanation** | understanding the why | [Architecture overview](architecture/overview.md) · [Live run streaming](architecture/streaming.md) · [Insight service](architecture/insight-service.md) · [ADRs](adr/) |
 
