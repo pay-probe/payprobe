@@ -30,8 +30,11 @@ Design notes
 """
 from __future__ import annotations
 
+import math as _math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
+
+from .crypto import fingerprint, is_secret_key
 
 
 class GuardrailError(Exception):
@@ -107,6 +110,9 @@ class Backend(Protocol):
     # starts/stops anything, that stays with the operator)
     def platform_status(self) -> dict: ...
     def list_runs(self) -> list[dict]: ...
+    # deterministic per-scenario history of one run (ADR-0010): the evidence
+    # an agent's "regression" claim is checked against; None for an unknown run
+    def get_run_regression(self, run_id: str) -> dict | None: ...
     def list_network_runs(self) -> list[dict]: ...
     def list_running_participants(self) -> list[dict]: ...
     def list_running_simulators(self) -> list[dict]: ...
@@ -121,6 +127,19 @@ class Backend(Protocol):
     def get_run_insights(self, run_id: str) -> dict | None: ...
     def list_insight_predictions(
         self, environment: str | None = None) -> dict: ...
+    # ADR-0010: the insight service as a first-class agent tool — its status,
+    # one scenario's prediction, the learned taxonomy, and (execute tier) a
+    # training pass that writes only to the insight service's own model store
+    def insight_status(self) -> dict: ...
+    def get_scenario_prediction(
+        self, scenario_id: str, environment: str | None = None) -> dict | None: ...
+    def list_insight_categories(self) -> Any: ...
+    def train_insights(self) -> dict: ...
+    # deterministic run history from the orchestrator (ADR-0010): per-day
+    # trend and per-scenario flakiness, the evidence an observer cites
+    def run_trend(self, days: int = 30, label: str | None = None) -> list[dict]: ...
+    def run_flakiness(self, days: int = 30, label: str | None = None,
+                      min_runs: int = 3) -> list[dict]: ...
     # playground (orchestrator, ADR-0007): ad-hoc execution BY REFERENCE —
     # the orchestrator resolves the target server-side (connection ⊕ override
     # matrix; secrets never round-trip) and echoes masked payloads.
@@ -151,15 +170,24 @@ class ChangeRecord:
 
 @dataclass
 class ChangeJournal:
-    """Records reversible writes for one assistant session, as plain data."""
+    """Records reversible writes for one assistant session, as plain data.
+
+    ``on_record`` (optional) is called with each record's dict the moment it
+    is made, which is *before* the write it protects executes: a caller that
+    persists the record there (agent-hub does, per heartbeat) makes the
+    ``before`` snapshot durable first, and if persisting fails the exception
+    stops the write, so no change ever happens without a journal entry."""
 
     records: list[ChangeRecord] = field(default_factory=list)
+    on_record: Callable[[dict], None] | None = None
     _seq: int = 0
 
     def record(self, tool: str, resource: str, key: str, summary: str,
                before: Any) -> ChangeRecord:
         self._seq += 1
         rec = ChangeRecord(self._seq, tool, resource, key, summary, before)
+        if self.on_record is not None:
+            self.on_record(rec.to_dict())  # durable before the write; a failure refuses it
         self.records.append(rec)
         return rec
 
@@ -358,6 +386,11 @@ def dispatch(ctx: ToolContext, name: str, args: dict | None = None,
         return {"tool": name, "ok": False, "error": str(exc), "guardrail": True}
     except (ToolError, ValueError, KeyError, RuntimeError) as exc:
         return {"tool": name, "ok": False, "error": str(exc), "guardrail": False}
+    except Exception as exc:  # noqa: BLE001 — any other failure is data for the model too
+        # e.g. http.client.InvalidURL from an id a model invented: the loop
+        # must see an error envelope and carry on, never lose the heartbeat.
+        return {"tool": name, "ok": False, "guardrail": False,
+                "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _issue_errors(check: dict) -> list[str]:
@@ -551,6 +584,21 @@ def _list_runs(ctx: ToolContext, args: dict) -> Any:
     return rows[:limit]
 
 
+@_tool("get_run_regression", "read",
+       "Deterministic regression evidence for ONE run, from the platform's run "
+       "history: per scenario, whether it passed in an earlier run "
+       "(conclusion 'regression'), failed in every earlier run ('never_passed') "
+       "or has no history ('first_run'), with the last passing run id and the "
+       "current failure streak. THE authority on 'is this a regression': "
+       "report its `verdict`, never your own guess.",
+       _obj({"run_id": _STR}, ["run_id"]))
+def _get_run_regression(ctx: ToolContext, args: dict) -> Any:
+    ev = ctx.backend.get_run_regression(args["run_id"])
+    if ev is None:
+        raise ToolError(f"run '{args['run_id']}' not found")
+    return ev
+
+
 @_tool("list_network_runs", "read",
        "Live network runs (started networks / simulated payment networks): "
        "per-run readiness health (live/total/ready) and every instance's bound "
@@ -629,8 +677,82 @@ def _list_insight_predictions(ctx: ToolContext, args: dict) -> Any:
         args.get("environment") or None)
 
 
+@_tool("insight_status", "read",
+       "Health of the ADVISORY insight service: corpus size (runs ingested), "
+       "the active learned categorizer and when it was trained, prediction "
+       "calibration. Call before trusting get_run_insights or predictions: a "
+       "thin corpus means weak advice.",
+       _obj({}))
+def _insight_status(ctx: ToolContext, args: dict) -> Any:
+    return ctx.backend.insight_status()
+
+
+@_tool("get_scenario_prediction", "read",
+       "ADVISORY outcome prediction for ONE scenario: `p_fail_next`, "
+       "`p_flaky`, `n_history` and `top_factors`, optionally for one "
+       "environment. Use for 'is this scenario likely to fail again'; never "
+       "a reason to skip a run.",
+       _obj({"scenario_id": _STR, "environment": _STR}, ["scenario_id"]))
+def _get_scenario_prediction(ctx: ToolContext, args: dict) -> Any:
+    out = ctx.backend.get_scenario_prediction(
+        args["scenario_id"], args.get("environment") or None)
+    if out is None:
+        raise ToolError(
+            f"no recorded outcomes for scenario '{args['scenario_id']}'")
+    return out
+
+
+@_tool("list_insight_categories", "read",
+       "The failure taxonomy the insight service learned from run history: "
+       "category id, label, size, example messages. Use it to name a failure "
+       "category the way the platform already does.",
+       _obj({}))
+def _list_insight_categories(ctx: ToolContext, args: dict) -> Any:
+    return ctx.backend.list_insight_categories()
+
+
+@_tool("train_insights", "execute",
+       "Ingest newly completed runs into the insight corpus and (re)fit the "
+       "learned categorizer. Incremental and idempotent; writes only to the "
+       "insight service's own model store, never to scenarios, runs or "
+       "config. Call it when get_run_insights says the corpus is stale.",
+       _obj({}))
+def _train_insights(ctx: ToolContext, args: dict) -> Any:
+    return ctx.backend.train_insights()
+
+
+@_tool("run_trend", "read",
+       "Per-day run-outcome trend from the platform's run history: runs, "
+       "passed/failed and the scenario pass-rate per day (most recent `days`, "
+       "default 30; optional run `label` to narrow). Deterministic evidence "
+       "for 'is the network getting better or worse'.",
+       _obj({"days": {"type": "integer"}, "label": _STR}))
+def _run_trend(ctx: ToolContext, args: dict) -> Any:
+    return ctx.backend.run_trend(int(args.get("days") or 30), args.get("label") or None)
+
+
+@_tool("run_flakiness", "read",
+       "Scenarios that both passed and failed within the window, ranked by "
+       "flip score (1.0 = alternating every run), with runs/passed/failed "
+       "counts and last status. Deterministic, from run history; a scenario "
+       "that always fails is a regression (see get_run_regression), not flaky.",
+       _obj({"days": {"type": "integer"}, "label": _STR,
+             "min_runs": {"type": "integer"}}))
+def _run_flakiness(ctx: ToolContext, args: dict) -> Any:
+    return ctx.backend.run_flakiness(
+        int(args.get("days") or 30), args.get("label") or None,
+        int(args.get("min_runs") or 3))
+
+
 # =============================================================================
 # WRITE tools (journalled, guard-railed)
+#
+# Order inside every update/delete handler: capture `before`, record the
+# journal entry, THEN write. With a write-through `ChangeJournal.on_record`
+# the entry is durable before the change exists, and a failure to persist it
+# refuses the change. A record whose write then fails restores to the state
+# that already holds, which is harmless. Creates record after the write
+# because the key is the id the write assigns.
 # =============================================================================
 
 @_tool("upsert_connection", "write",
@@ -640,10 +762,10 @@ def _list_insight_predictions(ctx: ToolContext, args: dict) -> Any:
 def _upsert_connection(ctx: ToolContext, args: dict) -> Any:
     name = args["name"]
     before = ctx.backend.get_connection(name)
-    saved = ctx.backend.put_connection(name, args.get("config") or {})
     verb = "updated" if before else "created"
     ctx.journal.record("upsert_connection", "connection", name,
                        f"{verb} connection '{name}'", before)
+    saved = ctx.backend.put_connection(name, args.get("config") or {})
     return {"saved": saved, "action": verb}
 
 
@@ -659,9 +781,9 @@ def _delete_connection(ctx: ToolContext, args: dict) -> Any:
     before = ctx.backend.get_connection(name)
     if before is None:
         raise ToolError(f"no connection '{name}'")
-    ctx.backend.delete_connection(name)
     ctx.journal.record("delete_connection", "connection", name,
                        f"deleted connection '{name}'", before)
+    ctx.backend.delete_connection(name)
     return {"deleted": name}
 
 
@@ -671,9 +793,9 @@ def _delete_connection(ctx: ToolContext, args: dict) -> Any:
 def _save_table(ctx: ToolContext, args: dict) -> Any:
     name = args["name"]
     before = ctx.backend.get_table(name)
-    saved = ctx.backend.put_table(name, args.get("draft") or {})
     verb = "updated" if before else "created"
     ctx.journal.record("save_table", "table", name, f"{verb} table '{name}'", before)
+    saved = ctx.backend.put_table(name, args.get("draft") or {})
     return {"saved": saved, "action": verb}
 
 
@@ -684,8 +806,8 @@ def _delete_table(ctx: ToolContext, args: dict) -> Any:
     before = ctx.backend.get_table(name)
     if before is None:
         raise ToolError(f"no table '{name}'")
-    ctx.backend.delete_table(name)
     ctx.journal.record("delete_table", "table", name, f"deleted table '{name}'", before)
+    ctx.backend.delete_table(name)
     return {"deleted": name}
 
 
@@ -695,10 +817,10 @@ def _delete_table(ctx: ToolContext, args: dict) -> Any:
              "secrets": {"type": "array", "items": _STR}}, ["variables"]))
 def _set_global_variables(ctx: ToolContext, args: dict) -> Any:
     before = ctx.backend.get_global_variables()
-    saved = ctx.backend.set_global_variables(
-        args.get("variables") or {}, args.get("secrets") or [])
     ctx.journal.record("set_global_variables", "variables", "global",
                        "replaced global variables", before)
+    saved = ctx.backend.set_global_variables(
+        args.get("variables") or {}, args.get("secrets") or [])
     return saved
 
 
@@ -721,9 +843,9 @@ def _delete_starter_flow(ctx: ToolContext, args: dict) -> Any:
     before = ctx.backend.get_starter_flow(fid)
     if before is None:
         raise ToolError(f"no starter flow '{fid}'")
-    ctx.backend.delete_starter_flow(fid)   # GuardrailError for builtins
     ctx.journal.record("delete_starter_flow", "starter_flow", fid,
                        f"deleted starter flow '{fid}'", before)
+    ctx.backend.delete_starter_flow(fid)   # GuardrailError for builtins
     return {"deleted": fid}
 
 
@@ -773,10 +895,10 @@ def _update_scenario(ctx: ToolContext, args: dict) -> Any:
     if before is None:
         raise ToolError(f"no scenario '{sid}'")
     draft = _validated_scenario(ctx, args)
+    ctx.journal.record("update_scenario", "scenario", sid,
+                       f"updated scenario '{draft.get('name') or before.get('name')}'", before)
     updated = ctx.backend.update_scenario(
         sid, draft, args.get("comment") or "updated via assistant")
-    ctx.journal.record("update_scenario", "scenario", sid,
-                       f"updated scenario '{updated.get('name')}'", before)
     return _scenario_summary(updated)
 
 
@@ -796,10 +918,10 @@ def _save_network(ctx: ToolContext, args: dict) -> Any:
     if errors:
         raise ToolError("network is invalid: " + "; ".join(errors))
     before = ctx.backend.get_network(nid)
-    saved = ctx.backend.put_network(nid, net)
     verb = "updated" if before else "created"
     ctx.journal.record("save_network", "network_flow", nid,
-                       f"{verb} network '{saved.get('name')}'", before)
+                       f"{verb} network '{net.get('name') or nid}'", before)
+    saved = ctx.backend.put_network(nid, net)
     return {"saved": _network_summary(saved), "action": verb}
 
 
@@ -812,9 +934,9 @@ def _delete_network(ctx: ToolContext, args: dict) -> Any:
     before = ctx.backend.get_network(nid)
     if before is None:
         raise ToolError(f"no network '{nid}'")
-    ctx.backend.delete_network(nid)
     ctx.journal.record("delete_network", "network_flow", nid,
                        f"deleted network '{nid}'", before)
+    ctx.backend.delete_network(nid)
     return {"deleted": nid}
 
 
@@ -897,3 +1019,227 @@ def _start_load_run(ctx: ToolContext, args: dict) -> Any:
     if args.get("extra"):
         body.update(args["extra"])
     return ctx.backend.start_load_run(body)
+
+
+# -- scoped toolkit (ADR-0010: agents get tools only through this) --------------
+
+#: Tools whose results carry data that originated outside the registry —
+#: runtime state, captured traffic, simulator output, model advice. Their
+#: results are wrapped as untrusted so a runner never treats content found in
+#: them as instructions (prompt-injection boundary).
+#:
+#: Since the ADR-0010 security review (2026-09-24) this is every read and
+#: execute tool: registry content is authored by users and by other agents
+#: (a scenario description is as good a place for an injected directive as a
+#: captured message), so nothing a tool returns is ever an instruction.
+UNTRUSTED_RESULT_TOOLS: frozenset[str] = frozenset(
+    n for n, t in REGISTRY.items() if t.tier in ("read", "execute")
+)
+
+
+def mask_secrets(node: Any) -> Any:
+    """Deep copy of ``node`` with every non-empty string under a secret-named
+    key (``password``, ``api_key``, ``*_secret``, ...; see
+    :func:`payprobe_common.crypto.is_secret_key`) replaced by
+    ``<secret:fingerprint>``. Applied to every tool result before the model
+    sees it and to heartbeat records before an API caller does: a credential
+    the registry holds never reaches an LLM provider or a viewer (CLAUDE.md
+    invariant #8). The journal keeps plaintext, SecretBox-encrypted at rest,
+    because restore needs the real value."""
+    if isinstance(node, dict):
+        out: dict = {}
+        for k, v in node.items():
+            if is_secret_key(str(k)) and isinstance(v, str) and v:
+                out[k] = f"<secret:{fingerprint(v)}>"
+            else:
+                out[k] = mask_secrets(v)
+        return out
+    if isinstance(node, list):
+        return [mask_secrets(v) for v in node]
+    return node
+
+#: Arg names that name a project or an environment (top level, or one level
+#: down inside ``spec`` / ``target``), used by the write-scope check.
+_SCOPE_PROJECT_KEYS = ("project_id", "project")
+_SCOPE_ENV_KEYS = ("environment", "environment_name", "env")
+
+#: How much of a tool result the model may see (bytes of JSON).
+DEFAULT_RESULT_CAP = 64 * 1024
+
+
+def tiers_for_mode(mode: str) -> tuple[str, ...]:
+    """``advisor`` and ``plan`` may only *execute* the read tier (plan mode
+    shows write schemas so the model can propose exact calls, but dispatch
+    refuses them); ``full`` executes everything."""
+    return ALL_TIERS if mode == "full" else ("read",)
+
+
+@dataclass(frozen=True)
+class ToolScope:
+    """The per-agent grant a runner builds from its registry entry."""
+
+    allow: frozenset[str]
+    mode: str = "plan"
+    projects: tuple[str, ...] = ()
+    environments: tuple[str, ...] = ()
+    result_cap: int = DEFAULT_RESULT_CAP
+    #: ``start_load_run`` above this rate (target / end / spike tps) is refused
+    #: here; heavier load only through an approved workflow step (ADR-0010
+    #: ``AGENT_LOAD_APPROVAL_TPS``). None = no cap.
+    load_tps_cap: int | None = None
+
+    @property
+    def tiers(self) -> tuple[str, ...]:
+        return tiers_for_mode(self.mode)
+
+    def schemas(self) -> list[dict]:
+        """The schemas this agent may see: allowlisted tools only. In plan
+        mode the write schemas are visible (the model proposes exact calls),
+        in advisor mode only the read tier is."""
+        visible = ALL_TIERS if self.mode in ("plan", "full") else ("read",)
+        return [{"name": t.name, "description": t.description,
+                 "parameters": t.parameters}
+                for t in tools_for(visible) if t.name in self.allow]
+
+
+def _scope_values(args: dict, keys: tuple[str, ...]) -> list[str]:
+    found: list[str] = []
+    for k in keys:
+        v = args.get(k)
+        if isinstance(v, str) and v:
+            found.append(v)
+    for nested in ("spec", "target", "extra"):  # `extra` is merged into the load body
+        inner = args.get(nested)
+        if isinstance(inner, dict):
+            for k in keys:
+                v = inner.get(k)
+                if isinstance(v, str) and v:
+                    found.append(v)
+    return found
+
+
+def _outside(values: list[str], allowed: tuple[str, ...]) -> str | None:
+    if "*" in allowed:
+        return None
+    for v in values:
+        if v not in allowed:
+            return v
+    return None
+
+
+def check_write_scope(scope: ToolScope, spec: ToolSpec, args: dict) -> str | None:
+    """Reason a write/execute call is outside the agent's write scope, or None.
+
+    Rules (deliberately simple, enforced here rather than in prompts):
+
+    * read-tier tools are never scope-checked;
+    * a call naming a project or environment must name one in scope
+      (``"*"`` in the scope list allows any);
+    * a write that names neither (connections, tables, starter flows,
+      variables: global registry objects) needs ``"*"`` in ``projects``.
+    """
+    if spec.tier == "read":
+        return None
+    projects = _scope_values(args, _SCOPE_PROJECT_KEYS)
+    envs = _scope_values(args, _SCOPE_ENV_KEYS)
+    if bad := _outside(projects, scope.projects):
+        return f"project '{bad}' is outside this agent's write scope"
+    if bad := _outside(envs, scope.environments):
+        return f"environment '{bad}' is outside this agent's write scope"
+    if not projects and not envs and "*" not in scope.projects:
+        return "global registry writes need '*' in the agent's project scope"
+    return None
+
+
+def _cap_result(result: Any, cap: int) -> tuple[Any, bool]:
+    import json as _json
+    try:
+        blob = _json.dumps(result, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        blob = str(result)
+    if len(blob.encode("utf-8")) <= cap:
+        return result, False
+    cut = blob.encode("utf-8")[:cap].decode("utf-8", "ignore")
+    return {"truncated_json": cut, "note": f"result exceeded {cap} bytes and was cut"}, True
+
+
+#: the one tool that fires real traffic; its rate knobs, top level or in `extra`
+_LOAD_TOOL = "start_load_run"
+_LOAD_RATE_KEYS = ("target_tps", "end_tps", "spike_tps", "start_tps", "base_tps")
+
+
+def requested_tps(args: dict) -> float:
+    """The highest rate a ``start_load_run`` call asks for (0 if none). A
+    nan/inf value, which would slip past every ``> cap`` comparison, counts
+    as unbounded."""
+    peak = 0.0
+    for holder in (args, args.get("extra") if isinstance(args.get("extra"), dict) else {}):
+        for k in _LOAD_RATE_KEYS:
+            v = holder.get(k)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, str):
+                try:
+                    v = float(v)
+                except ValueError:
+                    continue
+            if isinstance(v, (int, float)):
+                if not _math.isfinite(float(v)):
+                    return float("inf")
+                peak = max(peak, float(v))
+    return peak
+
+
+def check_load_cap(scope: ToolScope, name: str, args: dict) -> str | None:
+    """Refusal reason when a load run asks for more than the scope's cap.
+
+    Load is the one agent action that reaches real endpoints at volume, so a
+    heartbeat may only start it below ``AGENT_LOAD_APPROVAL_TPS``; anything
+    heavier goes through a workflow ``tool`` node behind an ``approval``
+    (the engine builds that scope without a cap)."""
+    if name != _LOAD_TOOL or not scope.load_tps_cap:
+        return None
+    peak = requested_tps(args)
+    if peak > scope.load_tps_cap:
+        return (f"load at {peak:g} tps exceeds this agent's cap of "
+                f"{scope.load_tps_cap} tps (AGENT_LOAD_APPROVAL_TPS): heavier load "
+                "needs an approved workflow step, not a heartbeat")
+    return None
+
+
+def scoped_dispatch(ctx: ToolContext, scope: ToolScope, name: str,
+                    args: dict | None = None) -> dict:
+    """:func:`dispatch` behind an agent's grant. Same envelope, plus:
+
+    * a tool outside ``scope.allow`` is refused (``guardrail: True``) even if
+      the model somehow names it (schemas are filtered too, defense in depth);
+    * tiers follow ``scope.mode`` — a write in plan mode is refused with the
+      "describe it in your plan" hint so the runner can record a *proposed*
+      call instead;
+    * write/execute calls are checked against the write scope;
+    * results have secret-named values masked (:func:`mask_secrets`), are
+      capped and, for :data:`UNTRUSTED_RESULT_TOOLS` (every read and execute
+      tool), wrapped as ``{"kind": "untrusted", "source": <tool>, "data": ...}``.
+    """
+    args = args or {}
+    if name not in scope.allow:
+        return {"tool": name, "ok": False, "guardrail": True,
+                "error": f"tool '{name}' is not in this agent's allowlist"}
+    spec = REGISTRY.get(name)
+    if spec is None:
+        return {"tool": name, "ok": False, "guardrail": False,
+                "error": f"unknown tool '{name}'"}
+    if spec.tier in scope.tiers:
+        if reason := check_write_scope(scope, spec, args):
+            return {"tool": name, "ok": False, "guardrail": True, "error": reason}
+        if reason := check_load_cap(scope, name, args):
+            return {"tool": name, "ok": False, "guardrail": True, "error": reason}
+    out = dispatch(ctx, name, args, tiers=scope.tiers)
+    if out.get("ok"):
+        result, truncated = _cap_result(mask_secrets(out.get("result")), scope.result_cap)
+        if name in UNTRUSTED_RESULT_TOOLS:
+            result = {"kind": "untrusted", "source": name, "data": result}
+        out["result"] = result
+        if truncated:
+            out["truncated"] = True
+    return out

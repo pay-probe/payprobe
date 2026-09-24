@@ -16,7 +16,6 @@ from their upstream registries.
 | `datikos/payprobe-scenario-service` | `packages` | `packages/scenario-service/Dockerfile` |
 | `datikos/payprobe-orchestrator` | repo root | `packages/orchestrator/Dockerfile` |
 | `datikos/payprobe-mcp-server` | `packages/mcp-server` | `packages/mcp-server/Dockerfile` |
-| `datikos/payprobe-assistant` | `packages` | `packages/payprobe-assistant/Dockerfile` |
 | `datikos/payprobe-insight-service` | `packages` | `packages/insight-service/Dockerfile` |
 | `datikos/payprobe-portal` | `packages/portal` | `packages/portal/Dockerfile` |
 | `datikos/payprobe-worker` | repo root | `packages/worker/Dockerfile` |

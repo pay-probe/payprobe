@@ -190,7 +190,8 @@ docker compose -f infra/docker/docker-compose.yml up --build
   secrets/endpoints (values themselves: `payprobe-config-and-flags`).
 - Default service ports: portal **8080**, scenario-service **8000**,
   orchestrator **8100**, mcp-server **8200**, auth-service **8300**,
-  assistant **8400**.
+  insight-service **8500**, agent-hub **8600** (the assistant is mounted
+  inside it at `/assistant`; the :8400 container was removed 2026-09-23).
 - Profiles: `--profile full` (501 placeholder stubs), `--profile tools`
   (one-shot worker CLI), `--profile load` (load-worker fleet),
   `--profile observability` (Prometheus :9090 + Grafana :3000).

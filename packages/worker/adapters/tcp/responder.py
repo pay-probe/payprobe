@@ -53,7 +53,7 @@ import random
 import time
 from typing import Any
 
-from . import iso8583
+from . import framing, iso8583
 from .chaos import ChaosEngine
 
 log = logging.getLogger(__name__)
@@ -109,6 +109,7 @@ class TcpResponder:
         f = config.get("framing", {})
         self.prefix_bytes = int(f.get("length_prefix_bytes", 2))
         self.byte_order = f.get("length_byte_order", "big")
+        self.length_encoding = framing.normalise_length_encoding(f.get("length_encoding"))
         self.length_includes_prefix = bool(f.get("length_includes_prefix", False))
         self.length_includes_header = bool(f.get("length_includes_header", True))
         self.tpdu_bytes = int(f.get("tpdu_bytes", 0))
@@ -164,12 +165,11 @@ class TcpResponder:
         return None
 
     async def stop(self) -> None:
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
         # Drop every live client connection so callers see the socket close and
         # reconnect to the next instance instead of lingering on a dead handler.
+        # Must happen BEFORE wait_closed(): since Python 3.12 that call blocks
+        # until every active connection is gone, so closing clients afterwards
+        # deadlocks stop() whenever a client is still attached.
         for writer in list(self._conns):
             try:
                 writer.close()
@@ -177,6 +177,10 @@ class TcpResponder:
                 log.debug("responder: error closing client socket on stop: %s", exc)
         self._conns.clear()
         self._conn_meta.clear()
+        if self._server is not None:
+            self._server.close()
+            await self._server.wait_closed()
+            self._server = None
 
     async def serve_forever(self) -> None:
         assert self._server is not None
@@ -326,6 +330,7 @@ class TcpResponder:
                         outcome.malformed,
                         prefix_bytes=self.prefix_bytes,
                         byte_order=self.byte_order,
+                        length_encoding=self.length_encoding,
                     )
 
                 if outcome.partial:
@@ -356,14 +361,17 @@ class TcpResponder:
         payload = self.tpdu_out + body
         counted = len(payload) if self.length_includes_header else len(body)
         length = counted + (self.prefix_bytes if self.length_includes_prefix else 0)
-        return length.to_bytes(self.prefix_bytes, self.byte_order) + payload
+        prefix = framing.encode_length(
+            length, self.prefix_bytes, self.byte_order, self.length_encoding
+        )
+        return prefix + payload
 
     async def _read_frame(self, reader: asyncio.StreamReader) -> bytes | None:
         try:
             prefix = await reader.readexactly(self.prefix_bytes)
         except asyncio.IncompleteReadError:
             return None
-        length = int.from_bytes(prefix, self.byte_order)
+        length = framing.decode_length(prefix, self.byte_order, self.length_encoding)
         core = length - (self.prefix_bytes if self.length_includes_prefix else 0)
         remaining = core if self.length_includes_header else core + self.tpdu_bytes
         if remaining <= 0:

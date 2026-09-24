@@ -10,6 +10,7 @@ export type EndpointKey =
   | "auth"
   | "assistant"
   | "insight"
+  | "agent-hub"
   | "redis"
   | "mcp";
 
@@ -117,9 +118,10 @@ export class RuntimeConfigService {
 
   /** Where the assistant *chat* is sent. An explicit "assistant" endpoint
    *  override (Settings → Endpoints) wins; otherwise the environment default —
-   *  the standalone payprobe-assistant (:8400 dev, /api/assistant prod) since
-   *  the 2026-07-07 cutover. Overriding to the scenario service (:8000) falls
-   *  back to the deprecated in-process shim. */
+   *  the assistant mounted inside agent-hub (dev `:8600/assistant`, prod
+   *  `/api/assistant`, ADR-0010 D2; the standalone :8400 container is gone).
+   *  Overriding to the scenario service (:8000) falls back to the deprecated
+   *  in-process shim. */
   get assistantApiBase(): string {
     const o = this.endpoint("assistant");
     return this.hasOverride("assistant")
@@ -131,6 +133,12 @@ export class RuntimeConfigService {
    *  must degrade gracefully when it isn't reachable. */
   get insightApiBase(): string {
     return this.baseFor("insight", environment.insightApiBase);
+  }
+
+  /** Agent registry (ADR-0010). Optional deployment — the Agents page
+   *  degrades to a "not reachable" notice when it isn't there. */
+  get agentHubApiBase(): string {
+    return this.baseFor("agent-hub", environment.agentHubApiBase);
   }
 
   /** Build an absolute base from a config's scheme/host/port. */
@@ -226,10 +234,20 @@ export class RuntimeConfigService {
       host: "localhost",
       port: 8300,
     };
-    // The standalone payprobe-assistant container's own address (not the chat
-    // routing target, which may point at the scenario-service shim). Probed at
-    // /health so its status shows even before chat is switched over to it.
-    const assistant = { scheme: "http", host: "localhost", port: 8400 };
+    // The assistant lives inside agent-hub (ADR-0010 D2): its endpoint is the
+    // agent-hub address, so the probe shows whether the chat backend is up.
+    // (The chat routing target itself may still be overridden to the
+    // scenario-service shim; that is `assistantApiBase`, not this entry.)
+    const assistant = parseBase(environment.assistantApiBase ?? "", 8600) ?? {
+      scheme: "http",
+      host: "localhost",
+      port: 8600,
+    };
+    const agentHub = parseBase(environment.agentHubApiBase, 8600) ?? {
+      scheme: "http",
+      host: "localhost",
+      port: 8600,
+    };
     const insight = parseBase(environment.insightApiBase, 8500) ?? {
       scheme: "http",
       host: "localhost",
@@ -289,6 +307,15 @@ export class RuntimeConfigService {
         healthPath: "/health",
         monitorOnly: false,
         hint: "Advisory ML insights — categorize / explain / predict (ADR-0005)",
+      },
+      {
+        key: "agent-hub",
+        label: "Agent hub",
+        ...agentHub,
+        kind: "http",
+        healthPath: "/health",
+        monitorOnly: false,
+        hint: "Agent registry — principals, workflows, pause switch (ADR-0010)",
       },
       {
         key: "redis",

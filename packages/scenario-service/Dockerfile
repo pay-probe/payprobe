@@ -23,6 +23,11 @@ COPY payprobe_common ./payprobe_common
 # "ResolutionImpossible" errors under a transient index state. Installing
 # payprobe-common first means the service's `payprobe-common` dep is already
 # satisfied and never re-resolved.
+# A slow PyPI read (the whole stack builds its images at once) must not fail
+# the image: wait longer per read and retry the download.
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5
+
 RUN pip install --no-cache-dir ./payprobe_common \
  && pip install --no-cache-dir .
 

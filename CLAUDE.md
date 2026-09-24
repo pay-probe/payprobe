@@ -28,9 +28,10 @@ product.
 | `packages/worker` | Execution engine + adapters + simulators; also `load_worker` / `flow_host` fleet roles | — |
 | `packages/mcp-server` | FastMCP proxy over both services (HTTP + stdio) | 8200 |
 | `packages/auth-service` | JWT auth + users/roles | 8300 |
-| `packages/payprobe-assistant` | Standalone LLM-gateway assistant (REST-backed) | 8400 |
+| `packages/payprobe-assistant` | LLM-gateway assistant (REST-backed), a library mounted inside agent-hub at `/assistant` (ADR-0010 D2); the standalone :8400 container was removed 2026-09-23, nginx `/api/assistant/` → agent-hub | (8600) |
 | `packages/insight-service` | Advisory ML insights: failure categorization + explanation + outcome prediction (ADR-0005; read-only, advise-only) | 8500 |
-| `packages/payprobe_common` | Shared: `agent_toolkit` (assistant tool layer), `crypto` (SecretBox) | — |
+| `packages/agent-hub` | Agents (ADR-0010): registry of versioned agent principals and JSON-DAG workflows, heartbeat runner with journal/revert, workflow engine with human approvals, wake sources (portal, MCP, schedule, orchestrator events, signed inbound webhooks), alert webhook, LLM egress allowlist, hub-wide quotas, deterministic post-checks (regression vs run history), insight/run-history tools; also serves the folded-in assistant at `/assistant`; PostgreSQL only (phases 1 to 5 built 2026-09-23; security review 2026-09-24 with 17 fixes on the branch, see `docs/history/2026-09-24-adr-0010-security-review.md`; ADR Accepted 2026-09-24 on David's Go/No-Go) | 8600 |
+| `packages/payprobe_common` | Shared: `agent_toolkit` (tool layer + scoped dispatch), `rest_backend`, `llm_provider`, `crypto` (SecretBox) | — |
 | `packages/report_service` | Shared report/gates/provenance library (orchestrator imports it) | — |
 | `packages/portal` | Angular 22 UI (standalone components, signals, `pp-*` design system) | 4200 |
 
@@ -44,15 +45,24 @@ in `docs/adr/`.
   `make test`, `make test-<pkg>`). Sibling packages import each other
   (`worker`, `payprobe_common`, `report_service`) by path, not installation.
 - Python deps that are NOT installed by default:
-  `structlog httpx iso8583 "mcp[cli]" aiohttp pycryptodome pytest pytest-asyncio`
+  `structlog httpx "mcp[cli]" aiohttp pycryptodome pyjwt asyncpg pytest pytest-asyncio`
   (+ `fakeredis` for the Redis-path tests; `nats-py` for the ADR-0006 NATS
-  tests). Missing `pycryptodome` fails every EMV/ARQC/payShield/VISA crypto test
+  tests). Do NOT `pip install iso8583`: the worker ships its own codec and the
+  PyPI name resolves to an unrelated project whose sdist does not build.
+  Missing `pycryptodome` fails every EMV/ARQC/payShield/VISA crypto test
   with ModuleNotFoundError — that is **environmental, not a regression**. Same
   for missing `aiohttp` (test_cybersource_sim collection) and missing `nats-py`
   (the NATS adapter/responder/flow suites — they skip, not fail, on absence).
 - If cross-package collection ever produces import collisions, run suites **per
-  package** — that is the known-safe mode. `test_payshield_e2e` can flake when
-  run with the whole worker suite (shared simulator state); it passes alone.
+  package** — that is the known-safe mode (and what CI does). `test_payshield_e2e`
+  can flake when run with the whole worker suite (shared simulator state); it
+  passes alone. In one combined session the agent-hub conftest skips **every**
+  collected test when its PostgreSQL is unreachable: a fast "N skipped" run is
+  "database down", never green. The agent-hub and insight-service suites need
+  a reachable Postgres (compose does not publish 5432; forward it first). The
+  agent-hub suite **truncates its database before every test**: it defaults to
+  its own `payprobe_test` (created on demand); never set
+  `AGENT_HUB_TEST_DATABASE_URL` to the platform's `payprobe` database.
 - The MCP registry has a **generated portal catalog**: after touching
   `mcp_server/registry.py` or `prompts.py`, run
   `python packages/mcp-server/scripts/gen_catalog.py` or
@@ -75,6 +85,10 @@ in `docs/adr/`.
    records `before` state; restore is a pure function of
    (resource, key, before) — JSON-serializable, replayable by any replica.
    Never register a write tool without journalling + a `restore_one` branch.
+   Update and delete handlers record **before** they write (agent-hub
+   persists the record write-through, so a process that dies mid-wake
+   still leaves every `before` behind, and a record that cannot be
+   persisted refuses the write). Keep that order.
 3. **The assistant tool layer lives ONCE** in
    `payprobe_common/agent_toolkit.py`. A new tool/domain = one handler there +
    one primitive op in each backend (`StoresBackend` in scenario-service,
@@ -103,6 +117,27 @@ in `docs/adr/`.
    matrix is the values.
 8. **Secrets never round-trip in plaintext.** SecretBox encrypts at rest,
    APIs mask, the vault page never reveals. Don't "fix" masking.
+9. **Agents get tools only through a scoped toolkit** (ADR-0010). A heartbeat
+   holds no service client, base URL or token of its own: it calls
+   `payprobe_common.agent_toolkit.scoped_dispatch` behind a `ToolScope` built
+   from the agent's *published* spec (allowlist, mode, write scope), acting
+   under an on-behalf-of JWT for the invoking user (`act` claim, never `svc`).
+   Allowlist, tiers, write scope, result caps and the untrusted-data envelope
+   are enforced there, never in prompts. The REST backend and the provider
+   caller live once, in `payprobe_common` (`rest_backend`, `llm_provider`).
+10. **No agent side effect without journal and gate.** Every agent write is a
+    journalled toolkit write (invariant #2 applies); `plan` mode records
+    *proposed* calls instead of executing; `full` mode outside `mock` needs an
+    `approval` node on **every path** to it, checked when a workflow is
+    published and again by the engine over the edges that actually fired
+    (a gate a condition skipped, or one crossed on its `rejected` edge, gates
+    nothing). A `full` heartbeat needs a human behind it: a user with an
+    invoke role, or an approved gate; service tokens and event / schedule /
+    webhook wakes are refused, and a `full` agent cannot carry an unattended
+    trigger. Agents are autonomous only inside one bounded heartbeat (per-wake
+    limits, daily budget = schedulability, global pause, which stops tool
+    nodes too). Secret-named values are masked before any model or API viewer
+    sees them (invariant #8 applies to heartbeat records).
 
 ## Operational gotchas
 
@@ -138,16 +173,25 @@ in `docs/adr/`.
 
 - `docs/ATLAS.md` — architecture with reasoning + roadmap (the companion to
   this file).
-- `docs/adr/` — nine ADRs; 0001 (fleet), 0004 (networks) and 0006 (NATS)
+- `docs/adr/` — ten ADRs; 0001 (fleet), 0004 (networks) and 0006 (NATS)
   are fully implemented, 0002 (proxy tap/intercept/stub) through stage 2 with
   only TLS deferred (now specced as 0008, proposed), 0005 (insight service)
   built as advise-only, 0007 (playground) backend built, portal page written
   2026-07-16 but still owed a host build + click-through, 0009 (payment-provider
   integration — PSP simulators/packs + generic `mcp` client adapter + signed
-  webhook emission) implemented, portal presets owed a host build; statuses in
-  the files are kept truthful.
-- `.claude/skills/payprobe-run-and-operate` and `payprobe-config-and-flags`
-  — operator-grade API/env-flag reference, kept current.
+  webhook emission) implemented, portal presets owed a host build, 0010 (agent
+  registry + orchestration) proposed, phases 1 to 5 built 2026-09-23 (registry,
+  heartbeats, workflow engine + approvals, wake sources, alert webhook, egress
+  allowlist, injection pack, quotas, regression post-check, insight tools,
+  sign-off annotation, assistant alias removed), security review 2026-09-24
+  and **Accepted** the same day on David's Go/No-Go; statuses in the files
+  are kept truthful.
+- `.claude/skills/payprobe-run-and-operate`, `payprobe-config-and-flags` and
+  `payprobe-agents` — operator-grade API/env-flag/agent reference, kept current.
 - `docs/history/` — finished build specs, plans and working notes (accurate at
   the time of build; the code has moved past some of them).
 - `docs/history/project-review.md` — the hardening review and what it changed.
+- `docs/history/2026-09-23-agent-hub-handoff.md` — ADR-0010 (agent-hub)
+  state of play: what phases 1 to 4 built, what is verified (including the
+  first real-provider wake), what is owed in order. Start there before touching
+  `packages/agent-hub`; operate it with the `payprobe-agents` skill.

@@ -227,3 +227,89 @@ async def test_approve_endpoint_appends_to_trail(app_module):
     }
     listed = await app_module.list_signoffs(project="p")
     assert any(s["id"] == snap["id"] for s in listed["signoffs"])
+
+
+# -- agent verdicts on the snapshot (ADR-0010: shown, never counted) ---------
+
+def _hb(hb_id, agent, result, status="done"):
+    return {"id": hb_id, "agent": agent, "version": 1, "spec_sha256": "abc",
+            "wake": "event", "status": status, "finished_at": "2026-09-23T17:00:00+00:00",
+            "model": "fake", "result": result, "error": None}
+
+
+def test_agent_verdict_annotation_is_pure_and_advisory():
+    triage = '```json\n{"run_id": "r", "category": "assertion", "root_cause": "RC 05",' \
+             ' "regression": false, "next_step": "check the switch",' \
+             ' "regression_evidence": {"verdict": "first_run", "claimed": true}}\n```'
+    observer = '{"findings": [{"severity": "warn", "subject": "r", "headline": "flaky"}]}'
+    rows = [_hb("h1", "failure-triage", triage), _hb("h2", "observer", observer),
+            _hb("h3", "reviewer", "plain prose"), _hb("h4", "observer", None, status="running")]
+    ann = m._agent_verdict_annotation(rows, "run:r")
+    assert ann["advisory"] is True and ann["counted_in_gate"] is False
+    assert ann["in_content_hash"] is False and ann["available"] is True
+    assert [v["agent"] for v in ann["verdicts"]] == ["failure-triage", "observer", "reviewer"]
+    t = ann["verdicts"][0]["verdict"]
+    assert t["category"] == "assertion" and t["regression"] is False
+    assert t["regression_evidence"] == {"verdict": "first_run", "claimed": True}
+    assert ann["verdicts"][1]["findings"] == [{"severity": "warn", "subject": "r", "headline": "flaky"}]
+    assert ann["verdicts"][2]["text"] == "plain prose"
+    # no rows at all: available False, the reason kept
+    off = m._agent_verdict_annotation(None, "run:r", "agent-hub not configured")
+    assert off["available"] is False and off["verdicts"] == [] and "not configured" in off["error"]
+
+
+async def test_certify_freezes_agent_verdicts_outside_the_hash(app_module, monkeypatch):
+    _finish(app_module, "rX", _pass_summary())
+    body = m.CertifyRequest(pack="switch_settlement", policy=POLICY, project="p")
+    # agent-hub off: the annotation says so, the snapshot is otherwise complete
+    monkeypatch.setattr(m, "AGENT_HUB_API_URL", "")
+    plain = await app_module.certify_run("rX", body, _req())
+    av = plain["annotations"]["agent_verdicts"]
+    assert av["available"] is False and av["verdicts"] == []
+
+    # agent-hub answering: verdicts are attached, hash and verdict unchanged
+    calls = []
+
+    async def fake_get(url):
+        calls.append(url)
+        if url.endswith("/packs/switch_settlement"):
+            return PACK
+        if "/heartbeats?subject=run%3ArX" in url:
+            return [{"id": "h1", "agent": "failure-triage", "status": "done"}]
+        if url.endswith("/heartbeats/h1"):
+            return _hb("h1", "failure-triage",
+                       '{"run_id": "rX", "category": "environment", "regression": false}')
+        raise AssertionError(url)
+
+    monkeypatch.setattr(m, "_http_get_json", fake_get)
+    monkeypatch.setattr(m, "AGENT_HUB_API_URL", "http://hub:8600")
+    snap = await app_module.certify_run("rX", body, _req())
+    av = snap["annotations"]["agent_verdicts"]
+    assert av["available"] is True and av["subject"] == "run:rX"
+    assert av["verdicts"][0]["verdict"]["category"] == "environment"
+    assert snap["verdict"] == plain["verdict"] == "GO"
+    # the annotation is not evidence: the hash is exactly summary + gates + provenance
+    # (it differs from `plain` only because the first GO became the baseline)
+    assert snap["content_hash"] == m._content_hash(
+        summary=snap["summary"], gate_result=snap["gate_result"], prov=snap["provenance"])
+    assert snap["provenance"]["baseline_run_id"] == "rX"
+    assert any(u.startswith("http://hub:8600/heartbeats?subject=") for u in calls)
+    # a stored snapshot carries it
+    assert app_module.signoff_store.get(snap["id"])["annotations"]["agent_verdicts"]["available"]
+
+
+async def test_certify_survives_an_unreachable_agent_hub(app_module, monkeypatch):
+    _finish(app_module, "rX", _pass_summary())
+
+    async def fake_get(url):
+        if url.endswith("/packs/switch_settlement"):
+            return PACK
+        raise ConnectionError("agent-hub down")
+
+    monkeypatch.setattr(m, "_http_get_json", fake_get)
+    monkeypatch.setattr(m, "AGENT_HUB_API_URL", "http://hub:8600")
+    snap = await app_module.certify_run(
+        "rX", m.CertifyRequest(pack="switch_settlement", policy=POLICY, project="p"), _req())
+    av = snap["annotations"]["agent_verdicts"]
+    assert snap["verdict"] == "GO" and av["available"] is False
+    assert "ConnectionError" in av["error"]

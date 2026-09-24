@@ -890,10 +890,16 @@ export const ADAPTERS: AdapterSpec[] = [
             desc: "Width of the length prefix (>= 1; required for multiplexing).",
           },
           {
+            key: "framing.length_encoding",
+            type: "string",
+            default: "binary",
+            desc: '"binary" integer prefix, or "ascii" zero-padded digits, one per prefix byte (0043).',
+          },
+          {
             key: "framing.length_byte_order",
             type: "string",
             default: "big",
-            desc: '"big" | "little".',
+            desc: '"big" | "little" (binary prefixes only).',
           },
           {
             key: "framing.length_includes_prefix",
@@ -1307,10 +1313,16 @@ export const ADAPTERS: AdapterSpec[] = [
             desc: "Framing length-prefix width.",
           },
           {
+            key: "length_encoding",
+            type: "string",
+            default: "binary",
+            desc: '"binary" integer prefix, or "ascii" zero-padded digits (0043).',
+          },
+          {
             key: "length_byte_order",
             type: "string",
             default: "big",
-            desc: '"big" | "little".',
+            desc: '"big" | "little" (binary prefixes only).',
           },
           {
             key: "encoding",

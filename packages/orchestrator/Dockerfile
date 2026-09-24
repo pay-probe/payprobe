@@ -17,6 +17,11 @@ WORKDIR /app
 
 # Third-party deps only; the two local packages are imported via PYTHONPATH.
 # (redis is needed when REDIS_URL is set -> RedisStreamBackbone.)
+# A slow PyPI read (the whole stack builds its images at once) must not fail
+# the image: wait longer per read and retry the download.
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5
+
 RUN pip install --no-cache-dir \
     "fastapi>=0.110" "uvicorn[standard]>=0.27" "redis[hiredis]>=5.0" \
     "pydantic>=2.0" "httpx>=0.27" "pycryptodome>=3.20" "PyJWT>=2.8" \

@@ -6,6 +6,8 @@ Run from the packages/ directory:
 
 import asyncio
 
+import pytest
+
 from worker.adapters.tcp import iso8583
 from worker.adapters.tcp.adapter import TcpAdapter
 
@@ -21,6 +23,8 @@ def _frame(body: str, fr: dict) -> bytes:
     payload = tpdu + body_bytes
     counted = len(payload) if fr["includes_header"] else len(body_bytes)
     length = counted + (pb if fr["includes_prefix"] else 0)
+    if fr.get("length_encoding") == "ascii":
+        return f"{length:0{pb}d}".encode("ascii") + payload
     return length.to_bytes(pb, bo) + payload
 
 
@@ -29,7 +33,11 @@ async def _read_frame(reader: asyncio.StreamReader, fr: dict) -> str:
     bo = fr["byte_order"]
     tpdu_bytes = fr.get("tpdu_bytes", 0)
     prefix = await reader.readexactly(pb)
-    length = int.from_bytes(prefix, bo)
+    length = (
+        int(prefix.decode("ascii"))
+        if fr.get("length_encoding") == "ascii"
+        else int.from_bytes(prefix, bo)
+    )
     core = length - (pb if fr["includes_prefix"] else 0)
     remaining = core if fr["includes_header"] else core + tpdu_bytes
     data = await reader.readexactly(remaining)
@@ -406,3 +414,31 @@ async def test_framing_with_tpdu_and_length_includes_prefix():
     finally:
         await adapter.disconnect()
         await server.stop()
+
+
+async def test_ascii_length_prefix_round_trips_against_a_digits_framed_host():
+    """framing.length_encoding = ascii: a 4-byte prefix reads ``0043``."""
+    fr = {**_DEFAULT_FR, "length_prefix_bytes": 4, "length_encoding": "ascii"}
+    server = MockIsoServer(fr=fr)
+    port = await server.start()
+    adapter = await _make_adapter(
+        port, framing={"length_prefix_bytes": 4, "length_encoding": "ascii"}
+    )
+    try:
+        result = await adapter.execute("send_0200", {"amount": 250})
+        assert result.success, result.error
+        assert result.response_payload["response_code"] == "00"
+    finally:
+        await adapter.disconnect()
+        await server.stop()
+
+
+async def test_length_encoding_mismatch_fails_loudly_not_silently():
+    """A binary-framed adapter against a digits-framed host reads a prefix
+    that is not what it expects; the failure names the mismatch."""
+    from worker.adapters.tcp import framing
+
+    with pytest.raises(ValueError, match="not decimal digits"):
+        framing.decode_length((43).to_bytes(2, "big"), "big", "ascii")
+    with pytest.raises(ValueError, match="length_encoding"):
+        framing.normalise_length_encoding("bcd")

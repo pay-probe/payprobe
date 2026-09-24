@@ -69,3 +69,7 @@ def test_status_aggregates_services(client):
     # (not deployed), otherwise "ok"/"down". "disabled" never degrades overall.
     assert "assistant" in body["services"]
     assert body["services"]["assistant"]["status"] in ("ok", "down", "disabled")
+    # Agent registry (ADR-0010) is reported the same way: "disabled" when
+    # AGENT_HUB_API_URL is unset (not every environment deploys it).
+    assert "agent-hub" in body["services"]
+    assert body["services"]["agent-hub"]["status"] in ("ok", "down", "disabled")

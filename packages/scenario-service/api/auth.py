@@ -34,6 +34,9 @@ from fastapi import Header, HTTPException, Request, status
 
 _DEV_ENVS = {"dev", "development", "test", "local"}
 
+#: the placeholder every compose file falls back to; never a real secret
+INSECURE_DEFAULT_SECRET = "dev-insecure-change-me"
+
 # Paths that must stay open: liveness/readiness probes, metrics scraping, and
 # the API reference/schema.
 PUBLIC_PATHS: set[str] = {
@@ -81,6 +84,8 @@ def _verify_jwt(token: str) -> dict[str, Any] | None:
         kwargs["audience"] = aud
     if iss := os.environ.get("AUTH_JWT_ISSUER"):
         kwargs["issuer"] = iss
+    if token.count(".") != 2:
+        return None  # not a JWT at all: let the static-bearer comparison decide
     try:
         return jwt.decode(token, key, **kwargs)
     except Exception as exc:  # noqa: BLE001 - any verify failure ⇒ 401
@@ -99,6 +104,12 @@ def _check(authorization: str | None) -> dict[str, Any] | None:
             "AUTH_JWT_SECRET, or PAYPROBE_ENV=dev to bypass)",
         )
 
+    if not _is_dev() and os.environ.get("AUTH_JWT_SECRET") == INSECURE_DEFAULT_SECRET:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "AUTH_JWT_SECRET is the compose placeholder; refusing to serve outside dev "
+            "(anyone who has read the repo could mint an admin token)",
+        )
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED,
                             "missing or malformed Authorization header")

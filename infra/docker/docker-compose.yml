@@ -216,9 +216,11 @@ services:
       # MCP server, so /status reports its reachability in the portal monitor.
       MCP_API_URL: http://mcp-server:8200
       # Config assistant, so /status (dashboard "System health") reports it too.
-      ASSIST_API_URL: http://assistant:8400
+      # Folded into agent-hub (ADR-0010 D2); the standalone :8400 container is gone.
+      ASSIST_API_URL: http://agent-hub:8600/assistant
       # Insight service (ADR-0005), same reason.
       INSIGHT_API_URL: http://insight-service:8500
+      AGENT_HUB_API_URL: http://agent-hub:8600
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
       # Fail-closed auth gate. Verify JWTs from auth-service (shared secret);
       # PAYPROBE_ENV=dev keeps the gate open for local work.
@@ -275,6 +277,8 @@ services:
     environment:
       SCENARIO_API_URL: http://scenario-service:8000
       RUN_API_URL: http://orchestrator:8100
+      # agent-hub (ADR-0010): agents, heartbeats, workflows, approvals inbox tools.
+      AGENT_HUB_API_URL: http://agent-hub:8600
       MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8200
@@ -291,40 +295,66 @@ services:
         condition: service_started
     <<: *restart
 
-  # Configuration assistant — the tool-calling agent + unified LLM gateway.
-  # Reads/writes config via the scenario-service / orchestrator REST APIs (service
-  # JWT) and is the only service that talks to LLM providers. Portal calls
-  # http://<host>:8400/agent/chat. Service is named `assistant` so the container
-  # is `payprobe-assistant` (the compose project prefix is already `payprobe`).
-  assistant:
+  # The configuration assistant (tool-calling agent + unified LLM gateway,
+  # `packages/payprobe-assistant`) is no longer a container of its own: since
+  # ADR-0010 D2 it is mounted inside agent-hub at /assistant (nginx routes
+  # /api/assistant/ there). The standalone `assistant` service (:8400) was the
+  # deprecated alias and was removed 2026-09-23.
+
+  # Agent registry (ADR-0010 phase 1): agent principals + workflow
+  # definitions, validated against the one toolkit. No LLM egress in phase 1;
+  # the runner (phase 2) reads the same Settings-managed key the assistant uses.
+  agent-hub:
     build:
-      # packages/ context so the image can include the shared payprobe_common
-      # (agent toolkit) alongside the service's own source.
+      # packages/ context so the image can include payprobe_common (the tool
+      # registry the allowlists are validated against).
       context: ../../packages
-      dockerfile: payprobe-assistant/Dockerfile
+      dockerfile: agent-hub/Dockerfile
     environment:
+      # Registry state lives in the platform Postgres (ADR-0010): no file fallback.
+      AGENT_HUB_DATABASE_URL: ${AGENT_HUB_DATABASE_URL:-postgresql://payprobe:payprobe@postgres:5432/payprobe}
+      # Phase 2 (heartbeat runner): where agents reach the platform, and the
+      # LLM provider (D4: ASSIST_LLM_* env wins, else Settings → AI assistant).
       SCENARIO_API_URL: http://scenario-service:8000
       RUN_API_URL: http://orchestrator:8100
-      # insight-service reads (advisory tools + Phase-2 /insights/explain)
       INSIGHT_API_URL: http://insight-service:8500
+      # D11 alert webhook (unset = off): failed / budget_exceeded / timed_out
+      # heartbeats and advisor findings at warn+, HMAC-signed when a secret is set.
+      AGENT_HUB_ALERT_WEBHOOK_URL: ${AGENT_HUB_ALERT_WEBHOOK_URL:-}
+      AGENT_HUB_ALERT_WEBHOOK_SECRET: ${AGENT_HUB_ALERT_WEBHOOK_SECRET:-}
+      # D2: the folded-in assistant's session + chat history stores (memory if unset).
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      # Service-to-service auth (mints a short-lived JWT with the shared secret).
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
-      # LLM provider — this is the egress boundary + key store.
+      # Phase 4 inbound webhooks (unset = 503): HMAC secret for /webhooks/events/{event}
+      # and /webhooks/agents/{name}; same t=,v1= scheme as the outbound alerts.
+      AGENT_HUB_WEBHOOK_SECRET: ${AGENT_HUB_WEBHOOK_SECRET:-}
+      # SecretBox for the heartbeat journal at rest (the same key the registries use)
+      PAYPROBE_SECRET_KEY: ${PAYPROBE_SECRET_KEY:-}
+      # Phase 5 LLM egress allowlist: extra provider/proxy hosts (exact or *.suffix,
+      # optional :port) beyond api.openai.com / api.anthropic.com and ASSIST_LLM_BASE_URL.
+      AGENT_HUB_EGRESS_ALLOW: ${AGENT_HUB_EGRESS_ALLOW:-}
+      # Hub-wide quotas (ADR-0010 phase 5; 0 = off): tokens all agents may spend per
+      # UTC day, heartbeats running at once, and the load rate a heartbeat may start
+      # by itself (heavier load needs an approved workflow step).
+      AGENT_HUB_DAILY_TOKENS: ${AGENT_HUB_DAILY_TOKENS:-5000000}
+      AGENT_HUB_MAX_CONCURRENT: ${AGENT_HUB_MAX_CONCURRENT:-4}
+      AGENT_LOAD_APPROVAL_TPS: ${AGENT_LOAD_APPROVAL_TPS:-100}
       ASSIST_LLM_PROVIDER: ${ASSIST_LLM_PROVIDER:-openai}
       ASSIST_LLM_API_KEY: ${ASSIST_LLM_API_KEY:-}
       ASSIST_LLM_MODEL: ${ASSIST_LLM_MODEL:-}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-change-me}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
       PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
     ports:
-      - "${ASSIST_PORT:-8400}:8400"
+      - "${AGENT_HUB_PORT:-8600}:8600"
     depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
       scenario-service:
         condition: service_started
       orchestrator:
         condition: service_started
-      redis:
-        condition: service_healthy
     <<: *restart
 
   # Advisory ML insight service (ADR-0005): failure categorization,
@@ -370,7 +400,7 @@ services:
     depends_on:
       - scenario-service
       - orchestrator
-      - assistant
+      - agent-hub
     <<: *restart
 
   # ---- not-yet-implemented services (placeholders) -----------------------

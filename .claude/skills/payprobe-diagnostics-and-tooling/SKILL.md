@@ -37,7 +37,7 @@ Default ports (from `infra/docker/docker-compose.yml`):
 | scenario-service | `http://localhost:8000` | scenarios, connections, ISO 8583 inspector |
 | auth-service | `http://localhost:8300` | mints JWTs (`POST /token`) |
 | mcp-server | `http://localhost:8200` | MCP Streamable HTTP at `/mcp`, liveness at `/healthz` |
-| assistant | `http://localhost:8400` | config assistant |
+| assistant | `http://localhost:8600/assistant` | config assistant, mounted inside agent-hub (ADR-0010 D2; no :8400 container) |
 | portal | `http://localhost:8080` | UI (Diagnostics, Trends, run reports, Network Trace, Peers pages) |
 
 Auth (orchestrator `api/auth.py`, scenario-service `api/auth.py` — same model):

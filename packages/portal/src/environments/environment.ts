@@ -14,9 +14,13 @@ export const environment = {
   // (ATLAS roadmap #5).
   // To fall back to the in-process shim during transition, override the
   // "assistant" endpoint in Settings → Endpoints to localhost:8000.
-  assistantApiBase: "http://localhost:8400",
+  // the assistant is mounted inside agent-hub (ADR-0010 D2); no :8400 container
+  assistantApiBase: "http://localhost:8600/assistant",
   // Advisory ML insight service (ADR-0005) — failure categorization,
   // explanations, outcome predictions. Advise-only; the portal degrades
   // gracefully when it is not deployed.
   insightApiBase: "http://localhost:8500",
+  // Agent registry (ADR-0010) — agent principals + workflows. Optional
+  // deployment; the Agents page shows a "not reachable" notice without it.
+  agentHubApiBase: "http://localhost:8600",
 };

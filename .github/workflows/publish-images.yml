@@ -54,9 +54,6 @@ jobs:
           - name: mcp-server
             context: packages/mcp-server
             dockerfile: packages/mcp-server/Dockerfile
-          - name: assistant
-            context: packages
-            dockerfile: packages/payprobe-assistant/Dockerfile
           - name: insight-service
             context: packages
             dockerfile: packages/insight-service/Dockerfile

@@ -6,8 +6,9 @@ export const environment = {
   scenarioApiBase: "/api/scenarios",
   runApiBase: "/api/orch",
   authApiBase: "/api/auth",
-  // Where the chat is sent: the standalone payprobe-assistant via nginx
-  // (/api/assistant/* → assistant:8400). It is the LLM egress boundary.
+  // Where the chat is sent: the assistant mounted inside agent-hub via nginx
+  // (/api/assistant/* → agent-hub:8600/assistant, ADR-0010 D2). It is the LLM
+  // egress boundary.
   // Provider config: ASSIST_LLM_* env wins; without it the service pulls the
   // Settings → AI assistant config from scenario-service over the service-
   // gated /assist/config/material (2026-07-13). Cutover 2026-07-07 (ATLAS #5).
@@ -16,4 +17,6 @@ export const environment = {
   // explanations, outcome predictions. Advise-only; the portal degrades
   // gracefully when it is not deployed.
   insightApiBase: "/api/insights",
+  // Agent registry (ADR-0010), same-origin via nginx.
+  agentHubApiBase: "/api/agents",
 };

@@ -87,8 +87,13 @@ function protoFilesFromConfig(raw: unknown): GrpcProtoFile[] {
   return [];
 }
 
+/** How the length prefix carries the length: a binary integer (the ISO 8583
+ *  norm) or zero-padded ASCII digits, one per prefix byte (e.g. `0043`). */
+export type LengthEncoding = "binary" | "ascii";
+
 export interface FramingConfig {
   lengthPrefixBytes: number;
+  lengthEncoding: LengthEncoding;
   byteOrder: ByteOrder;
   lengthIncludesPrefix: boolean;
   lengthIncludesHeader: boolean;
@@ -259,6 +264,7 @@ export const DEFAULT_NATS: NatsConfig = {
 
 export const DEFAULT_FRAMING: FramingConfig = {
   lengthPrefixBytes: 2,
+  lengthEncoding: "binary",
   byteOrder: "big",
   lengthIncludesPrefix: false,
   lengthIncludesHeader: true,
@@ -266,6 +272,52 @@ export const DEFAULT_FRAMING: FramingConfig = {
   tpduOutboundHex: "",
   encoding: "ascii",
 };
+
+/** The `framing` object of an adapter config (snake_case keys) from a draft.
+ *  Sparse by default (defaults omitted, the way connections are stored);
+ *  `full` writes every key, for a config a human reads as JSON. */
+export function framingToApi(
+  f: FramingConfig,
+  full = false,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (full || f.lengthPrefixBytes !== DEFAULT_FRAMING.lengthPrefixBytes)
+    out["length_prefix_bytes"] = f.lengthPrefixBytes;
+  if (full || f.lengthEncoding !== DEFAULT_FRAMING.lengthEncoding)
+    out["length_encoding"] = f.lengthEncoding;
+  if (full || f.byteOrder !== DEFAULT_FRAMING.byteOrder)
+    out["length_byte_order"] = f.byteOrder;
+  if (full || f.lengthIncludesPrefix)
+    out["length_includes_prefix"] = !!f.lengthIncludesPrefix;
+  if (full || !f.lengthIncludesHeader)
+    out["length_includes_header"] = !!f.lengthIncludesHeader;
+  if (full || f.tpduBytes) out["tpdu_bytes"] = f.tpduBytes || 0;
+  if (full || f.tpduOutboundHex)
+    out["tpdu_outbound_hex"] = f.tpduOutboundHex || "";
+  if (full || f.encoding !== DEFAULT_FRAMING.encoding)
+    out["encoding"] = f.encoding;
+  return out;
+}
+
+/** A framing draft from an adapter config's `framing` object (or nothing). */
+export function framingFromApi(
+  f: Record<string, any> | undefined | null,
+): FramingConfig {
+  const src = f ?? {};
+  return {
+    lengthPrefixBytes:
+      src["length_prefix_bytes"] ?? DEFAULT_FRAMING.lengthPrefixBytes,
+    lengthEncoding: (src["length_encoding"] ??
+      DEFAULT_FRAMING.lengthEncoding) as LengthEncoding,
+    byteOrder: (src["length_byte_order"] ??
+      DEFAULT_FRAMING.byteOrder) as ByteOrder,
+    lengthIncludesPrefix: src["length_includes_prefix"] ?? false,
+    lengthIncludesHeader: src["length_includes_header"] ?? true,
+    tpduBytes: src["tpdu_bytes"] ?? 0,
+    tpduOutboundHex: src["tpdu_outbound_hex"] ?? "",
+    encoding: src["encoding"] ?? DEFAULT_FRAMING.encoding,
+  };
+}
 
 export function blankConnection(name = ""): Connection {
   return {
@@ -451,17 +503,7 @@ export function toAdapterConfig(i: Connection): Record<string, unknown> {
   if (i.host) cfg["host"] = i.host;
   if (i.port) cfg["port"] = i.port;
 
-  const f = i.framing;
-  const framing: Record<string, unknown> = {};
-  if (f.lengthPrefixBytes !== DEFAULT_FRAMING.lengthPrefixBytes)
-    framing["length_prefix_bytes"] = f.lengthPrefixBytes;
-  if (f.byteOrder !== DEFAULT_FRAMING.byteOrder)
-    framing["length_byte_order"] = f.byteOrder;
-  if (f.lengthIncludesPrefix) framing["length_includes_prefix"] = true;
-  if (!f.lengthIncludesHeader) framing["length_includes_header"] = false;
-  if (f.tpduBytes) framing["tpdu_bytes"] = f.tpduBytes;
-  if (f.tpduOutboundHex) framing["tpdu_outbound_hex"] = f.tpduOutboundHex;
-  if (f.encoding !== DEFAULT_FRAMING.encoding) framing["encoding"] = f.encoding;
+  const framing = framingToApi(i.framing);
   if (Object.keys(framing).length) cfg["framing"] = framing;
 
   if (!i.extends && i.protocol === "iso8583") {
@@ -661,17 +703,7 @@ export function fromAdapterConfig(
     poolSize: cfg["pool_size"],
     responseTimeoutSec: cfg["response_timeout_sec"] ?? 30,
     connectTimeoutSec: cfg["connect_timeout_sec"] ?? 10,
-    framing: {
-      lengthPrefixBytes:
-        f["length_prefix_bytes"] ?? DEFAULT_FRAMING.lengthPrefixBytes,
-      byteOrder: (f["length_byte_order"] ??
-        DEFAULT_FRAMING.byteOrder) as ByteOrder,
-      lengthIncludesPrefix: f["length_includes_prefix"] ?? false,
-      lengthIncludesHeader: f["length_includes_header"] ?? true,
-      tpduBytes: f["tpdu_bytes"] ?? 0,
-      tpduOutboundHex: f["tpdu_outbound_hex"] ?? "",
-      encoding: f["encoding"] ?? DEFAULT_FRAMING.encoding,
-    },
+    framing: framingFromApi(f),
     correlation: {
       field: c["field"] ?? "11",
       autoGenerate: c["auto_generate"] !== false,

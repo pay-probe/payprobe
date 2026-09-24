@@ -234,3 +234,18 @@ def test_persists_to_file(tmp_path):
     # stored under the documented shape
     raw = json.loads((tmp_path / "connections.json").read_text())
     assert "connections" in raw and "switch_visa" in raw["connections"]
+
+
+def test_framing_length_encoding_is_validated():
+    from api.connection_store import ConnectionDraft
+
+    ok = ConnectionDraft.model_validate(
+        {**_draft(framing={"length_prefix_bytes": 4, "length_encoding": "ascii"}).model_dump()}
+    )
+    assert ok.model_extra["framing"]["length_encoding"] == "ascii"
+    import pytest
+
+    with pytest.raises(ValueError, match="length_encoding"):
+        ConnectionDraft.model_validate(
+            {**_draft(framing={"length_prefix_bytes": 4, "length_encoding": "bcd"}).model_dump()}
+        )

@@ -298,6 +298,106 @@ class RunStore:
         out.sort(key=lambda x: (x["score"], x["failed"]), reverse=True)
         return out
 
+    def regression(self, run_id: str) -> dict | None:
+        """Deterministic regression evidence for one run (ADR-0010).
+
+        For every scenario the run executed, its earlier pass/fail outcomes
+        across all previous finished runs (any label, newest first) and the
+        conclusion the history supports:
+
+        - ``regression``: it failed now and passed at least once before;
+        - ``never_passed``: it failed now and every earlier run failed too;
+        - ``first_run``: it failed now and has no history at all.
+
+        The run-level ``verdict`` is ``regression`` if any scenario regressed,
+        else ``never_passed`` / ``first_run`` (in that order) if anything
+        failed, else ``passed``. This is what an agent's "regression: true"
+        claim is checked against: the model reads the history, the platform
+        decides. Blocked/other outcomes are not evidence either way.
+        """
+        cur = self._conn.execute(
+            "SELECT created_at, label, status, summary FROM runs WHERE id=?", (run_id,)
+        ).fetchone()
+        if cur is None:
+            return None
+        try:
+            summary = json.loads(cur["summary"]) if cur["summary"] else {}
+        except (TypeError, ValueError):
+            summary = {}
+        rows = self._conn.execute(
+            "SELECT id, created_at, label, summary FROM runs "
+            "WHERE created_at < ? AND id != ? AND summary IS NOT NULL "
+            "ORDER BY created_at DESC",
+            (cur["created_at"], run_id),
+        ).fetchall()
+        history: dict[str, list[dict]] = {}
+        for r in rows:
+            try:
+                prev = json.loads(r["summary"])
+            except (TypeError, ValueError):
+                continue
+            for s in (prev or {}).get("scenarios", []) or []:
+                st = s.get("status")
+                if st not in ("passed", "failed"):
+                    continue
+                key = s.get("scenario_id") or s.get("name") or "?"
+                history.setdefault(key, []).append({
+                    "run_id": r["id"], "at": r["created_at"],
+                    "label": r["label"], "status": st,
+                })
+
+        scenarios: list[dict] = []
+        for s in (summary or {}).get("scenarios", []) or []:
+            key = s.get("scenario_id") or s.get("name") or "?"
+            prior = history.get(key, [])
+            passed = [p for p in prior if p["status"] == "passed"]
+            failed_now = s.get("status") == "failed"
+            streak = 1 if failed_now else 0
+            for p in prior:  # consecutive failures ending in this run
+                if not failed_now or p["status"] != "failed":
+                    break
+                streak += 1
+            if not failed_now:
+                conclusion = "passed" if s.get("status") == "passed" else "not_evidence"
+            elif passed:
+                conclusion = "regression"
+            elif prior:
+                conclusion = "never_passed"
+            else:
+                conclusion = "first_run"
+            scenarios.append({
+                "scenario_id": s.get("scenario_id") or "",
+                "name": s.get("name") or key,
+                "status": s.get("status"),
+                "prior_runs": len(prior),
+                "prior_passed": len(passed),
+                "prior_failed": len(prior) - len(passed),
+                "last_passed_run_id": passed[0]["run_id"] if passed else None,
+                "last_passed_at": passed[0]["at"] if passed else None,
+                "failure_streak": streak,
+                "conclusion": conclusion,
+            })
+
+        conclusions = {s["conclusion"] for s in scenarios}
+        if "regression" in conclusions:
+            verdict = "regression"
+        elif "never_passed" in conclusions:
+            verdict = "never_passed"
+        elif "first_run" in conclusions:
+            verdict = "first_run"
+        else:
+            verdict = "passed"
+        return {
+            "run_id": run_id,
+            "status": cur["status"],
+            "label": cur["label"],
+            "verdict": verdict,
+            "regression": verdict == "regression",
+            "regressed": [s["name"] for s in scenarios if s["conclusion"] == "regression"],
+            "never_passed": [s["name"] for s in scenarios if s["conclusion"] == "never_passed"],
+            "scenarios": scenarios,
+        }
+
     def previous(self, run_id: str) -> str | None:
         """The id of the run to diff against: the most recent completed run
         before this one, preferring the same label (like-for-like)."""

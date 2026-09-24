@@ -82,8 +82,9 @@ Drift check:
 | `SCENARIO_API_URL` | `http://scenario-service:8000` | Where to fetch scenarios when a run is launched by id/project/set. | `packages/orchestrator/api/main.py:SCENARIO_API_URL` |
 | `AUTH_API_URL` | `http://auth-service:8300` | Auth-service base for `/status`. | `packages/orchestrator/api/main.py:AUTH_API_URL` |
 | `MCP_API_URL` | `""` (not probed) | MCP server base; probed by `/status` only when set. | `packages/orchestrator/api/main.py:MCP_API_URL` |
-| `ASSIST_API_URL` | `""` (not probed) | Assistant base; probed by `/status` only when set. | `packages/orchestrator/api/main.py:ASSIST_API_URL` |
+| `ASSIST_API_URL` | `""` (not probed; compose: `http://agent-hub:8600/assistant` since ADR-0010 D2) | Assistant base; probed by `/status` only when set (`<base>/health`). | `packages/orchestrator/api/main.py:ASSIST_API_URL` |
 | `INSIGHT_API_URL` | `""` (not probed) | Insight-service base; probed by `/status` only when set. | `packages/orchestrator/api/main.py:INSIGHT_API_URL` |
+| `AGENT_HUB_API_URL` | `""` (compose: `http://agent-hub:8600`) | agent-hub base: probed by `/status` and, since ADR-0010 phase 4, the target of fire-and-forget `POST /events` (`run.completed` / `run.failed` when a run ends, `gate.failed` on a non-GO certify verdict). Unset = agents are never woken by the orchestrator. | `packages/orchestrator/api/main.py:AGENT_HUB_API_URL`, `_notify_agent_hub` |
 | `SCENARIO_API_TOKEN` | unset | Outbound credential for orchestrator→scenario-service (wins over `API_TOKEN`; else falls back to minting a JWT from `AUTH_JWT_SECRET`). All tiers: prod. | `packages/orchestrator/api/main.py` (~line 399, `_scenario_auth_header`-style helper) |
 
 ### 2.3 Feature flags and escape hatches
@@ -208,14 +209,23 @@ Drift check:
 | `INSIGHT_API_URL` | `http://localhost:8500` | Upstream insight-service (advisory tools `get_run_insights` / `list_insight_predictions` / `train_insights`). | prod | `tools.py:INSIGHT_API` |
 | `MCP_API_TOKEN` | unset | Static bearer for upstream calls; wins over `API_TOKEN`, which wins over JWT minting. | prod | `tools.py:_auth_header` (~line 65) |
 | `MCP_JWT_TTL` | `3600` | Minted service-JWT lifetime (s). | prod | `tools.py:_service_jwt` (~line 44) |
-| `MCP_JWT_SUB` | `mcp-server` | `sub` claim on minted JWTs. | prod | `tools.py:_service_jwt` (~line 46) |
+| `MCP_JWT_SUB` | `mcp-server` | `sub` claim on minted JWTs; since ADR-0010 phase 4 also copied into a `svc` claim, which only agent-hub's role gate reads (lets the MCP server wake agents and run workflows as a platform service; the other services ignore it). | prod | `tools.py:_service_jwt` |
+| `AGENT_HUB_API_URL` | `http://localhost:8600` (compose: `http://agent-hub:8600`) | agent-hub base for the "Agents & workflows" tool group (agents, wake, heartbeats, workflows, runs, approvals inbox; no decide tool by design). Optional deployment: tools fail with a clear "cannot reach" when it is down. | prod | `tools.py:AGENT_HUB_API` |
 
 Drift check:
 `grep -rn "environ" packages/mcp-server --include="*.py" | grep -v tests`
 
 ---
 
-## 7. Assistant (`packages/payprobe-assistant`, port 8400)
+## 7. Assistant (`packages/payprobe-assistant`, mounted in agent-hub at `/assistant`)
+
+Since 2026-09-23 (ADR-0010 D2) this app runs inside agent-hub at
+`/assistant`, which is where nginx (`/api/assistant/`), the orchestrator
+probe and the portal (dev `http://localhost:8600/assistant`) point; every
+variable below is read there (agent-hub's compose block carries them, plus
+`REDIS_URL`). The standalone :8400 container, its image and `ASSIST_PORT`
+were removed the same day; `packages/payprobe-assistant` is a library with
+its own test suite.
 
 The unified LLM gateway — the ONLY service meant to hold provider keys.
 
@@ -260,6 +270,46 @@ orchestrator `/status`, mcp-server tools, both assistant backends, portal
 
 Drift check:
 `grep -rn "environ" packages/insight-service --include="*.py" | grep -v tests`
+
+---
+
+## 7.6 Agent-hub (`packages/agent-hub`, port 8600) — ADR-0010
+
+Registry of agent principals and workflows plus the heartbeat runner.
+PostgreSQL only (D6): no file or in-memory fallback, a missing DSN fails
+startup. Compose defaults every knob; `deploy/.env` gained no lines.
+
+| Var | Default | Effect | Tier | Where read |
+|---|---|---|---|---|
+| `AGENT_HUB_DATABASE_URL` (or `DATABASE_URL`) | required (compose: `postgresql://payprobe:payprobe@postgres:5432/payprobe`) | Registry + heartbeat tables (`agent_hub_*`, numbered migrations at startup). | prod | `agent_hub/store.py:dsn_from_env` |
+| `AGENT_HUB_POOL_MAX` | `5` | asyncpg pool size. | prod | `agent_hub/store.py:RegistryStore.connect` |
+| `AGENT_HUB_SEED` | `1` | `0` skips seeding the builtins (`config`, `scenario-author`, `observer`, `certification-planner`, `reviewer`, `failure-triage`); missing builtins are added on any later start. | prod | `agent_hub/main.py:_seed_enabled` |
+| `AGENT_HUB_ADMIN_ROLES` | `admin` | Roles that may create, publish, retire, pause, revert (or a definition's own `rbac.edit`). | prod | `agent_hub/main.py:_admin_roles` |
+| `AGENT_HUB_MODEL_ALLOWLIST` | unset | Comma list restricting `spec.model` at publish time. | prod | `agent_hub/validate.py` |
+| `AGENT_HUB_ALERT_WEBHOOK_URL` | unset (off) | D11 alert webhook: signed, retried, fire-and-forget POST on `failed` / `budget_exceeded` / `timed_out` heartbeats (budget refusals and restart orphans included) and on advisor findings at `warn`+. Stats under `/health.alerts`. | prod | `agent_hub/alerts.py:Alerter.from_env` |
+| `PAYPROBE_SECRET_KEY` | unset (compose passes the platform's; no key ⇒ plaintext passthrough) | SecretBox for the heartbeat and tool-node journals at rest (their `before` snapshots can hold credentials); the same key the registries use, so one `.env` value covers both. | prod | `agent_hub/main.py:launch_heartbeat`, `agent_hub/engine.py:_run_tool` |
+| `AGENT_HUB_ALERT_WEBHOOK_SECRET` | unset (unsigned) | `X-PayProbe-Signature: t=<ts>,v1=<HMAC-SHA256("<ts>.<body>")>`, the Stripe scheme the ADR-0009 simulators also emit. | prod | `agent_hub/alerts.py:sign` |
+| `AGENT_HUB_ALERT_TIMEOUT_S` | `5` | Per-attempt HTTP timeout; 3 attempts with 1 s / 4 s backoff on 5xx or transport error, 4xx is final. | prod | `agent_hub/alerts.py:_httpx_transport` |
+| `AGENT_HUB_ENGINE_TICK_S` | `30` | Housekeeping tick: expires approvals past `timeout_s` (the run fails and alerts `run.failed`) and wakes due `schedule` triggers. Startup always runs one reconcile pass regardless. | prod | `agent_hub/main.py:lifespan` |
+| `AGENT_HUB_SCHEDULER` | `1` | `0` disables the schedule ticker (`interval_sec` / `daily_at` triggers never fire); `POST /events` keeps working. Nothing is scheduled while agents are paused. | prod | `agent_hub/main.py:lifespan`, `agent_hub/triggers.py` |
+| `AGENT_HUB_WEBHOOK_SECRET` | unset (routes answer 503) | HMAC secret for inbound `/webhooks/events/{event}` (wakes agents with that `event` trigger) and `/webhooks/agents/{name}` (direct wake; agent must declare a `webhook` trigger). `X-PayProbe-Signature: t=,v1=` over the raw body, 5 min tolerance, 64 KB cap; the bearer gate skips `/webhooks/`. | prod | `agent_hub/main.py:_verified_webhook_body`, `agent_hub/auth.py:require_auth` |
+| `AGENT_HUB_EGRESS_ALLOW` | unset | LLM egress allowlist extension: comma list of exact hosts, `*.suffix` wildcards, optional `:port`; listed hosts may be plain http (local proxies). Always allowed over https: `api.openai.com`, `api.anthropic.com`, the host of `ASSIST_LLM_BASE_URL`. A provider `base_url` outside the set (for example edited in Settings → AI assistant by a compromised admin) fails the heartbeat with `egress refused` before anything is sent; `/health.egress` shows the effective set. | prod | `agent_hub/egress.py`, `agent_hub/llm.py:_post_json` |
+| `AGENT_HUB_DAILY_TOKENS` | `5000000` (compose sets it; `0` = off) | Hub-wide daily token ceiling across every agent (UTC day, same ledger as the per-agent `budget.daily_tokens`). A wake past it is refused and recorded as `budget_exceeded` ("hub-wide daily token ceiling"), alerts like a budget stop. `/health.quotas` shows the ceiling and `tokens_today`. | prod | `agent_hub/quotas.py`, `agent_hub/main.py:launch_heartbeat` |
+| `AGENT_HUB_MAX_CONCURRENT` | `4` (compose sets it; `0` = off) | Heartbeats that may be `running` at once across all agents (per agent it is always one: coalescing). A wake past the cap is refused and recorded as `quota_exceeded`; a schedule fires again on its next due tick, an event wake is lost and the row says so. `/health.quotas.running`. | prod | `agent_hub/quotas.py`, `agent_hub/main.py:launch_heartbeat` |
+| `AGENT_LOAD_APPROVAL_TPS` | `100` (compose sets it; `0` = off) | Highest `start_load_run` rate (`target_tps`, `end_tps`, `spike_tps`, `start_tps`, `base_tps`, top level or in `extra`; nan/inf count as unbounded) a heartbeat may start by itself; above it the tool layer refuses (`guardrail: true`, in plan mode a proposal). Workflow `tool` nodes carry no cap because outside mock they must sit behind an `approval` (publish-time rule). | prod | `agent_hub/quotas.py:load_approval_tps`, `payprobe_common/agent_toolkit.py:check_load_cap` |
+| `SCENARIO_API_URL` / `RUN_API_URL` / `INSIGHT_API_URL` | `http://localhost:8000` / `:8100` / `:8500` | Where heartbeats reach the platform through the shared REST backend, under a per-heartbeat on-behalf-of JWT (`act` claim, never `svc`). | prod | `agent_hub/rest.py` |
+| `ASSIST_LLM_PROVIDER` / `_API_KEY` / `_MODEL` / `_BASE_URL` | unset (then Settings → AI assistant) | The one platform LLM provider (D4); no provider ⇒ wake returns 503, nothing recorded. | prod | `agent_hub/llm.py:resolve_llm` |
+| `ASSIST_SETTINGS_LLM` | `1` | `0` ignores the Settings → AI assistant provider config and uses env only (same switch as the assistant). | prod | `agent_hub/llm.py:resolve_llm` |
+| `AGENT_HUB_JWT_TTL` | `3600` | Lifetime of the service JWT agent-hub mints for its own platform reads (not the per-heartbeat OBO token, whose TTL is `wall_clock_s` + 60). | prod | `agent_hub/rest.py` |
+| caller gate | `PAYPROBE_ENV` / `API_TOKEN` / `AUTH_JWT_SECRET` | Same fail-closed gate as every service; `/health` public. | prod | `agent_hub/auth.py` |
+| `AGENT_HUB_TEST_DATABASE_URL` | `postgresql://payprobe:payprobe@localhost:5432/payprobe` | Tests only. Unreachable ⇒ the conftest skips **every test in the pytest session**, not just agent-hub's; compose does not publish 5432, forward it first. | test | `agent-hub/tests/hub_testkit.py` |
+
+Consumers: portal `agentHubApiBase` (dev `http://localhost:8600`, prod
+`/api/agents`, proxied by all three nginx confs), orchestrator `/status`
+(`AGENT_HUB_API_URL`).
+
+Drift check:
+`grep -rn "environ" packages/agent-hub/agent_hub --include="*.py"`
 
 ---
 
@@ -321,7 +371,6 @@ Drift check:
 | scenario-service | `SCENARIO_PORT` | 8000 | 8000 |
 | auth-service | `AUTH_PORT` | 8300 | 8300 |
 | mcp-server | `MCP_PORT` | 8200 | 8200 |
-| assistant | `ASSIST_PORT` | 8400 | 8400 |
 | insight-service | `INSIGHT_PORT` | 8500 | 8500 |
 | prometheus | `PROMETHEUS_PORT` | 9090 | 9090 |
 | grafana | `GRAFANA_PORT` | 3000 | 3000 |

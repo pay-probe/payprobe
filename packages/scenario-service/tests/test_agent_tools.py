@@ -338,7 +338,9 @@ def test_playground_tools_tiering():
     """playground_execute is EXECUTE tier: not a read (it fires traffic), not a
     journalled write (nothing to restore) — and advisor mode never sees it."""
     exec_names = {t.name for t in tools_for(("execute",))}
-    assert exec_names == {"playground_execute", "start_load_run"}
+    # train_insights (ADR-0010) writes only to the insight service's own model
+    # store: real side effect, nothing to journal, so execute tier as well
+    assert exec_names == {"playground_execute", "start_load_run", "train_insights"}
     assert "playground_targets" in {t.name for t in tools_for(("read",))}
     assert "playground_execute" not in {s["name"] for s in schemas_for(("read",))}
     assert "playground_execute" not in {s["name"] for s in schemas_for(("read", "write"))}

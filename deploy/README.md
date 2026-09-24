@@ -26,8 +26,8 @@ docker compose down -v       # also wipe volumes
 | orchestrator | `datikos/payprobe-orchestrator` | 8100 |
 | auth-service | `datikos/payprobe-auth-service` | 8300 |
 | mcp-server | `datikos/payprobe-mcp-server` | 8200 |
-| assistant | `datikos/payprobe-assistant` | 8400 |
 | insight-service | `datikos/payprobe-insight-service` | 8500 |
+| agent-hub (agents + the config assistant at `/assistant`) | `datikos/payprobe-agent-hub` | 8600 |
 | postgres / redis / nats ×3 | upstream images | — |
 
 ## Configuration

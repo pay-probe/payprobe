@@ -14,33 +14,84 @@
   <div class="inst__body">
     <!-- list -->
     <aside class="inst__list">
-      @for (i of connections(); track i.name) {
-        <button class="row" [class.active]="isActive(i)" (click)="edit(i)">
-          <span class="row__ico"><pp-icon name="cpu" [size]="16" /></span>
-          <span class="row__main">
-            <span class="row__name">{{ i.name }}</span>
-            <span class="row__sub">
-              {{ connLabel(i) }}
-              @if (i.adapter === "grpc") {
-                @if (i.grpc.target) {
-                  · {{ i.grpc.target }}
+      <label class="list__filter">
+        <pp-icon name="search" [size]="14" />
+        <input
+          type="text"
+          placeholder="Filter connections…"
+          [ngModel]="filter()"
+          (ngModelChange)="filter.set($event)"
+        />
+        <span class="muted list__count"
+          >{{ filtered().length }}/{{ connections().length }}</span
+        >
+      </label>
+      <div class="fam">
+        @for (f of families; track f.key) {
+          @if (familyCounts()[f.key]) {
+            <button
+              class="fam__chip"
+              [class.active]="familyFilter() === f.key"
+              [attr.data-tone]="f.tone"
+              [title]="'Only ' + f.label"
+              (click)="toggleFamily(f.key)"
+            >
+              <pp-icon [name]="f.icon" [size]="12" /> {{ f.label }}
+              <span class="fam__n">{{ familyCounts()[f.key] }}</span>
+            </button>
+          }
+        }
+      </div>
+      @for (g of grouped(); track g.key) {
+        <div class="grp" [attr.data-tone]="g.tone">
+          <pp-icon [name]="g.icon" [size]="12" /> {{ g.label }}
+          <span class="grp__n">{{ g.items.length }}</span>
+        </div>
+        @for (i of g.items; track i.name) {
+          <button class="row" [class.active]="isActive(i)" (click)="edit(i)">
+            <span class="row__ico" [attr.data-tone]="adapterTone(i)"
+              ><pp-icon [name]="adapterIcon(i)" [size]="16"
+            /></span>
+            <span class="row__main">
+              <span class="row__name">{{ i.name }}</span>
+              <span class="row__sub">
+                @if (i.mode === "inbound") {
+                  <span class="tag tag--in" title="Inbound: listens">in</span>
                 }
-              } @else if (i.adapter === "http") {
-                @if (i.rest.baseUrl) {
-                  · {{ i.rest.baseUrl }}
+                @if (i.default) {
+                  <span
+                    class="tag tag--default"
+                    title="Default for its adapter type"
+                    >default</span
+                  >
                 }
-              } @else if (i.host) {
-                · {{ i.host }}:{{ i.port }}
-              }
-              @if (i.extends) {
-                · extends {{ i.extends }}
-              }
+                {{ connLabel(i) }}
+                @if (i.adapter === "grpc") {
+                  @if (i.grpc.target) {
+                    · {{ i.grpc.target }}
+                  }
+                } @else if (i.adapter === "http") {
+                  @if (i.rest.baseUrl) {
+                    · {{ i.rest.baseUrl }}
+                  }
+                } @else if (i.host) {
+                  · {{ i.host }}:{{ i.port }}
+                }
+                @if (i.extends) {
+                  · extends {{ i.extends }}
+                }
+              </span>
             </span>
-          </span>
-        </button>
+          </button>
+        }
       } @empty {
         <p class="muted empty">
-          No connections yet. Create one to get started.
+          @if (connections().length) {
+            Nothing matches the current filters.
+            <button class="linkbtn" (click)="clearFilters()">Clear</button>
+          } @else {
+            No connections yet. Create one to get started.
+          }
         </p>
       }
     </aside>
@@ -49,6 +100,57 @@
     <section class="inst__editor">
       @if (draft(); as d) {
         <div class="form">
+          <div class="edhead">
+            <span class="edhead__ico" [attr.data-tone]="adapterTone(d)"
+              ><pp-icon [name]="adapterIcon(d)" [size]="18"
+            /></span>
+            <div class="edhead__main">
+              <strong class="edhead__name">{{
+                d.name || "New connection"
+              }}</strong>
+              <span class="edhead__sub muted">
+                {{ connLabel(d) }}
+                @if (endpoint(d)) {
+                  · <code class="edhead__ep">{{ endpoint(d) }}</code>
+                }
+                @if (d.poolSize) {
+                  · pool {{ d.poolSize }}
+                }
+              </span>
+            </div>
+            <div class="edhead__badges">
+              @if (d.mode === "inbound") {
+                <pp-badge tone="info">inbound · listens</pp-badge>
+              } @else {
+                <pp-badge tone="neutral">outbound · connects</pp-badge>
+              }
+              @if (d.default) {
+                <pp-badge tone="brand">default for {{ connLabel(d) }}</pp-badge>
+              }
+              @if (d.extends) {
+                <pp-badge tone="neutral">extends {{ d.extends }}</pp-badge>
+              }
+              @if (dirty()) {
+                <pp-badge tone="warning">unsaved changes</pp-badge>
+              }
+              @if (testResult(); as t) {
+                <span
+                  class="test-badge"
+                  [title]="
+                    t.ok ? 'Reachable in ' + t.latency_ms + ' ms' : t.error
+                  "
+                >
+                  <pp-badge [tone]="t.ok ? 'success' : 'danger'">
+                    {{
+                      t.ok
+                        ? "reachable · " + t.latency_ms + " ms"
+                        : "test failed · " + t.error
+                    }}
+                  </pp-badge>
+                </span>
+              }
+            </div>
+          </div>
           <div class="grid2">
             <label class="fld">
               <span>Name</span>
@@ -98,14 +200,28 @@
             </label>
             <label class="fld">
               <span>Direction</span>
-              <select [(ngModel)]="d.mode" (ngModelChange)="markDirty()">
-                <option value="outbound">
-                  Outbound — connect to a host (client)
-                </option>
-                <option value="inbound">
-                  Inbound — listen for messages (server)
-                </option>
-              </select>
+              <span class="seg" role="radiogroup">
+                <button
+                  type="button"
+                  class="seg__btn"
+                  [class.active]="d.mode !== 'inbound'"
+                  (click)="setMode(d, 'outbound')"
+                  title="Client: the worker connects to the host"
+                >
+                  <pp-icon name="send" [size]="13" /> Outbound
+                  <small>connects</small>
+                </button>
+                <button
+                  type="button"
+                  class="seg__btn"
+                  [class.active]="d.mode === 'inbound'"
+                  (click)="setMode(d, 'inbound')"
+                  title="Server: a participant flow binds and listens on the port"
+                >
+                  <pp-icon name="server" [size]="13" /> Inbound
+                  <small>listens</small>
+                </button>
+              </span>
             </label>
             <label class="fld chk">
               <input
@@ -123,7 +239,10 @@
           </div>
 
           <details class="sect">
-            <summary>Environment overrides</summary>
+            <summary>
+              <pp-icon name="layers" [size]="14" /> Environment overrides
+              <span class="sect__info">{{ overridesSummary() }}</span>
+            </summary>
             <p class="muted">
               Override this connection's parameters per environment (e.g.
               <code>host</code>, <code>port</code>). Blank = inherit the base
@@ -303,79 +422,32 @@
               </label>
             </div>
 
-            <details class="sect">
-              <summary>Framing</summary>
-              <div class="grid2">
-                <label class="fld">
-                  <span>Length prefix bytes</span>
-                  <input
-                    type="number"
-                    min="1"
-                    [(ngModel)]="d.framing.lengthPrefixBytes"
-                    (ngModelChange)="markDirty()"
-                  />
-                </label>
-                <label class="fld">
-                  <span>Byte order</span>
-                  <select
-                    [(ngModel)]="d.framing.byteOrder"
-                    (ngModelChange)="markDirty()"
-                  >
-                    <option value="big">big-endian</option>
-                    <option value="little">little-endian</option>
-                  </select>
-                </label>
-                <label class="fld chk">
-                  <input
-                    type="checkbox"
-                    [(ngModel)]="d.framing.lengthIncludesPrefix"
-                    (ngModelChange)="markDirty()"
-                  />
-                  <span>Length counts the prefix bytes</span>
-                </label>
-                <label class="fld chk">
-                  <input
-                    type="checkbox"
-                    [(ngModel)]="d.framing.lengthIncludesHeader"
-                    (ngModelChange)="markDirty()"
-                  />
-                  <span>Length counts the TPDU header</span>
-                </label>
-                <label class="fld">
-                  <span>TPDU bytes (inbound)</span>
-                  <input
-                    type="number"
-                    min="0"
-                    [(ngModel)]="d.framing.tpduBytes"
-                    (ngModelChange)="markDirty()"
-                  />
-                </label>
-                <label class="fld">
-                  <span>TPDU outbound (hex)</span>
-                  <input
-                    type="text"
-                    [(ngModel)]="d.framing.tpduOutboundHex"
-                    (ngModelChange)="markDirty()"
-                    placeholder="6000000000"
-                  />
-                </label>
-                <label class="fld">
-                  <span>Encoding</span>
-                  <input
-                    type="text"
-                    [(ngModel)]="d.framing.encoding"
-                    (ngModelChange)="markDirty()"
-                  />
-                </label>
-              </div>
+            <details class="sect sect--framing">
+              <summary>
+                <pp-icon name="package" [size]="14" /> Framing
+                <span class="sect__info">{{ framingSummary(d) }}</span>
+              </summary>
+              <pp-framing-editor
+                [framing]="d.framing"
+                [mode]="d.mode"
+                (changed)="markDirty()"
+              />
             </details>
 
             @if (!d.extends && d.protocol === "iso8583") {
               <details class="sect" open>
-                <summary>Correlation (ISO 8583)</summary>
+                <summary>
+                  <pp-icon name="list" [size]="14" /> Correlation (ISO 8583)
+                  <span class="sect__info">{{ correlationSummary(d) }}</span>
+                </summary>
                 <div class="grid2">
                   <label class="fld">
-                    <span>Correlation DE</span>
+                    <span
+                      >Correlation DE
+                      <small class="muted"
+                        >(the field a reply is matched on)</small
+                      ></span
+                    >
                     <input
                       type="text"
                       [(ngModel)]="d.correlation.field"
@@ -383,29 +455,50 @@
                       placeholder="11 (STAN)"
                     />
                   </label>
-                  <label class="fld chk">
-                    <input
-                      type="checkbox"
-                      [(ngModel)]="d.correlation.autoGenerate"
-                      (ngModelChange)="markDirty()"
-                    />
-                    <span>Auto-generate the field (STAN)</span>
-                  </label>
-                  <label class="fld chk">
-                    <input
-                      type="checkbox"
-                      [(ngModel)]="d.correlation.matchMti"
-                      (ngModelChange)="markDirty()"
-                    />
-                    <span>Also match on response MTI</span>
-                  </label>
+                  <div class="fld fld--stack">
+                    <span>Matching rules</span>
+                    <label class="chkrow">
+                      <input
+                        type="checkbox"
+                        [(ngModel)]="d.correlation.autoGenerate"
+                        (ngModelChange)="markDirty()"
+                      />
+                      <span
+                        >Auto-generate the field
+                        <small class="muted"
+                          >(a fresh STAN per request when the step sets
+                          none)</small
+                        ></span
+                      >
+                    </label>
+                    <label class="chkrow">
+                      <input
+                        type="checkbox"
+                        [(ngModel)]="d.correlation.matchMti"
+                        (ngModelChange)="markDirty()"
+                      />
+                      <span
+                        >Also match on response MTI
+                        <small class="muted"
+                          >(0200 pairs only with 0210)</small
+                        ></span
+                      >
+                    </label>
+                  </div>
                 </div>
+                <p class="hint">
+                  <pp-icon name="info" [size]="13" />
+                  {{ correlationExplain(d) }}
+                </p>
               </details>
             }
 
             @if (!d.extends && d.protocol === "header_echo") {
               <details class="sect" open>
-                <summary>Header echo (HSM)</summary>
+                <summary>
+                  <pp-icon name="cpu" [size]="14" /> Header echo (HSM)
+                  <span class="sect__info">{{ headerEchoSummary(d) }}</span>
+                </summary>
                 <div class="grid2">
                   <label class="fld">
                     <span>Header bytes</span>
@@ -448,26 +541,55 @@
             }
 
             <details class="sect">
-              <summary>Session</summary>
+              <summary>
+                <pp-icon name="clock" [size]="14" /> Session
+                <span class="sect__info">{{ sessionSummary(d) }}</span>
+              </summary>
+              <ol class="timeline">
+                @for (st of sessionSteps(d); track $index) {
+                  <li>
+                    <span class="timeline__ico"
+                      ><pp-icon [name]="st.icon" [size]="13"
+                    /></span>
+                    <span>{{ st.text }}</span>
+                  </li>
+                }
+              </ol>
               <div class="grid2">
-                <label class="fld chk">
-                  <input
-                    type="checkbox"
-                    [(ngModel)]="d.signOn"
-                    (ngModelChange)="markDirty()"
-                  />
-                  <span>Sign on at connect</span>
-                </label>
-                <label class="fld chk">
-                  <input
-                    type="checkbox"
-                    [(ngModel)]="d.keepalive.enabled"
-                    (ngModelChange)="markDirty()"
-                  />
-                  <span>Keep-alive echo</span>
-                </label>
+                <div class="fld fld--stack">
+                  <span>At connect</span>
+                  <label class="chkrow">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="d.signOn"
+                      (ngModelChange)="markDirty()"
+                    />
+                    <span
+                      >Sign on
+                      <small class="muted"
+                        >(0800 network management before traffic)</small
+                      ></span
+                    >
+                  </label>
+                  <label class="chkrow">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="d.keepalive.enabled"
+                      (ngModelChange)="markDirty()"
+                    />
+                    <span
+                      >Keep-alive echo
+                      <small class="muted">(0800 while idle)</small></span
+                    >
+                  </label>
+                </div>
                 <label class="fld">
-                  <span>Keep-alive interval (s)</span>
+                  <span
+                    >Keep-alive interval
+                    <small class="muted"
+                      >(seconds of silence before an echo)</small
+                    ></span
+                  >
                   <input
                     type="number"
                     min="1"
@@ -477,7 +599,12 @@
                   />
                 </label>
                 <label class="fld">
-                  <span>Response timeout (s)</span>
+                  <span
+                    >Response timeout
+                    <small class="muted"
+                      >(seconds a request waits for its reply)</small
+                    ></span
+                  >
                   <input
                     type="number"
                     min="1"
@@ -486,7 +613,12 @@
                   />
                 </label>
                 <label class="fld">
-                  <span>Connect timeout (s)</span>
+                  <span
+                    >Connect timeout
+                    <small class="muted"
+                      >(seconds to establish the socket)</small
+                    ></span
+                  >
                   <input
                     type="number"
                     min="1"
@@ -499,9 +631,18 @@
           }
 
           @if (d.adapter === "grpc") {
+            <div class="flow">
+              <pp-icon name="box" [size]="15" />
+              <span>{{ grpcSummary(d) }}</span>
+            </div>
             <div class="grid2">
               <label class="fld">
-                <span>Target <small class="muted">(host:port)</small></span>
+                <span
+                  >Target
+                  <small class="muted"
+                    >(host:port the worker dials)</small
+                  ></span
+                >
                 <input
                   type="text"
                   [(ngModel)]="d.grpc.target"
@@ -510,7 +651,10 @@
                 />
               </label>
               <label class="fld">
-                <span>Timeout (s)</span>
+                <span
+                  >Timeout
+                  <small class="muted">(seconds, per call)</small></span
+                >
                 <input
                   type="number"
                   min="1"
@@ -642,7 +786,8 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
 
               <details class="sect">
                 <summary>
-                  Advanced <small class="muted">(worker-host paths)</small>
+                  <pp-icon name="settings" [size]="14" /> Advanced
+                  <small class="muted">(worker-host paths)</small>
                 </summary>
                 <div class="grid2">
                   <label class="fld">
@@ -690,7 +835,12 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
             }
 
             <details class="sect">
-              <summary>TLS</summary>
+              <summary>
+                <pp-icon name="lock" [size]="14" /> TLS
+                <span class="sect__info">{{
+                  d.grpc.tlsEnabled ? "on" : "off"
+                }}</span>
+              </summary>
               <div class="grid2">
                 <label class="fld chk">
                   <input
@@ -698,7 +848,12 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
                     [(ngModel)]="d.grpc.tlsEnabled"
                     (ngModelChange)="markDirty()"
                   />
-                  <span>Use a secure channel (TLS)</span>
+                  <span
+                    >Use a secure channel (TLS)
+                    <small class="muted"
+                      >(system roots unless a path is given)</small
+                    ></span
+                  >
                 </label>
                 <label class="fld">
                   <span
@@ -718,8 +873,9 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
 
             <details class="sect">
               <summary>
-                Call metadata
+                <pp-icon name="list" [size]="14" /> Call metadata
                 <small class="muted">(headers sent on every call)</small>
+                <span class="sect__info">{{ d.grpc.metadata.length }}</span>
               </summary>
               <div class="rows">
                 @for (m of d.grpc.metadata; track $index) {
@@ -756,10 +912,11 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
 
             <details class="sect" open>
               <summary>
-                Actions
+                <pp-icon name="send" [size]="14" /> Actions
                 <small class="muted"
                   >(friendly name → package.Service/Method)</small
                 >
+                <span class="sect__info">{{ d.grpc.actions.length }}</span>
               </summary>
               <div class="rows">
                 @for (a of d.grpc.actions; track $index) {
@@ -861,14 +1018,25 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
           }
 
           @if (d.adapter === "nats") {
+            <div class="flow">
+              <pp-icon name="message" [size]="15" />
+              <span>{{ natsFlow(d) }}</span>
+            </div>
             <p class="muted" style="margin: 0 0 8px">
-              NATS is broker-mediated (ADR-0006): Host/Port (or Servers) address
-              the broker, not a bind target. A responder participant subscribes
-              to Subjects; an outbound client publishes/requests on Subject.
+              NATS is broker-mediated (ADR-0006): nothing binds a port here.
+              Host/Port (or Servers) address the broker; an inbound responder
+              subscribes to Subjects, an outbound client requests on Subject.
             </p>
+
+            <h4 class="sub-h"><pp-icon name="server" [size]="13" /> Broker</h4>
             <div class="grid2">
               <label class="fld">
-                <span>Host <small class="muted">(broker)</small></span>
+                <span
+                  >Host
+                  <small class="muted"
+                    >(the broker, not a bind address)</small
+                  ></span
+                >
                 <input
                   type="text"
                   [(ngModel)]="d.host"
@@ -878,7 +1046,10 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
               </label>
               <label class="fld">
                 <span
-                  >Port <small class="muted">(broker client port)</small></span
+                  >Port
+                  <small class="muted"
+                    >(client port, 4222 by default)</small
+                  ></span
                 >
                 <input
                   type="number"
@@ -891,7 +1062,7 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
                 <span
                   >Servers
                   <small class="muted"
-                    >(multi-URL cluster, one per line — wins over
+                    >(cluster URLs, one per line; when set they win over
                     host/port)</small
                   ></span
                 >
@@ -902,10 +1073,23 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
                   placeholder="nats://nats-1:4222&#10;nats://nats-2:4223"
                 ></textarea>
               </label>
+            </div>
+
+            <h4 class="sub-h">
+              <pp-icon name="message" [size]="13" /> Subjects
+              <small class="muted">{{
+                d.mode === "inbound"
+                  ? "(what this responder listens on)"
+                  : "(where this client sends)"
+              }}</small>
+            </h4>
+            <div class="grid2">
               <label class="fld">
                 <span
                   >Subject
-                  <small class="muted">(publish / request)</small></span
+                  <small class="muted"
+                    >(outbound: publish / request here)</small
+                  ></span
                 >
                 <input
                   type="text"
@@ -915,7 +1099,47 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
                 />
               </label>
               <label class="fld">
-                <span>Codec</span>
+                <span
+                  >Subjects
+                  <small class="muted"
+                    >(inbound: subscribe to these, one per line)</small
+                  ></span
+                >
+                <textarea
+                  rows="2"
+                  [(ngModel)]="d.nats.subjects"
+                  (ngModelChange)="markDirty()"
+                  placeholder="pay.auth&#10;pay.reversal"
+                ></textarea>
+              </label>
+              <label class="fld">
+                <span
+                  >Queue group
+                  <small class="muted"
+                    >(instances in the same group share the messages; empty =
+                    every instance gets all)</small
+                  ></span
+                >
+                <input
+                  type="text"
+                  [(ngModel)]="d.nats.queueGroup"
+                  (ngModelChange)="markDirty()"
+                  placeholder="issuers"
+                />
+              </label>
+            </div>
+
+            <h4 class="sub-h">
+              <pp-icon name="format" [size]="13" /> Messages
+            </h4>
+            <div class="grid2">
+              <label class="fld">
+                <span
+                  >Codec
+                  <small class="muted"
+                    >(how a payload becomes bytes on the subject)</small
+                  ></span
+                >
                 <select
                   [(ngModel)]="d.nats.codec"
                   (ngModelChange)="markDirty()"
@@ -927,29 +1151,11 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
               </label>
               <label class="fld">
                 <span
-                  >Subjects
+                  >Request timeout
                   <small class="muted"
-                    >(inbound responder, one per line)</small
+                    >(seconds to wait for a reply on the inbox)</small
                   ></span
                 >
-                <textarea
-                  rows="2"
-                  [(ngModel)]="d.nats.subjects"
-                  (ngModelChange)="markDirty()"
-                  placeholder="pay.auth&#10;pay.reversal"
-                ></textarea>
-              </label>
-              <label class="fld">
-                <span>Queue group <small class="muted">(fan-out)</small></span>
-                <input
-                  type="text"
-                  [(ngModel)]="d.nats.queueGroup"
-                  (ngModelChange)="markDirty()"
-                  placeholder="issuers"
-                />
-              </label>
-              <label class="fld">
-                <span>Request timeout (s)</span>
                 <input
                   type="number"
                   [(ngModel)]="d.nats.requestTimeoutSec"
@@ -957,8 +1163,17 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
                   placeholder="2"
                 />
               </label>
+            </div>
+
+            <h4 class="sub-h">
+              <pp-icon name="lock" [size]="13" /> Authentication
+              <small class="muted"
+                >(one of; secrets are masked and encrypted at rest)</small
+              >
+            </h4>
+            <div class="grid2">
               <label class="fld">
-                <span>Auth token <small class="muted">(secret)</small></span>
+                <span>Auth token</span>
                 <input
                   type="password"
                   [(ngModel)]="d.nats.authToken"
@@ -967,7 +1182,7 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
                 />
               </label>
               <label class="fld">
-                <span>NKey seed <small class="muted">(secret)</small></span>
+                <span>NKey seed</span>
                 <input
                   type="password"
                   [(ngModel)]="d.nats.authNkeySeed"
@@ -977,7 +1192,9 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
               <label class="fld">
                 <span
                   >Creds file
-                  <small class="muted">(.creds path, secret)</small></span
+                  <small class="muted"
+                    >(.creds path on the worker host)</small
+                  ></span
                 >
                 <input
                   type="text"
@@ -986,11 +1203,18 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
                   placeholder="/etc/nats/app.creds"
                 />
               </label>
+            </div>
+
+            <h4 class="sub-h">
+              <pp-icon name="database" [size]="13" /> JetStream
+              <small class="muted"
+                >(optional: durable messages; the stream is created if
+                missing)</small
+              >
+            </h4>
+            <div class="grid2">
               <label class="fld">
-                <span
-                  >JetStream stream
-                  <small class="muted">(created if missing)</small></span
-                >
+                <span>Stream <small class="muted">(name)</small></span>
                 <input
                   type="text"
                   [(ngModel)]="d.nats.jetstreamStream"
@@ -1000,8 +1224,10 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
               </label>
               <label class="fld">
                 <span
-                  >JetStream durable
-                  <small class="muted">(consumer name)</small></span
+                  >Durable consumer
+                  <small class="muted"
+                    >(name; resumes where it left off)</small
+                  ></span
                 >
                 <input
                   type="text"
@@ -1012,9 +1238,9 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
               </label>
               <label class="fld grid2__full">
                 <span
-                  >JetStream subjects
+                  >Stream subjects
                   <small class="muted"
-                    >(stream binds, one per line)</small
+                    >(what the stream captures, one per line)</small
                   ></span
                 >
                 <textarea
@@ -1135,39 +1361,53 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
             </p>
           }
 
-          <div class="actions">
+          <div class="actions actions--sticky">
             <button
               class="btn btn--primary"
               (click)="save()"
               [disabled]="!dirty()"
+              title="Save (⌘S / Ctrl+S)"
             >
-              Save
+              <pp-icon name="check" [size]="14" /> Save
             </button>
-            <button class="btn" (click)="cancel()">Cancel</button>
+            <button class="btn" (click)="cancel()">
+              <pp-icon name="undo" [size]="14" /> Cancel
+            </button>
             <button
               class="btn"
               (click)="testConnection()"
               [disabled]="testing()"
             >
+              <pp-icon name="zap" [size]="14" />
               {{ testing() ? "Testing…" : "Test" }}
             </button>
-            <button class="btn" (click)="clone()">Clone</button>
-            @if (testResult(); as t) {
-              <span class="test-result" [class.ok]="t.ok" [class.bad]="!t.ok">
-                {{ t.ok ? "✓ " + t.latency_ms + " ms" : "✗ " + t.error }}
-              </span>
-            }
+            <button class="btn" (click)="clone()">
+              <pp-icon name="copy" [size]="14" /> Clone
+            </button>
             @if (originalName()) {
-              <button class="btn btn--danger" (click)="remove(d)">
-                Delete
+              <button
+                class="btn btn--danger actions__right"
+                (click)="remove(d)"
+              >
+                <pp-icon name="x" [size]="14" /> Delete
               </button>
             }
           </div>
         </div>
       } @else {
         <div class="placeholder">
-          <pp-icon name="cpu" [size]="28" />
+          <pp-icon name="plug" [size]="28" />
           <p>Select a connection to edit, or create a new one.</p>
+          <button class="btn btn--primary" (click)="newConnection()">
+            <pp-icon name="plus" [size]="14" /> New connection
+          </button>
+          <div class="legend">
+            @for (f of families; track f.key) {
+              <span class="legend__item" [attr.data-tone]="f.tone">
+                <pp-icon [name]="f.icon" [size]="13" /> {{ f.label }}
+              </span>
+            }
+          </div>
         </div>
       }
     </section>
