@@ -114,7 +114,14 @@ class TcpResponder:
         self.length_includes_header = bool(f.get("length_includes_header", True))
         self.tpdu_bytes = int(f.get("tpdu_bytes", 0))
         self.tpdu_out = bytes.fromhex(f.get("tpdu_outbound_hex", "") or "")
+        #: Text codec for ``header_echo`` bodies (legacy ``framing.encoding``).
         self.encoding = f.get("encoding", "ascii")
+        #: ISO 8583 wire encoding profile (ADR-0011): a top-level ``encoding``
+        #: (where a bound Message Format's ``definition.encoding`` is injected)
+        #: or the legacy ``framing.encoding`` folded on read; a disagreeing pair
+        #: is refused here, at construction, never silently picked.
+        self.wire_encoding = iso8583.wire_encoding_from_config(config, protocol=self.protocol)
+        self.mti_encoding = iso8583.mti_encoding(self.wire_encoding)
 
         # header_echo specifics
         he = config.get("header_echo", {})
@@ -331,6 +338,8 @@ class TcpResponder:
                         prefix_bytes=self.prefix_bytes,
                         byte_order=self.byte_order,
                         length_encoding=self.length_encoding,
+                        mti_encoding=self.mti_encoding,
+                        header_bytes=len(self.tpdu_out),
                     )
 
                 if outcome.partial:
@@ -382,8 +391,8 @@ class TcpResponder:
     # -- protocol decode / encode -------------------------------------------
 
     def _decode(self, body: bytes) -> dict:
-        text = body.decode(self.encoding, errors="replace")
         if self.protocol == "header_echo":
+            text = body.decode(self.encoding, errors="replace")
             hb, rcb = self.header_bytes, self.resp_cmd_bytes
             return {
                 "header": text[:hb],
@@ -391,8 +400,8 @@ class TcpResponder:
                 "data": text[hb + rcb :],
                 "raw": text,
             }
-        parsed = iso8583.iso_unpack(text, self.fields)
-        return {
+        parsed = iso8583.unpack(body, self.fields, self.wire_encoding)
+        out = {
             "mti": parsed["mti"],
             "de": {k: v.get("value") for k, v in parsed["fields"].items()},
             #: every DE bit set in the bitmap (a superset of the keys in ``de``
@@ -400,6 +409,9 @@ class TcpResponder:
             #: dialect validation to flag DEs the format does not define.
             "de_list": parsed["de_list"],
         }
+        if parsed.get("truncated"):
+            out["decode_error"] = parsed.get("error")
+        return out
 
     def _encode(self, parsed: dict, action: dict) -> bytes:
         if self.protocol == "header_echo":
@@ -451,7 +463,7 @@ class TcpResponder:
                     values[str(de)] = gen_spec
         values.setdefault("39", "00")
         mti = action.get("mti") or _next_mti(parsed.get("mti", "0200"))
-        return iso8583.iso_pack(mti, values, self.fields).encode(self.encoding)
+        return iso8583.pack(mti, values, self.fields, self.wire_encoding)
 
     # -- rule resolution -----------------------------------------------------
 

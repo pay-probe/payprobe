@@ -298,7 +298,7 @@ class TcpProxy(TcpResponder):
         values = {str(k): str(v) for k, v in (parsed.get("de") or {}).items() if v is not None}
         for de, val in (action.get("set") or {}).items():
             values[str(de)] = str(val)
-        return iso8583.iso_pack(mti, values, self.fields).encode(self.encoding)
+        return iso8583.pack(mti, values, self.fields, self.wire_encoding)
 
     async def _intercept(self, body: bytes, parsed: dict, dst_writer: asyncio.StreamWriter) -> None:
         """Forward a frame, mutating / delaying / dropping / corrupting it when a

@@ -10,10 +10,11 @@ ISO 8583 bytes over a subject:
 * ``bytes``   — raw binary. Encodes from ``{"hex": …}`` / ``{"base64": …}`` /
   ``{"text": …}`` (or a bare ``str``/``bytes``); decodes to a dict exposing all
   three views so a rule or assertion can match whichever is convenient.
-* ``iso8583`` — reuse the existing dialect codecs (:mod:`worker.adapters.tcp.iso8583`)
-  so a ``{mti, de:{…}}`` payload packs to ASCII ISO 8583 bytes and inbound bytes
-  unpack to ``{mti, de, fields}`` — no NATS-only encoding story. The DE table
-  comes from the connection's ``fields`` (injected from a Message Format when a
+* ``iso8583`` — reuse the one shared codec (:mod:`payprobe_common.iso8583` via
+  :mod:`worker.adapters.tcp.iso8583`) so a ``{mti, de:{…}}`` payload packs to
+  ISO 8583 bytes and inbound bytes unpack to ``{mti, de, fields}`` — no NATS-only
+  encoding story. The DE table comes from the connection's ``fields`` and the wire
+  profile from its ``encoding`` (both injected from a Message Format when a
   ``message_format_id`` is bound, exactly like the TCP simulator path).
 
 ``encode`` never raises for JSON/bytes; an ISO 8583 encode with a malformed
@@ -33,6 +34,12 @@ def _iso_fields(config: dict | None) -> dict:
     from ..tcp.iso8583 import DEFAULT_FIELDS
 
     return (config or {}).get("fields") or DEFAULT_FIELDS
+
+
+def _iso_encoding(config: dict | None):
+    from ..tcp.iso8583 import wire_encoding_from_config
+
+    return wire_encoding_from_config(config or {})
 
 
 def encode(payload: Any, codec: str = DEFAULT_CODEC, config: dict | None = None) -> bytes:
@@ -104,7 +111,7 @@ def _decode_bytes(raw: bytes) -> dict:
 
 
 def _encode_iso8583(payload: Any, config: dict | None) -> bytes:
-    from ..tcp.iso8583 import iso_pack
+    from ..tcp.iso8583 import pack
 
     if not isinstance(payload, dict):
         raise ValueError("iso8583 codec needs a {mti, de:{…}} payload")  # noqa: TRY004
@@ -115,15 +122,15 @@ def _encode_iso8583(payload: Any, config: dict | None) -> bytes:
     if not isinstance(de, dict):
         # also accept a flat fields map ({"2": "...", "4": "..."})
         de = {k: v for k, v in payload.items() if str(k).isdigit()}
-    return iso_pack(mti, de, _iso_fields(config)).encode("ascii")
+    return pack(mti, de, _iso_fields(config), _iso_encoding(config))
 
 
 def _decode_iso8583(raw: bytes, config: dict | None) -> dict:
-    from ..tcp.iso8583 import iso_unpack
+    from ..tcp.iso8583 import unpack
 
     text = raw.decode("ascii", errors="replace")
     try:
-        parsed = iso_unpack(text, _iso_fields(config))
+        parsed = unpack(raw, _iso_fields(config), _iso_encoding(config))
     except Exception:  # noqa: BLE001 — malformed frame stays matchable as text
         return {"raw": text, "error": "iso8583 decode failed"}
     # expose a flat {de: value} view alongside the rich fields, matching the

@@ -85,20 +85,10 @@ log = logging.getLogger(__name__)
 #: scenario-service can't be reached). Keep the two in sync.
 DEFAULT_FORMAT_ID = "visa-base1"
 
-#: DE table = the base 1987 set plus the VISA-relevant fields the flows touch.
+#: DE table = the shared VISA Base I dictionary (``payprobe_common.iso8583``),
+#: the same object the ``visa-base1`` registry format is seeded from (ADR-0011).
 #: Offline fallback for :data:`DEFAULT_FORMAT_ID` (see note above).
-VISA_FIELDS: dict[str, dict] = {
-    **iso8583.DEFAULT_FIELDS,
-    "43": {"name": "Card Acceptor Name/Location", "len_type": "fixed", "length": 40},
-    "44": {"name": "Additional Response Data", "len_type": "llvar", "length": 25},
-    "48": {"name": "Additional Data (Private)", "len_type": "lllvar", "length": 999},
-    "54": {"name": "Additional Amounts", "len_type": "lllvar", "length": 120},
-    "60": {"name": "Reserved (Visa POS Data)", "len_type": "lllvar", "length": 999},
-    "62": {"name": "Custom Payment Service (Visa)", "len_type": "lllvar", "length": 999},
-    "63": {"name": "Network Data (Visa)", "len_type": "lllvar", "length": 999},
-    "90": {"name": "Original Data Elements", "len_type": "fixed", "length": 42},
-    "95": {"name": "Replacement Amounts", "len_type": "fixed", "length": 42},
-}
+VISA_FIELDS: dict[str, dict] = iso8583.VISA_BASE_I
 
 # VISA-ish DE 39 response codes used as defaults below (public, widely documented).
 RC_APPROVED = "00"

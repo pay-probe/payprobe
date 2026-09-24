@@ -43,6 +43,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 ENV NODE_PATH=/opt/jsdeps/node_modules
 
+COPY packages/payprobe_common /app/packages/payprobe_common
 COPY packages/worker /app/packages/worker
 COPY examples /app/examples
 

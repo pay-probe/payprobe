@@ -9,7 +9,8 @@ and turns inbound bytes back into a parsed dict with the same correlation key.
 This keeps the same long-lived, multiplexed connection usable for very
 different hosts:
 
-* ``iso8583``     — ASCII ISO 8583 (switches, acquirers, issuer simulators).
+* ``iso8583``     — ISO 8583 under the connection's wire ``encoding`` profile
+                    (ASCII default; binary bitmap / BCD / EBCDIC via ADR-0011).
 * ``header_echo`` — host-command protocols where the host echoes a leading
                     header that we use to match the reply (HSMs such as Thales
                     payShield, and many simple request/response hosts).
@@ -105,7 +106,9 @@ _DEFAULT_RESPONSE_MTI_MAP = {
 
 
 class Iso8583Protocol(TcpProtocol):
-    """ASCII ISO 8583. Correlation by a configurable DE (STAN / DE 11)."""
+    """ISO 8583 under the connection's wire encoding profile (``encoding`` at the
+    top level of the config, or the legacy ``framing.encoding`` text codec folded
+    on read). Correlation by a configurable DE (STAN / DE 11)."""
 
     name = "iso8583"
 
@@ -119,7 +122,8 @@ class Iso8583Protocol(TcpProtocol):
         self.fields = config.get("fields") or iso8583.DEFAULT_FIELDS
         self.field_map = {**_DEFAULT_FIELD_MAP, **config.get("field_map", {})}
         self.auto_fields = bool(config.get("auto_fields", True))
-        self.encoding = config.get("framing", {}).get("encoding", "ascii")
+        #: Wire encoding profile (ADR-0011): ``"ascii"`` | ``"binary"`` | axis dict.
+        self.wire_encoding = iso8583.wire_encoding_from_config(config)
         self._stan = 0
 
     def encode(self, action: str, payload: dict) -> EncodedMessage:
@@ -139,7 +143,7 @@ class Iso8583Protocol(TcpProtocol):
         if self.auto_fields:
             self._stamp_time_fields(values, fields)
         expected = self.resp_mti_map.get(mti, mti) if self.match_mti else None
-        body = iso8583.iso_pack(mti, values, fields).encode(self.encoding)
+        body = iso8583.pack(mti, values, fields, self.wire_encoding)
         return EncodedMessage(self._key(corr, expected), body, {"mti": mti, "values": values})
 
     def _resolve_fields(self, payload: dict) -> dict:
@@ -155,8 +159,7 @@ class Iso8583Protocol(TcpProtocol):
         return f if isinstance(f, dict) and f else self.fields
 
     def decode(self, body: bytes) -> dict:
-        text = body.decode(self.encoding, errors="replace")
-        return iso8583.iso_unpack(text, self.fields)
+        return iso8583.unpack(body, self.fields, self.wire_encoding)
 
     def correlation_key(self, parsed: dict) -> str | None:
         corr = (parsed.get("fields", {}).get(self.corr_field) or {}).get("value")

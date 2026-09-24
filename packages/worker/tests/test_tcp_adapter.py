@@ -441,4 +441,4 @@ async def test_length_encoding_mismatch_fails_loudly_not_silently():
     with pytest.raises(ValueError, match="not decimal digits"):
         framing.decode_length((43).to_bytes(2, "big"), "big", "ascii")
     with pytest.raises(ValueError, match="length_encoding"):
-        framing.normalise_length_encoding("bcd")
+        framing.normalise_length_encoding("hex")  # bcd is valid since ADR-0011

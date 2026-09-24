@@ -96,10 +96,11 @@ them editable first to satisfy the dependencies."*
 ```bash
 python -m venv .venv && source .venv/bin/activate
 
-# 1. leaf packages first
+# 1. leaf packages first (payprobe_common before the worker: since ADR-0011 the
+#    worker imports its ISO 8583 codec from it)
+pip install -e "packages/payprobe_common[dev]"
 pip install -e "packages/worker[dev]"
 pip install -e "packages/report_service[dev]"
-pip install -e "packages/payprobe_common[dev]"
 
 # 2. now the orchestrator resolves its local deps
 pip install -e "packages/orchestrator[dev]"

@@ -116,6 +116,8 @@ class ChaosEngine:
         prefix_bytes: int = 2,
         byte_order: str = "big",
         length_encoding: str = "binary",
+        mti_encoding: str = "ascii",
+        header_bytes: int = 0,
     ) -> bytes:
         """Return a deliberately broken version of a fully framed reply.
 
@@ -125,8 +127,10 @@ class ChaosEngine:
           (framing stays valid, so the client receives a whole frame it cannot
           parse → decode/parse error).
         - ``flip_bits``  — flip a handful of bits in the body (subtle corruption).
-        - ``bad_mti``    — overwrite the first body bytes with ``"9999"`` so the
-          MTI is nonsensical (valid frame, wrong message type).
+        - ``bad_mti``    — overwrite the MTI (after ``header_bytes`` of TPDU) with
+          ``9999`` in the MTI's own encoding (``mti_encoding``: ASCII text, two
+          BCD bytes, or EBCDIC) so the message type is nonsensical while the
+          frame stays valid.
         - ``bad_length`` — inflate the length prefix so the client waits for more
           bytes than will ever arrive (read stall / timeout or stream desync).
         """
@@ -143,9 +147,16 @@ class ChaosEngine:
             return framing.encode_length(bogus, prefix_bytes, byte_order, length_encoding) + rest
 
         if mode == "bad_mti":
-            if len(rest) >= 4:
-                return prefix + b"9999" + rest[4:]
-            return prefix + b"9" * len(rest)
+            head, body = rest[:header_bytes], rest[header_bytes:]
+            if mti_encoding == "bcd":
+                bogus = b"\x99\x99"
+            elif mti_encoding == "ebcdic":
+                bogus = "9999".encode("cp037")
+            else:
+                bogus = b"9999"
+            if len(body) >= len(bogus):
+                return prefix + head + bogus + body[len(bogus) :]
+            return prefix + head + (bogus * len(body))[: len(body)]
 
         if mode == "flip_bits":
             buf = bytearray(rest)

@@ -37,8 +37,8 @@ test-agent-hub: ## Run the agent-hub registry suite (ADR-0010)
 test-cov: ## Run the full suite with coverage
 	cd packages && $(PYTEST) $(PKGS) --cov --cov-report=term-missing -q
 
-install: ## Install worker runtime + dev test dependencies
-	pip install -e "packages/worker[dev]" httpx fastapi structlog pyyaml
+install: ## Install worker runtime + dev test dependencies (shared payprobe_common first: the worker imports its ISO 8583 codec)
+	pip install -e packages/payprobe_common -e "packages/worker[dev]" httpx fastapi structlog pyyaml
 
 portal-build: ## Production build of the Angular portal
 	cd packages/portal && npm run build

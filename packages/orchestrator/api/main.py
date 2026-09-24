@@ -88,6 +88,8 @@ from report_service.provenance import provenance as _provenance, content_hash as
 
 # Shared encryption-at-rest (no-op passthrough unless PAYPROBE_SECRET_KEY is set).
 from payprobe_common.crypto import SecretBox as _SecretBox
+from payprobe_common.iso8583 import resolve_encoding as _iso_resolve_encoding
+from payprobe_common.iso8583 import wire_encoding_from_config as _iso_wire_encoding_from_config
 
 from .run_store import RunStore
 from .schedule_store import ScheduleStore
@@ -786,6 +788,17 @@ async def _attach_tables(scenarios: list[dict]) -> None:
 #: restore the legacy "inline env adapter wins" behaviour if ever needed.
 _CONNECTION_OVERRIDE_WINS = os.environ.get(
     "PAYPROBE_CONNECTION_OVERRIDE_WINS", "1"
+).lower() not in ("0", "false", "no")
+
+#: ADR-0011 — a simulator bound to a Message Format also takes the format's wire
+#: ``encoding`` profile (binary bitmap / BCD / EBCDIC …), so a dialect declared
+#: binary really binds binary, and a format whose ``encoding`` disagrees with
+#: the config's own is refused (400). Default ON since 2026-09-24 (phase 5, after
+#: a real-environment run against the live registry). Escape hatch: set
+#: ``PAYPROBE_ISO8583_FORMAT_ENCODING=0`` to restore the pre-ADR posture (only
+#: the DE table and presence matrix bind; a disagreement is logged, not refused).
+_ISO8583_FORMAT_ENCODING = os.environ.get(
+    "PAYPROBE_ISO8583_FORMAT_ENCODING", "1"
 ).lower() not in ("0", "false", "no")
 
 #: Default-connection model — now the DEFAULT (docs/history/DEFAULT-CONNECTION-MODEL-SPEC.md).
@@ -2478,13 +2491,51 @@ async def _resolve_simulator_config(config: dict) -> dict:
         validate.setdefault("presence", presence)
         validate.setdefault("mode", "warn")
         cfg["validate"] = validate
+    _apply_format_encoding(cfg, fid, definition.get("encoding"))
     return cfg
+
+
+def _apply_format_encoding(cfg: dict, fid: str, fmt_encoding: Any) -> None:
+    """ADR-0011: the bound format's wire ``encoding`` wins over the simulator
+    config's own (``encoding`` or the legacy ``framing.encoding``), and the two
+    may never disagree silently. Injection is gated by
+    ``PAYPROBE_ISO8583_FORMAT_ENCODING``; the disagreement check is not (it only
+    warns while the flag is off, so operators see what the flip will change)."""
+    if fmt_encoding is None:
+        return
+    try:
+        wanted = _iso_resolve_encoding(fmt_encoding)
+        own = _iso_wire_encoding_from_config(cfg)
+    except ValueError as exc:
+        raise HTTPException(400, f"simulator: message format '{fid}': {exc}")
+    has_own = cfg.get("encoding") is not None or (cfg.get("framing") or {}).get(
+        "encoding"
+    ) is not None
+    if has_own and _iso_resolve_encoding(own) != wanted:
+        msg = (
+            f"simulator: message format '{fid}' declares encoding {fmt_encoding!r} but the "
+            f"config carries {own!r} (encoding / framing.encoding); keep one"
+        )
+        if _ISO8583_FORMAT_ENCODING:
+            raise HTTPException(400, msg)
+        log.warning("%s — honoured neither way until PAYPROBE_ISO8583_FORMAT_ENCODING=1", msg)
+        return
+    if _ISO8583_FORMAT_ENCODING:
+        cfg["encoding"] = fmt_encoding
+        framing = dict(cfg.get("framing") or {})
+        if "encoding" in framing:
+            # the legacy text codec would only restate (or contradict) the profile
+            framing.pop("encoding")
+            cfg["framing"] = framing
 
 
 async def _start_responder(sid: str, label: str, config: dict) -> TcpResponder:
     """Boot a responder for ``config`` and register it under ``sid``."""
     config = await _resolve_simulator_config(config)
-    responder = _responder_for(config)
+    try:
+        responder = _responder_for(config)
+    except ValueError as exc:  # e.g. encoding / framing.encoding disagree (ADR-0011)
+        raise HTTPException(400, f"could not start simulator: {exc}")
     try:
         await responder.start()
     except Exception as exc:  # noqa: BLE001 - bad config / port in use
