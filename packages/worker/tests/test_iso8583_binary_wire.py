@@ -197,9 +197,7 @@ async def test_legacy_framing_encoding_cp037_folds_to_ebcdic_text_on_both_ends()
     )
     assert r.wire_encoding == {"text": "ebcdic"}
     port = await r.start()
-    a = await _adapter(
-        port, encoding={"text": "ebcdic"}, framing={"length_prefix_bytes": 2}
-    )
+    a = await _adapter(port, encoding={"text": "ebcdic"}, framing={"length_prefix_bytes": 2})
     try:
         res = await a.execute("send_0200", {"values": {"4": "000000001000", "41": "TERM ABC"}})
         assert res.success, res.error

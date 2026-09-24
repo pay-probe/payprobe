@@ -64,6 +64,12 @@ nats = [
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.lint.isort]
+# payprobe_common is a sibling package on PYTHONPATH, not a third-party dist:
+# group it with the worker's own imports whatever directory ruff runs from
+# (CI runs from packages/worker; local runs often from packages/). ADR-0011.
+known-first-party = ["worker", "payprobe_common"]
+
 [tool.black]
 # Match ruff's line length so the two formatters don't fight.
 line-length = 100
