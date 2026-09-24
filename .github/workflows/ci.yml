@@ -16,7 +16,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
+        # The worker's ISO 8583 codec is the shared payprobe_common one (ADR-0011).
         run: |
+          pip install -e packages/payprobe_common
           cd packages/worker
           pip install -e ".[dev]"
       - name: Lint

@@ -3,182 +3,23 @@
 Code-backed steps (self-contained Python, since the worker runs code nodes in an
 isolated subprocess). ISO8583 pack/parse use an **ASCII** representation with a
 configurable field table (`FIELDS`) right in the step — edit it per integration,
-or load a registered version from the Message Formats manager. ISO20022 build /
+or load a registered version from the Message Formats manager. The codec source
+and the default table come from ``payprobe_common.iso8583`` (ADR-0011). ISO20022 build /
 parse work on XML via the standard library.
 """
 from __future__ import annotations
 
+from payprobe_common.iso8583 import ISO8583_1987
+from payprobe_common.iso8583.portable import codec_source
+
 from .catalog import ActionSpec, TargetSpec
 
-# A generic, configuration-driven ASCII ISO8583 codec, embedded into the steps.
-ISO8583_CODEC_SRC = r'''
-def _bits_from_hex(h):
-    n = int(h, 16); w = len(h) * 4
-    return {i + 1 for i in range(w) if n & (1 << (w - 1 - i))}
-
-def _bitmap(des, width):
-    n = 0
-    for d in des:
-        n |= 1 << (width - d)
-    return format(n, "0%dX" % (width // 4))
-
-def iso_unpack(msg, FIELDS):
-    msg = "".join(msg.split())
-    pos = 0
-    mti = msg[0:4]; pos = 4
-    present = _bits_from_hex(msg[pos:pos + 16]); pos += 16
-    if 1 in present:
-        present |= {b + 64 for b in _bits_from_hex(msg[pos:pos + 16])}; pos += 16
-        present.discard(1)
-    fields = {}
-    for de in sorted(present):
-        sp = FIELDS.get(str(de))
-        if not sp:
-            fields[str(de)] = {"name": "(unknown)", "value": "", "error": "DE not in spec"}
-            break
-        lt = sp.get("len_type", "fixed")
-        if lt == "fixed":
-            ln = int(sp.get("length", 0)); v = msg[pos:pos + ln]; pos += ln
-        else:  # llvar(2)/lllvar(3)/llllvar(4)/lllllvar(5) length prefix
-            pw = {"llvar": 2, "lllvar": 3, "llllvar": 4, "lllllvar": 5}.get(lt, 3)
-            ln = int(msg[pos:pos + pw]); pos += pw; v = msg[pos:pos + ln]; pos += ln
-        fields[str(de)] = {"name": sp.get("name", ""), "value": v}
-    return {"mti": mti, "de_list": sorted(present), "fields": fields}
-
-def iso_pack(mti, values, FIELDS):
-    values = {str(k): str(v) for k, v in values.items()}
-    des = sorted(int(d) for d in values)
-    has_sec = any(d > 64 for d in des)
-    primary = {d for d in des if d <= 64}
-    if has_sec:
-        primary.add(1)
-    out = mti + _bitmap(primary, 64)
-    if has_sec:
-        out += _bitmap({d - 64 for d in des if d > 64}, 64)
-    for d in des:
-        sp = FIELDS[str(d)]; v = values[str(d)]
-        lt = sp.get("len_type", "fixed")
-        if lt == "fixed":
-            out += v
-        else:  # llvar(2)/lllvar(3)/llllvar(4)/lllllvar(5) length prefix
-            pw = {"llvar": 2, "lllvar": 3, "llllvar": 4, "lllllvar": 5}.get(lt, 3)
-            out += str(len(v)).zfill(pw) + v
-    return out
-'''
-
-# Standard ISO8583:1987 field table (ASCII), as editable source. Names, classes
-# and lengths follow the published 1987 data-element directory.
-ISO8583_1987_FIELDS_SRC = (
-    'FIELDS = {\n'
-    '    "2":  {"name": "Primary Account Number (PAN)", "len_type": "llvar",  "length": 19, "type": "n"},\n'
-    '    "3":  {"name": "Processing Code",        "len_type": "fixed",  "length": 6,  "type": "n"},\n'
-    '    "4":  {"name": "Amount, Transaction",    "len_type": "fixed",  "length": 12, "type": "n"},\n'
-    '    "5":  {"name": "Amount, Settlement",     "len_type": "fixed",  "length": 12, "type": "n"},\n'
-    '    "6":  {"name": "Amount, Cardholder Billing", "len_type": "fixed", "length": 12, "type": "n"},\n'
-    '    "7":  {"name": "Transmission Date & Time", "len_type": "fixed", "length": 10, "type": "n"},\n'
-    '    "11": {"name": "System Trace Audit Number","len_type": "fixed",  "length": 6,  "type": "n"},\n'
-    '    "12": {"name": "Time, Local Transaction", "len_type": "fixed",  "length": 6,  "type": "n"},\n'
-    '    "13": {"name": "Date, Local Transaction",  "len_type": "fixed",  "length": 4,  "type": "n"},\n'
-    '    "14": {"name": "Date, Expiration",        "len_type": "fixed",  "length": 4,  "type": "n"},\n'
-    '    "15": {"name": "Date, Settlement",        "len_type": "fixed",  "length": 4,  "type": "n"},\n'
-    '    "18": {"name": "Merchant Type (MCC)",     "len_type": "fixed",  "length": 4,  "type": "n"},\n'
-    '    "19": {"name": "Acquirer Country Code",   "len_type": "fixed",  "length": 3,  "type": "n"},\n'
-    '    "22": {"name": "POS Entry Mode",          "len_type": "fixed",  "length": 3,  "type": "n"},\n'
-    '    "25": {"name": "POS Condition Code",      "len_type": "fixed",  "length": 2,  "type": "n"},\n'
-    '    "32": {"name": "Acquiring Institution ID","len_type": "llvar",  "length": 11, "type": "n"},\n'
-    '    "35": {"name": "Track 2 Data",            "len_type": "llvar",  "length": 37, "type": "z"},\n'
-    '    "37": {"name": "Retrieval Reference Number", "len_type": "fixed", "length": 12, "type": "an"},\n'
-    '    "38": {"name": "Authorization ID Response", "len_type": "fixed", "length": 6,  "type": "an"},\n'
-    '    "39": {"name": "Response Code",           "len_type": "fixed",  "length": 2,  "type": "an"},\n'
-    '    "41": {"name": "Card Acceptor Terminal ID","len_type": "fixed",  "length": 8,  "type": "ans"},\n'
-    '    "42": {"name": "Card Acceptor ID Code",   "len_type": "fixed",  "length": 15, "type": "ans"},\n'
-    '    "43": {"name": "Card Acceptor Name/Location", "len_type": "fixed", "length": 40, "type": "ans"},\n'
-    '    "49": {"name": "Currency Code, Transaction", "len_type": "fixed", "length": 3,  "type": "n"},\n'
-    '    "52": {"name": "PIN Data",                "len_type": "fixed",  "length": 16, "type": "b"},\n'
-    '    "53": {"name": "Security Control Information", "len_type": "fixed", "length": 16, "type": "n"},\n'
-    '    "55": {"name": "ICC Data (EMV)",          "len_type": "lllvar", "length": 999,"type": "b"},\n'
-    '    "64": {"name": "Message Authentication Code", "len_type": "fixed", "length": 16, "type": "b"},\n'
-    '    "70": {"name": "Network Management Code", "len_type": "fixed",  "length": 3,  "type": "n"},\n'
-    '}\n'
-)
-
-# ISO8583:1993-style field table (ASCII). Mirrors the 1987 table with the
-# headline 1993 changes: DE 22 becomes the 12-char Point-of-Service Data Code,
-# DE 39 becomes the 3-char Action Code, and 1993 additions (DE 56 message reason
-# code, DE 95 replacement amounts, network/error DEs) are included.
-ISO8583_1993_FIELDS_SRC = (
-    'FIELDS = {\n'
-    '    "2":  {"name": "Primary Account Number", "len_type": "llvar",  "length": 19, "type": "n"},\n'
-    '    "3":  {"name": "Processing Code",        "len_type": "fixed",  "length": 6,  "type": "n"},\n'
-    '    "4":  {"name": "Amount, Transaction",    "len_type": "fixed",  "length": 12, "type": "n"},\n'
-    '    "7":  {"name": "Transmission Date/Time",  "len_type": "fixed",  "length": 10, "type": "n"},\n'
-    '    "11": {"name": "STAN",                    "len_type": "fixed",  "length": 6,  "type": "n"},\n'
-    '    "12": {"name": "Date/Time, Local Txn",    "len_type": "fixed",  "length": 12, "type": "n"},\n'
-    '    "13": {"name": "Date, Effective",         "len_type": "fixed",  "length": 4,  "type": "n"},\n'
-    '    "14": {"name": "Date, Expiration",        "len_type": "fixed",  "length": 4,  "type": "n"},\n'
-    '    "18": {"name": "Merchant Type",           "len_type": "fixed",  "length": 4,  "type": "n"},\n'
-    '    "22": {"name": "POS Data Code",           "len_type": "fixed",  "length": 12, "type": "an"},\n'
-    '    "25": {"name": "POS Condition Code",      "len_type": "fixed",  "length": 2,  "type": "n"},\n'
-    '    "32": {"name": "Acquiring Institution ID","len_type": "llvar",  "length": 11, "type": "n"},\n'
-    '    "35": {"name": "Track 2 Data",            "len_type": "llvar",  "length": 37, "type": "z"},\n'
-    '    "37": {"name": "Retrieval Reference Num", "len_type": "fixed",  "length": 12, "type": "an"},\n'
-    '    "38": {"name": "Approval Code",           "len_type": "fixed",  "length": 6,  "type": "an"},\n'
-    '    "39": {"name": "Action Code",             "len_type": "fixed",  "length": 3,  "type": "n"},\n'
-    '    "41": {"name": "Card Acceptor Terminal",  "len_type": "fixed",  "length": 8,  "type": "ans"},\n'
-    '    "42": {"name": "Card Acceptor ID Code",   "len_type": "fixed",  "length": 15, "type": "ans"},\n'
-    '    "49": {"name": "Currency Code, Txn",      "len_type": "fixed",  "length": 3,  "type": "n"},\n'
-    '    "52": {"name": "PIN Data",                "len_type": "fixed",  "length": 16, "type": "b"},\n'
-    '    "53": {"name": "Security Control Info",   "len_type": "llvar",  "length": 48, "type": "b"},\n'
-    '    "55": {"name": "ICC Data (EMV)",          "len_type": "lllvar", "length": 999,"type": "b"},\n'
-    '    "56": {"name": "Message Reason Code",     "len_type": "llvar",  "length": 4,  "type": "n"},\n'
-    '    "70": {"name": "Network Management Code", "len_type": "fixed",  "length": 3,  "type": "n"},\n'
-    '    "95": {"name": "Replacement Amounts",     "len_type": "fixed",  "length": 42, "type": "an"},\n'
-    '}\n'
-)
-
-
-# VISA Base I — the DE table the bundled VisaSimulator (scheme host) packs and
-# parses with: the standard ISO 8583:1987 core plus the VISA-relevant private
-# fields its flows touch (DE 43/44/48/54/60/62/63/90/95). Extracted here so the
-# simulator can bind it from the registry (message_format_id) instead of carrying
-# a private hard-coded copy. Functional, public ISO 8583 layout — DE 62/63 are
-# opaque echo fields, not VISA's confidential V.I.P. sub-field structure.
-ISO8583_VISA_FIELDS_SRC = (
-    'FIELDS = {\n'
-    '    "2":  {"name": "Primary Account Number (PAN)", "len_type": "llvar",  "length": 19, "type": "n"},\n'
-    '    "3":  {"name": "Processing Code",        "len_type": "fixed",  "length": 6,  "type": "n"},\n'
-    '    "4":  {"name": "Amount, Transaction",    "len_type": "fixed",  "length": 12, "type": "n"},\n'
-    '    "7":  {"name": "Transmission Date & Time", "len_type": "fixed", "length": 10, "type": "n"},\n'
-    '    "11": {"name": "System Trace Audit Number","len_type": "fixed",  "length": 6,  "type": "n"},\n'
-    '    "12": {"name": "Time, Local Transaction", "len_type": "fixed",  "length": 6,  "type": "n"},\n'
-    '    "13": {"name": "Date, Local Transaction",  "len_type": "fixed",  "length": 4,  "type": "n"},\n'
-    '    "14": {"name": "Date, Expiration",        "len_type": "fixed",  "length": 4,  "type": "n"},\n'
-    '    "18": {"name": "Merchant Type (MCC)",     "len_type": "fixed",  "length": 4,  "type": "n"},\n'
-    '    "22": {"name": "POS Entry Mode",          "len_type": "fixed",  "length": 3,  "type": "n"},\n'
-    '    "25": {"name": "POS Condition Code",      "len_type": "fixed",  "length": 2,  "type": "n"},\n'
-    '    "32": {"name": "Acquiring Institution ID","len_type": "llvar",  "length": 11, "type": "n"},\n'
-    '    "35": {"name": "Track 2 Data",            "len_type": "llvar",  "length": 37, "type": "z"},\n'
-    '    "37": {"name": "Retrieval Reference Number", "len_type": "fixed", "length": 12, "type": "an"},\n'
-    '    "38": {"name": "Authorization ID Response", "len_type": "fixed", "length": 6,  "type": "an"},\n'
-    '    "39": {"name": "Response Code",           "len_type": "fixed",  "length": 2,  "type": "an"},\n'
-    '    "41": {"name": "Card Acceptor Terminal ID","len_type": "fixed",  "length": 8,  "type": "ans"},\n'
-    '    "42": {"name": "Card Acceptor ID Code",   "len_type": "fixed",  "length": 15, "type": "ans"},\n'
-    '    "43": {"name": "Card Acceptor Name/Location", "len_type": "fixed", "length": 40, "type": "ans"},\n'
-    '    "44": {"name": "Additional Response Data", "len_type": "llvar",  "length": 25, "type": "ans"},\n'
-    '    "48": {"name": "Additional Data (Private)", "len_type": "lllvar", "length": 999, "type": "ans"},\n'
-    '    "49": {"name": "Currency Code, Transaction", "len_type": "fixed", "length": 3,  "type": "n"},\n'
-    '    "52": {"name": "PIN Data",                "len_type": "fixed",  "length": 16, "type": "b"},\n'
-    '    "54": {"name": "Additional Amounts",      "len_type": "lllvar", "length": 120, "type": "ans"},\n'
-    '    "55": {"name": "ICC Data (EMV)",          "len_type": "lllvar", "length": 999,"type": "b"},\n'
-    '    "60": {"name": "Reserved (Visa POS Data)", "len_type": "lllvar", "length": 999, "type": "ans"},\n'
-    '    "62": {"name": "Custom Payment Service (Visa)", "len_type": "lllvar", "length": 999, "type": "ans"},\n'
-    '    "63": {"name": "Network Data (Visa)",     "len_type": "lllvar", "length": 999, "type": "ans"},\n'
-    '    "70": {"name": "Network Management Code", "len_type": "fixed",  "length": 3,  "type": "n"},\n'
-    '    "90": {"name": "Original Data Elements",  "len_type": "fixed",  "length": 42, "type": "n"},\n'
-    '    "95": {"name": "Replacement Amounts",     "len_type": "fixed",  "length": 42, "type": "an"},\n'
-    '}\n'
-)
-
+# The ISO 8583 codec pasted into the steps. Code steps run in ``python -I`` with
+# no PYTHONPATH (worker/engine/code_runner.py), so they cannot import the shared
+# codec; the paste is therefore *generated* from ``payprobe_common.iso8583.portable``
+# and ``test_iso_catalog_codec_parity`` keeps it byte-identical to the shared codec
+# under the ASCII profile (ADR-0011). Binary profiles use the ``tcp`` step.
+ISO8583_CODEC_SRC = codec_source()
 
 # The DE table (FIELDS) now comes from the `fields` Input — pick a registered
 # Message Format in the editor to snapshot it here, or edit the JSON directly.
@@ -271,16 +112,8 @@ except ET.ParseError as exc:
 
 import json as _json
 
-
-def _fields_json(src: str) -> str:
-    """Execute a ``FIELDS = {...}`` source block and return it as a JSON string."""
-    ns: dict = {}
-    exec(src, ns)  # noqa: S102 - trusted module constant
-    return _json.dumps(ns["FIELDS"])
-
-
-#: Default DE table (JSON) used when a step ships standalone.
-_FIELDS_1987_JSON = _fields_json(ISO8583_1987_FIELDS_SRC)
+#: Default DE table (JSON) used when a step ships standalone — the shared 1987 dictionary.
+_FIELDS_1987_JSON = _json.dumps(ISO8583_1987)
 
 
 def _i(name, value):

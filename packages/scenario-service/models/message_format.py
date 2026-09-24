@@ -8,15 +8,12 @@ same flow can target different integrations just by switching the format.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from .iso_catalog import (
-    ISO8583_1987_FIELDS_SRC,
-    ISO8583_1993_FIELDS_SRC,
-    ISO8583_VISA_FIELDS_SRC,
-)
+from payprobe_common.iso8583 import ISO8583_1987, ISO8583_1993, VISA_BASE_I
 
 Protocol = Literal["iso8583", "iso20022"]
 
@@ -42,12 +39,6 @@ class MessageFormatDraft(BaseModel):
 class MessageFormat(MessageFormatDraft):
     id: str
     builtin: bool = False
-
-
-def _exec_fields(src: str) -> dict:
-    ns: dict = {}
-    exec(src, ns)  # noqa: S102 - trusted constant
-    return ns["FIELDS"]
 
 
 #: Per-MTI presence matrix for the standard ISO 8583 request flows. Deliberately
@@ -96,7 +87,7 @@ BUILTIN_FORMATS: list[MessageFormat] = [
         "an integration-specific version.",
         definition={
             "encoding": "ascii",
-            "fields": _exec_fields(ISO8583_1987_FIELDS_SRC),
+            "fields": deepcopy(ISO8583_1987),
             "presence": _ISO8583_PRESENCE,
             "mti": _ISO8583_MTIS_1987,
         },
@@ -113,7 +104,7 @@ BUILTIN_FORMATS: list[MessageFormat] = [
         "integration-specific version.",
         definition={
             "encoding": "ascii",
-            "fields": _exec_fields(ISO8583_1993_FIELDS_SRC),
+            "fields": deepcopy(ISO8583_1993),
             "presence": _ISO8583_PRESENCE,
             "mti": _ISO8583_MTIS_1993,
         },
@@ -131,7 +122,7 @@ BUILTIN_FORMATS: list[MessageFormat] = [
         "62/63 are opaque echo fields. Clone it to pin an integration-specific set.",
         definition={
             "encoding": "ascii",
-            "fields": _exec_fields(ISO8583_VISA_FIELDS_SRC),
+            "fields": deepcopy(VISA_BASE_I),
             "presence": _ISO8583_VISA_PRESENCE,
             "mti": _ISO8583_MTIS_VISA,
         },
