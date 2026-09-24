@@ -58,6 +58,7 @@ filesystem reads — run under nsjail/gVisor for fully untrusted multi-tenant co
 | `AUTH_API_URL` | **http://auth-service:8300** | Used by the `/status` aggregator. |
 | `PAYPROBE_LOAD_EXTERNAL_WORKERS` | — | `1` disables in-process load-worker fallback (true distributed fleet only). |
 | `DISABLE_SCHEDULER` | — | `1` turns off the scheduled-run loop. |
+| `PAYPROBE_ISO8583_FORMAT_ENCODING` | **0** | ADR-0011 phase 3. `1`: a simulator bound to a Message Format also takes the format's wire `encoding` profile (`ascii`, `binary`, or an axis dict: binary bitmap / BCD / EBCDIC / raw binary / BCD or binary length indicators), so a dialect declared binary really binds binary; a legacy `framing.encoding` text codec is dropped from the config. `0`: only the DE table and presence matrix bind (pre-ADR behaviour) and a format whose encoding disagrees with the config's own is logged, not refused. With the flag on that disagreement is a 400. |
 
 ## Observability
 

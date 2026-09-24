@@ -1,5 +1,6 @@
 """The one length-prefix encode/decode every TCP piece shares (adapter,
-responder, proxy, chaos): binary integers and zero-padded ASCII digits."""
+responder, proxy, chaos): binary integers, zero-padded ASCII digits and, since
+ADR-0011, packed-BCD digits."""
 
 import asyncio
 
@@ -19,6 +20,9 @@ from worker.adapters.tcp.responder import TcpResponder
         (43, 4, "big", "ascii", b"0043"),
         (43, 6, "big", "ascii", b"000043"),
         (0, 2, "big", "ascii", b"00"),
+        (43, 2, "big", "bcd", b"\x00\x43"),
+        (1234, 2, "little", "bcd", b"\x12\x34"),
+        (7, 1, "big", "bcd", b"\x07"),
     ],
 )
 def test_encode_and_decode_round_trip(value, width, order, enc, expected):
@@ -36,6 +40,9 @@ def test_capacity_and_overflow():
     assert framing.length_capacity(2, "binary") == 65535
     assert framing.length_capacity(2, "ascii") == 99
     assert framing.length_capacity(4, "ascii") == 9999
+    assert framing.length_capacity(2, "bcd") == 9999
+    with pytest.raises(ValueError, match="does not fit"):
+        framing.encode_length(10000, 2, "big", "bcd")
     with pytest.raises(ValueError, match="does not fit"):
         framing.encode_length(100, 2, "big", "ascii")
     with pytest.raises(ValueError, match="does not fit"):
@@ -47,11 +54,17 @@ def test_non_digit_ascii_prefix_names_the_mismatch():
         framing.decode_length(b"\x00\x2b", "big", "ascii")
 
 
+def test_non_decimal_bcd_nibble_names_the_mismatch():
+    with pytest.raises(ValueError, match="framing.length_encoding"):
+        framing.decode_length(b"\x00\x2b", "big", "bcd")
+
+
 def test_normalise_defaults_to_binary_and_refuses_unknown():
     assert framing.normalise_length_encoding(None) == "binary"
     assert framing.normalise_length_encoding("ASCII") == "ascii"
+    assert framing.normalise_length_encoding("bcd") == "bcd"
     with pytest.raises(ValueError):
-        framing.normalise_length_encoding("bcd")
+        framing.normalise_length_encoding("hex")
 
 
 def test_chaos_bad_length_keeps_the_ascii_prefix_digits():

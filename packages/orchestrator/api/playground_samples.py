@@ -52,6 +52,14 @@ WIRE_SAMPLES: dict[str, list[dict]] = {
          "action": "send_0800",
          "payload": {},
          "notes": "Sign-on/echo heartbeat; expects an 0810 back."},
+        {"name": "Purchase (0200), binary profile",
+         "action": "send_0200",
+         "payload": {"pan": _PAN, "processing_code": "000000",
+                     "amount": 10000, "currency": "981"},
+         "notes": "Same request; bind message_format_id 'iso8583-binary' (or set the "
+                  "connection's encoding to 'binary') and the wire carries a binary "
+                  "bitmap, BCD numerics and BCD length indicators instead of ASCII. "
+                  "The host must speak the same profile (ADR-0011)."},
     ],
     "visa": [
         {"name": "VISA auth (0100)",

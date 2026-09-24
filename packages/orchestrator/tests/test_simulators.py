@@ -600,3 +600,103 @@ async def test_stop_reconciles_a_stranded_run():
     out = await m.stop_load_run("orphan")
     assert out["status"] == "interrupted"
     assert m.run_store.get("orphan")["status"] == "interrupted"
+
+
+# -- ADR-0011: a bound format's wire encoding reaches the simulator -------------
+
+import pytest  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
+
+
+def _binary_format(fid="iso8583-binary", encoding="binary"):
+    return {"id": fid, "definition": {
+        "encoding": encoding,
+        "fields": {"11": {"name": "STAN", "len_type": "fixed", "length": 6, "type": "n"}},
+    }}
+
+
+async def test_format_encoding_is_not_injected_while_the_flag_is_off(monkeypatch):
+    """Default posture (PAYPROBE_ISO8583_FORMAT_ENCODING unset): the DE table binds
+    as before, the encoding is left alone, so nothing changes on the wire until an
+    operator flips the flag."""
+    async def _fake_get(url):
+        return _binary_format()
+
+    monkeypatch.setattr(m, "_http_get_json", _fake_get)
+    monkeypatch.setattr(m, "_ISO8583_FORMAT_ENCODING", False)
+    cfg = await m._resolve_simulator_config(
+        {"protocol": "iso8583", "port": 7011, "message_format_id": "iso8583-binary"})
+    assert cfg["fields"]["11"]["length"] == 6
+    assert "encoding" not in cfg
+
+
+async def test_format_encoding_is_injected_and_legacy_key_dropped_when_flag_on(monkeypatch):
+    async def _fake_get(url):
+        return _binary_format()
+
+    monkeypatch.setattr(m, "_http_get_json", _fake_get)
+    monkeypatch.setattr(m, "_ISO8583_FORMAT_ENCODING", True)
+    cfg = await m._resolve_simulator_config({
+        "protocol": "iso8583", "port": 7011, "message_format_id": "iso8583-binary",
+        "framing": {"length_prefix_bytes": 2, "length_encoding": "bcd"},
+    })
+    assert cfg["encoding"] == "binary"
+    assert cfg["framing"] == {"length_prefix_bytes": 2, "length_encoding": "bcd"}
+    # a config that already agrees keeps working; its legacy text codec is folded away
+    cfg2 = await m._resolve_simulator_config({
+        "protocol": "iso8583", "message_format_id": "iso8583-binary",
+        "encoding": "binary", "framing": {"length_prefix_bytes": 2},
+    })
+    assert cfg2["encoding"] == "binary" and "encoding" not in cfg2["framing"]
+
+
+async def test_format_encoding_disagreement_is_refused_when_flag_on(monkeypatch):
+    async def _fake_get(url):
+        return _binary_format()
+
+    monkeypatch.setattr(m, "_http_get_json", _fake_get)
+    monkeypatch.setattr(m, "_ISO8583_FORMAT_ENCODING", True)
+    with pytest.raises(HTTPException) as exc:
+        await m._resolve_simulator_config({
+            "protocol": "iso8583", "message_format_id": "iso8583-binary",
+            "framing": {"encoding": "ascii"},
+        })
+    assert exc.value.status_code == 400
+    assert "declares encoding 'binary'" in exc.value.detail
+
+
+async def test_format_encoding_disagreement_only_warns_while_flag_off(monkeypatch, caplog):
+    async def _fake_get(url):
+        return _binary_format()
+
+    monkeypatch.setattr(m, "_http_get_json", _fake_get)
+    monkeypatch.setattr(m, "_ISO8583_FORMAT_ENCODING", False)
+    with caplog.at_level("WARNING", logger="orchestrator"):
+        cfg = await m._resolve_simulator_config({
+            "protocol": "iso8583", "message_format_id": "iso8583-binary",
+            "framing": {"encoding": "ascii"},
+        })
+    assert "encoding" not in cfg
+    assert any("PAYPROBE_ISO8583_FORMAT_ENCODING=1" in r.getMessage() for r in caplog.records)
+
+
+async def test_bad_format_encoding_is_a_400_not_a_500(monkeypatch):
+    async def _fake_get(url):
+        return _binary_format(encoding="bnary")
+
+    monkeypatch.setattr(m, "_http_get_json", _fake_get)
+    with pytest.raises(HTTPException) as exc:
+        await m._resolve_simulator_config(
+            {"protocol": "iso8583", "message_format_id": "iso8583-binary"})
+    assert exc.value.status_code == 400 and "unknown ISO 8583 encoding profile" in exc.value.detail
+
+
+async def test_responder_config_refused_by_the_worker_is_a_400(monkeypatch):
+    """encoding and framing.encoding disagreeing in the simulator config itself is
+    caught when the responder is built and surfaces as a 400."""
+    with pytest.raises(HTTPException) as exc:
+        await m._start_responder("sid-adr11", "x", {
+            "protocol": "iso8583", "port": 0,
+            "encoding": "binary", "framing": {"encoding": "ascii"},
+        })
+    assert exc.value.status_code == 400 and "disagree" in exc.value.detail

@@ -153,6 +153,12 @@ def _mti_mode(opts: dict) -> str:
     return opts.get("mti") or ("bcd" if opts["numeric"] == "bcd" else "ascii")
 
 
+def mti_encoding(encoding: Any) -> str:
+    """How the MTI is written under ``encoding``: ``ascii`` | ``bcd`` | ``ebcdic``.
+    (What chaos ``bad_mti`` needs to corrupt the right bytes.)"""
+    return _mti_mode(resolve_encoding(encoding))
+
+
 def _pad(fo: dict) -> tuple[str, str]:
     side = str(fo.get("pad", "left")).lower()
     if side not in ("left", "right"):
@@ -441,6 +447,7 @@ __all__ = [
     "encode_value",
     "field_options",
     "is_ascii",
+    "mti_encoding",
     "pack",
     "resolve_encoding",
     "unpack",

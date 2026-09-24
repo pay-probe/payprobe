@@ -72,6 +72,23 @@ def test_corrupt_bad_mti_rewrites_message_type():
     assert out[2:6] == b"9999"
 
 
+def test_corrupt_bad_mti_in_bcd_touches_only_the_two_mti_bytes():
+    body = bytes.fromhex("0210") + bytes(8) + b"rest"
+    frame = len(body).to_bytes(2, "big") + body
+    out = ChaosEngine().corrupt(frame, "bad_mti", prefix_bytes=2, mti_encoding="bcd")
+    assert out[2:4] == b"\x99\x99"
+    assert out[4:] == body[2:]  # the bitmap is untouched
+
+
+def test_corrupt_bad_mti_skips_the_tpdu_header():
+    tpdu = bytes.fromhex("6000010000")
+    body = tpdu + b"0210" + b"0000ABCD"
+    frame = len(body).to_bytes(2, "big") + body
+    out = ChaosEngine().corrupt(frame, "bad_mti", prefix_bytes=2, header_bytes=len(tpdu))
+    assert out[2 : 2 + len(tpdu)] == tpdu
+    assert out[2 + len(tpdu) : 6 + len(tpdu)] == b"9999"
+
+
 def test_corrupt_flip_bits_same_length_different_body():
     frame = (12).to_bytes(2, "big") + b"0210AUTH00ABCD"
     out = ChaosEngine(seed=9).corrupt(frame, "flip_bits", prefix_bytes=2)

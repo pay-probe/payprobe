@@ -129,6 +129,25 @@ BUILTIN_FORMATS: list[MessageFormat] = [
         builtin=True,
     ),
     MessageFormat(
+        id="iso8583-binary",
+        protocol="iso8583",
+        name="ISO8583 1987 (binary profile)",
+        version="1987",
+        group="Standard",
+        description="The ISO8583:1987 field table under a representative binary wire "
+        "profile: 8-byte binary bitmap, packed-BCD numerics and MTI, raw binary "
+        "fields, BCD length indicators. A profile, not a scheme spec — clone it and "
+        "adjust the encoding axes (bitmap/numeric/text/binary/length) or add per-field "
+        "overrides to match a host (ADR-0011).",
+        definition={
+            "encoding": "binary",
+            "fields": deepcopy(ISO8583_1987),
+            "presence": _ISO8583_PRESENCE,
+            "mti": _ISO8583_MTIS_1987,
+        },
+        builtin=True,
+    ),
+    MessageFormat(
         id="iso20022-pacs008",
         protocol="iso20022",
         name="ISO20022 pacs.008 (FIToFICstmrCdtTrf)",

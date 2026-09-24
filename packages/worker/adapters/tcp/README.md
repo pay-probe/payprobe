@@ -40,16 +40,29 @@ adapter instead.)
   "host": "10.0.1.50",          // required
   "port": 7000,                  // required
   "protocol": "iso8583",         // "iso8583" | "header_echo"
+  "encoding": "ascii",           // iso8583 wire profile (ADR-0011): "ascii" (default) |
+                                 // "binary" (binary bitmap, BCD numerics + MTI, raw binary
+                                 // fields, BCD length indicators) | an axis dict
+                                 // {"bitmap": "hex|binary|ebcdic", "numeric": "ascii|bcd|ebcdic",
+                                 //  "text": "ascii|ebcdic", "binary": "hex|raw",
+                                 //  "length": "ascii|bcd|binary|ebcdic", "mti": "ascii|bcd|ebcdic"}.
+                                 // A bound Message Format's definition.encoding is injected
+                                 // here by the orchestrator (PAYPROBE_ISO8583_FORMAT_ENCODING=1).
 
   "framing": {                   // applies to every protocol
     "length_prefix_bytes": 2,    // width of the length prefix (>= 1)
-    "length_encoding": "binary", // "binary" integer | "ascii" zero-padded digits (0043)
+    "length_encoding": "binary", // "binary" integer | "ascii" zero-padded digits (0043) |
+                                 // "bcd" packed digits (0x00 0x43)
     "length_byte_order": "big",  // "big" | "little" (binary prefixes only)
     "length_includes_prefix": false, // does the length count its own prefix bytes?
     "length_includes_header": true,  // does the length count the TPDU header?
     "tpdu_bytes": 0,             // inbound TPDU header width to strip
     "tpdu_outbound_hex": "",     // static TPDU prepended on send (hex)
-    "encoding": "ascii"          // default body text encoding
+    "encoding": "ascii"          // LEGACY for iso8583 (folded into the top-level
+                                 // "encoding": ascii/utf-8/latin-1 -> "ascii", cp037/ebcdic
+                                 // -> {"text": "ebcdic"}; anything else, or a value that
+                                 // disagrees with the top-level profile, is refused at
+                                 // start). Still the real body text codec for header_echo.
   },
 
   "sign_on":   { "enabled": true, "action": "...", "payload": { } },

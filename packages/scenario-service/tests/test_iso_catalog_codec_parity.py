@@ -56,6 +56,7 @@ def test_builtin_formats_and_step_defaults_use_the_shared_tables():
     # builtins are copies: editing a registry document must not touch the shared table
     assert by_id["iso8583-1987"].definition["fields"] is not shared.ISO8583_1987
     assert json.loads(iso_catalog._FIELDS_1987_JSON) == shared.ISO8583_1987
-    for f in BUILTIN_FORMATS:
-        if f.protocol == "iso8583":
-            assert f.definition["encoding"] == "ascii"
+    encodings = {f.id: f.definition["encoding"] for f in BUILTIN_FORMATS if f.protocol == "iso8583"}
+    assert encodings == {"iso8583-1987": "ascii", "iso8583-1993": "ascii",
+                         "visa-base1": "ascii", "iso8583-binary": "binary"}
+    assert by_id["iso8583-binary"].definition["fields"] == shared.ISO8583_1987
