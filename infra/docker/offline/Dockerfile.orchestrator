@@ -29,4 +29,8 @@ ENV PYTHONPATH=/app/packages \
 EXPOSE 8100
 HEALTHCHECK --interval=15s --timeout=3s --retries=5 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"
+# Unprivileged, like the online images: the data volumes must be writable by
+# uid 10001 (see docs/operations/offline-minimal-deployment.md).
+RUN useradd --system --uid 10001 --no-create-home payprobe
+USER payprobe
 CMD ["uvicorn", "orchestrator.api.main:app", "--host", "0.0.0.0", "--port", "8100"]
