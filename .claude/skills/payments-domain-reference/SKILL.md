@@ -400,9 +400,11 @@ Tests: `packages/worker/tests/test_cybersource_sim.py`.
   `set/echo/generate/decline/delay/drop`), plus chaos/fault injection
   (`packages/worker/adapters/tcp/chaos.py`). Simulators (VISA, payShield) subclass it.
 - **Framing** = how message boundaries are marked on a TCP stream. Config keys
-  (adapter and responder share them): `length_prefix_bytes` (≥1), `length_byte_order`
-  (`big`/`little`), `length_includes_header`, `tpdu_bytes` (inbound TPDU header to
-  strip), `encoding`. A framing mismatch between two ends is the classic "hangs
+  (adapter and responder share them): `length_prefix_bytes` (≥1), `length_encoding`
+  (`binary` integer, or `ascii` zero-padded digits such as `0043`; added 2026-09-24,
+  `packages/worker/adapters/tcp/framing.py` is the one encode/decode), `length_byte_order`
+  (`big`/`little`, binary only), `length_includes_header`, `tpdu_bytes` (inbound TPDU
+  header to strip), `encoding`. A framing mismatch between two ends is the classic "hangs
   forever / garbage decode" failure — see `payprobe-debugging-playbook`.
 - **Protocol** = message content strategy on top of the transport
   (`packages/worker/adapters/tcp/protocols.py`): `iso8583` (correlate on STAN etc.)

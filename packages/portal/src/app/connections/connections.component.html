@@ -316,10 +316,21 @@
                   />
                 </label>
                 <label class="fld">
+                  <span>Length encoding</span>
+                  <select
+                    [(ngModel)]="d.framing.lengthEncoding"
+                    (ngModelChange)="markDirty()"
+                  >
+                    <option value="binary">binary integer</option>
+                    <option value="ascii">ASCII digits (e.g. 000043)</option>
+                  </select>
+                </label>
+                <label class="fld">
                   <span>Byte order</span>
                   <select
                     [(ngModel)]="d.framing.byteOrder"
                     (ngModelChange)="markDirty()"
+                    title="Only applies to a binary length prefix"
                   >
                     <option value="big">big-endian</option>
                     <option value="little">little-endian</option>

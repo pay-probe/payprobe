@@ -43,7 +43,8 @@ adapter instead.)
 
   "framing": {                   // applies to every protocol
     "length_prefix_bytes": 2,    // width of the length prefix (>= 1)
-    "length_byte_order": "big",  // "big" | "little"
+    "length_encoding": "binary", // "binary" integer | "ascii" zero-padded digits (0043)
+    "length_byte_order": "big",  // "big" | "little" (binary prefixes only)
     "length_includes_prefix": false, // does the length count its own prefix bytes?
     "length_includes_header": true,  // does the length count the TPDU header?
     "tpdu_bytes": 0,             // inbound TPDU header width to strip

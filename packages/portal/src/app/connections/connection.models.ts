@@ -87,8 +87,13 @@ function protoFilesFromConfig(raw: unknown): GrpcProtoFile[] {
   return [];
 }
 
+/** How the length prefix carries the length: a binary integer (the ISO 8583
+ *  norm) or zero-padded ASCII digits, one per prefix byte (e.g. `0043`). */
+export type LengthEncoding = "binary" | "ascii";
+
 export interface FramingConfig {
   lengthPrefixBytes: number;
+  lengthEncoding: LengthEncoding;
   byteOrder: ByteOrder;
   lengthIncludesPrefix: boolean;
   lengthIncludesHeader: boolean;
@@ -259,6 +264,7 @@ export const DEFAULT_NATS: NatsConfig = {
 
 export const DEFAULT_FRAMING: FramingConfig = {
   lengthPrefixBytes: 2,
+  lengthEncoding: "binary",
   byteOrder: "big",
   lengthIncludesPrefix: false,
   lengthIncludesHeader: true,
@@ -455,6 +461,8 @@ export function toAdapterConfig(i: Connection): Record<string, unknown> {
   const framing: Record<string, unknown> = {};
   if (f.lengthPrefixBytes !== DEFAULT_FRAMING.lengthPrefixBytes)
     framing["length_prefix_bytes"] = f.lengthPrefixBytes;
+  if (f.lengthEncoding !== DEFAULT_FRAMING.lengthEncoding)
+    framing["length_encoding"] = f.lengthEncoding;
   if (f.byteOrder !== DEFAULT_FRAMING.byteOrder)
     framing["length_byte_order"] = f.byteOrder;
   if (f.lengthIncludesPrefix) framing["length_includes_prefix"] = true;
@@ -664,6 +672,8 @@ export function fromAdapterConfig(
     framing: {
       lengthPrefixBytes:
         f["length_prefix_bytes"] ?? DEFAULT_FRAMING.lengthPrefixBytes,
+      lengthEncoding: (f["length_encoding"] ??
+        DEFAULT_FRAMING.lengthEncoding) as LengthEncoding,
       byteOrder: (f["length_byte_order"] ??
         DEFAULT_FRAMING.byteOrder) as ByteOrder,
       lengthIncludesPrefix: f["length_includes_prefix"] ?? false,
