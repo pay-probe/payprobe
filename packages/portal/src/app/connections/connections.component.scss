@@ -136,6 +136,20 @@
   gap: 4px;
   font-size: 12px;
 
+  // checkbox fields: box beside its text, bottom-aligned with the inputs next to it
+  &.chk {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    align-self: end;
+    padding-bottom: 7px;
+
+    span {
+      color: var(--color-text);
+      font-size: 13px;
+    }
+  }
+
   span {
     color: var(--color-text-muted, var(--color-text));
   }
@@ -259,19 +273,6 @@
     background: var(--color-bg);
     padding: 1px 5px;
     border-radius: 4px;
-  }
-
-  &.chk {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-    align-self: end;
-    padding-bottom: 7px;
-
-    span {
-      color: var(--color-text);
-      font-size: 13px;
-    }
   }
 }
 
