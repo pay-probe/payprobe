@@ -186,7 +186,9 @@ in `docs/adr/`.
   sign-off annotation, assistant alias removed), security review 2026-09-24
   and **Accepted** the same day on David's Go/No-Go, 0011 (one ISO 8583
   codec in `payprobe_common` + one field dictionary + binary/BCD/EBCDIC on
-  the live wire) proposed 2026-09-24, not built; statuses in the files
+  the live wire) proposed 2026-09-24, phases 0 to 4 built the same day on
+  `feature/adr-0011-iso8583-codec` (flag `PAYPROBE_ISO8583_FORMAT_ENCODING`
+  default off until phase 5); statuses in the files
   are kept truthful.
 - `.claude/skills/payprobe-run-and-operate`, `payprobe-config-and-flags` and
   `payprobe-agents` — operator-grade API/env-flag/agent reference, kept current.

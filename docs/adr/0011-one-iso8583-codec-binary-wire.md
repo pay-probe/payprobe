@@ -1,6 +1,9 @@
 # ADR-0011: One ISO 8583 codec, one field dictionary, binary on the live wire
 
-**Status:** Proposed
+**Status:** Proposed — phases 0 to 4 built 2026-09-24 on branch
+`feature/adr-0011-iso8583-codec` (see Implementation status); phase 5 (the
+`PAYPROBE_ISO8583_FORMAT_ENCODING` flip after a real-environment run, plus the
+doc flips) owed. Accepted only after that flip.
 **Date:** 2026-09-24
 **Deciders:** PayProbe maintainers (David + reviewers)
 **Extends:** `docs/history/standards-gap-analysis.md` recommendation #1
@@ -394,27 +397,58 @@ skill's ambition 1 status, ATLAS §13 and this ADR's status.
 
 ## Action Items
 
-- [ ] Record baselines: `make test` count and the six ISO suites (89 on 2026-09-24).
-- [ ] Phase 0: `test_iso8583_golden.py` with recorded ASCII and binary bytes.
-- [ ] Phase 1: `payprobe_common/iso8583/{codec,fields,profiles,tlv}.py`; shims in
+- [x] Record baselines: `make test` count and the six ISO suites (89 on 2026-09-24).
+- [x] Phase 0: `test_iso8583_golden.py` with recorded ASCII and binary bytes.
+- [x] Phase 1: `payprobe_common/iso8583/{codec,fields,profiles,tlv}.py`; shims in
       `worker/adapters/tcp/iso8583.py`, `scenario-service/models/iso_catalog.py`,
       `scenario-service/models/iso8583_analyzer.py`; `pyproject.toml`
       `only-include`; `packages/worker/Dockerfile` `COPY`; parity test that
       `worker.DEFAULT_FIELDS is payprobe_common.iso8583.ISO8583_1987`;
       `ISO8583_CODEC_SRC` generated from the shared module +
       `test_iso_catalog_codec_parity` against the phase 0 golden set.
-- [ ] Phase 2: per-field override (`pad`, `separator`), BCD length prefix in
+- [x] Phase 2: per-field override (`pad`, `separator`), BCD length prefix in
       `framing.py` (`test_tcp_framing.py`), profile-aware `validate`,
       `unpack` `truncated`.
-- [ ] Phase 3: profile resolution in `Iso8583Protocol`, `TcpResponder`,
+- [x] Phase 3: profile resolution in `Iso8583Protocol`, `TcpResponder`,
       `ProxyResponder`, `nats/codecs.py`; `ChaosEngine.malform(bad_mti)` takes
       the profile; `_resolve_simulator_format` injects `encoding` behind
       `PAYPROBE_ISO8583_FORMAT_ENCODING`; disagreement check in simulator start
       and the scenario validator; `docs/operations/configuration.md` row.
-- [ ] Phase 4: builtin `iso8583-binary` format; loopback test
+- [x] Phase 4: builtin `iso8583-binary` format; loopback test
       `test_iso8583_binary_wire.py`; playground binary sample.
 - [ ] Phase 5: flag default ON after a real-environment run; remove exec'd
       source strings; docs and skills updated; ADR status to Accepted.
+
+## Implementation status
+
+Built 2026-09-24, same day as the ADR, on `feature/adr-0011-iso8583-codec`
+(three commits: the ADR, phases 0–1, phases 2–4). Everything below is verified
+by tests in the branch; nothing is claimed beyond what they assert.
+
+| Phase | What shipped | Proof |
+|---|---|---|
+| 0 | `packages/worker/tests/fixtures/iso8583_golden.json`: 8 spec-valid messages × 6 encodings recorded from the pre-ADR worker (ASCII) and analyzer (binary) codecs | `test_iso8583_golden.py` (96 parametrised byte comparisons + round trips) |
+| 1 | `packages/payprobe_common/iso8583/` (`codec`, `fields`, `validate`, `tlv`, `portable`); worker `adapters/tcp/iso8583.py`, the analyzer and the catalog are re-exports; the code-step paste is generated from `portable.py`; `ISO8583_1987` (50 DEs) is the one dictionary (`iso8583-1987` builtin grew from 29 to 50 DEs; the worker default table gained `type` classes) | `test_iso8583_golden.py::test_one_field_dictionary_everywhere`, `scenario-service/tests/test_iso_catalog_codec_parity.py` |
+| 2 | Per-field `encoding` overrides (`pad`, `pad_nibble`, `separator`), `length: binary`, optional `mti` axis, profile-aware `bad_mti`, `unpack` reports `truncated` + `error`, `framing.length_encoding: "bcd"` | `test_iso8583_golden.py`, `test_tcp_framing.py`, `test_chaos.py` |
+| 3 | `wire_encoding_from_config` precedence + fold + refusal in `Iso8583Protocol`, `TcpResponder`, `ProxyResponder`, NATS codec; orchestrator injects the format `encoding` behind `PAYPROBE_ISO8583_FORMAT_ENCODING` (default `0`), refuses a disagreeing pair with 400 when on, warns when off | `orchestrator/tests/test_simulators.py` (6 new), `test_iso8583_binary_wire.py::test_disagreeing_encoding_keys_*` |
+| 4 | `VisaSimulator` passes the ASCII suite's flow set over a live socket under `binary`; raw binary frames decode byte-identically with the shared codec; ASCII client vs binary host fails loudly; `iso8583-binary` builtin format; playground binary sample | `test_iso8583_binary_wire.py` (10 tests) |
+
+Suite counts after phase 4 (2026-09-24, per package, `PYTHONPATH=packages`):
+worker **601 passed / 6 skipped** (was 482 / 6), scenario-service **341**
+(was 331), orchestrator **399** (was 393). `test_socket_registry.py`'s
+reconnect test is intermittent in full-suite runs on this branch (passes 10/10
+alone); it does not touch the codec and is tracked separately.
+
+Two behaviour changes worth knowing beyond the ADR text: the wire path no
+longer strips spaces out of decoded text fields (the old text path did, which
+mangled a DE 43 with embedded spaces), and the catalog paste's `iso_unpack`
+trims only leading/trailing whitespace for the same reason. The worker's
+legacy `iso_unpack(str)` helper keeps the strip-everything convenience.
+
+Settled open question: the MTI follows the `numeric` axis unless an `mti`
+axis is given (`{"mti": "ebcdic"}` for hosts that write the MTI in EBCDIC
+while numerics stay ASCII); length indicators have their own `length` axis
+with an `ebcdic` value.
 
 ## Open questions
 

@@ -81,9 +81,11 @@ scoring live in one test platform.
 | MessageFormat registry (1987 / 1993 / VISA / pacs.008 builtins) | [BUILT] | `packages/scenario-service/models/message_format.py` (`BUILTIN_FORMATS`) |
 | Dialect validation on the live responder (warn/reject, violations on trace) | [BUILT] | `packages/worker/adapters/tcp/responder.py` (`validate` block, `validate_mode`, `invalid` counter) |
 | Certification packs + scoring | [BUILT] | scenario-service `GET/POST /packs*` in `packages/scenario-service/api/main.py`; certification generators in `packages/report_service/generators.py`; MCP `run_certification` tool |
-| **Binary/BCD/EBCDIC codec — offline only** | [BUILT offline, MISSING on wire] | see below |
+| **Binary/BCD/EBCDIC codec on the live wire** | [BUILT 2026-09-24, ADR-0011 phases 0–4 on branch `feature/adr-0011-iso8583-codec`; format-encoding injection behind `PAYPROBE_ISO8583_FORMAT_ENCODING`, default OFF until phase 5] | `packages/payprobe_common/iso8583/` (one codec, one field dictionary, per-field overrides); worker `adapters/tcp/iso8583.py` is a re-export; loopback proof `packages/worker/tests/test_iso8583_binary_wire.py`; golden contract `packages/worker/tests/test_iso8583_golden.py` |
 
-**The blocker, stated precisely (standards-gap #1).** The *analyzer* has
+**Status 2026-09-24: the blocker below is closed by ADR-0011** (`docs/adr/0011-one-iso8583-codec-binary-wire.md`): the codec moved to `payprobe_common/iso8583`, the worker wire path packs and unpacks bytes under a profile, `VisaSimulator` passes its flow set over a live socket under `binary`, and the wire bytes decode byte-identically with the shared codec (milestone (d) met by test). Still owed: phase 5 (flip `PAYPROBE_ISO8583_FORMAT_ENCODING` on after a real-environment run, docs flips). The paragraph is kept as the record of what the gap was.
+
+**The blocker as it stood (standards-gap #1).** The *analyzer* had
 already gained binary profiles: `packages/scenario-service/models/iso8583_analyzer.py`
 implements `resolve_encoding()` with an ASCII profile, a `"binary"` profile
 (binary bitmap + packed-BCD numerics + raw binary fields + BCD length
@@ -374,11 +376,12 @@ Re-verify volatile facts before relying on them:
 ```bash
 # From the repo root.
 
-# Ambition 1 — codec gap still open? (expect: worker codec docstring says ASCII;
-# analyzer has binary profiles)
+# Ambition 1 — one codec on the wire (expect: worker module is a re-export of
+# payprobe_common.iso8583; the binary loopback test exists and passes)
 head -5 packages/worker/adapters/tcp/iso8583.py
-grep -n "_BINARY_OPTS\|resolve_encoding" packages/scenario-service/models/iso8583_analyzer.py
-grep -n "ASCII-only" docs/standards-gap-analysis.md
+ls packages/payprobe_common/iso8583/
+cd packages && PYTHONPATH=. python3 -m pytest worker/tests/test_iso8583_binary_wire.py worker/tests/test_iso8583_golden.py -q && cd ..
+grep -n "PAYPROBE_ISO8583_FORMAT_ENCODING" packages/orchestrator/api/main.py   # default "0" until phase 5
 
 # Simulators still where cited
 grep -n "class VisaSimulator\|class PayShieldSimulator\|class CyberSourceSimulator" \
