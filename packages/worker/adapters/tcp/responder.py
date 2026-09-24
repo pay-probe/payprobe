@@ -54,6 +54,7 @@ import time
 from typing import Any
 
 from . import iso8583
+from . import framing
 from .chaos import ChaosEngine
 
 log = logging.getLogger(__name__)
@@ -109,6 +110,7 @@ class TcpResponder:
         f = config.get("framing", {})
         self.prefix_bytes = int(f.get("length_prefix_bytes", 2))
         self.byte_order = f.get("length_byte_order", "big")
+        self.length_encoding = framing.length_encoding(f)
         self.length_includes_prefix = bool(f.get("length_includes_prefix", False))
         self.length_includes_header = bool(f.get("length_includes_header", True))
         self.tpdu_bytes = int(f.get("tpdu_bytes", 0))
@@ -326,6 +328,7 @@ class TcpResponder:
                         outcome.malformed,
                         prefix_bytes=self.prefix_bytes,
                         byte_order=self.byte_order,
+                        length_encoding=self.length_encoding,
                     )
 
                 if outcome.partial:
@@ -356,14 +359,17 @@ class TcpResponder:
         payload = self.tpdu_out + body
         counted = len(payload) if self.length_includes_header else len(body)
         length = counted + (self.prefix_bytes if self.length_includes_prefix else 0)
-        return length.to_bytes(self.prefix_bytes, self.byte_order) + payload
+        prefix = framing.encode_length(
+            length, self.prefix_bytes, self.byte_order, self.length_encoding
+        )
+        return prefix + payload
 
     async def _read_frame(self, reader: asyncio.StreamReader) -> bytes | None:
         try:
             prefix = await reader.readexactly(self.prefix_bytes)
         except asyncio.IncompleteReadError:
             return None
-        length = int.from_bytes(prefix, self.byte_order)
+        length = framing.decode_length(prefix, self.byte_order, self.length_encoding)
         core = length - (self.prefix_bytes if self.length_includes_prefix else 0)
         remaining = core if self.length_includes_header else core + self.tpdu_bytes
         if remaining <= 0:

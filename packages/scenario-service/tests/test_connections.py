@@ -224,6 +224,22 @@ def test_validation_rejects_bad_config():
     assert ok.port == 1500
 
 
+def test_framing_length_encoding_is_validated():
+    import pytest
+    from pydantic import ValidationError
+
+    """ASCII-digit length prefixes are accepted; any other encoding is
+    rejected at save time rather than at connect time."""
+    ascii6 = ConnectionDraft(adapter="tcp", protocol="iso8583", host="h", port=7000,
+                             framing={"length_prefix_bytes": 6, "length_encoding": "ascii"})
+    assert ascii6.model_dump()["framing"]["length_encoding"] == "ascii"
+    ConnectionDraft(adapter="tcp", protocol="iso8583", host="h", port=7001,
+                    framing={"length_prefix_bytes": 2, "length_encoding": "binary"})
+    with pytest.raises(ValidationError):
+        ConnectionDraft(adapter="tcp", protocol="iso8583", host="h", port=7000,
+                        framing={"length_prefix_bytes": 6, "length_encoding": "bcd"})
+
+
 def test_persists_to_file(tmp_path):
     path = str(tmp_path / "connections.json")
     s1 = ConnectionStore(path)

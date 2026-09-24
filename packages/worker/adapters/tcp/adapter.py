@@ -25,7 +25,8 @@ Config (all keys optional unless noted)::
 
       "framing": {
         "length_prefix_bytes": 2,      # width of the length prefix (>= 1)
-        "length_byte_order": "big",    # "big" | "little"
+        "length_byte_order": "big",    # "big" | "little" (binary prefixes only)
+        "length_encoding": "binary",   # "binary" | "ascii" (zero-padded decimal digits)
         "length_includes_prefix": false,  # does the length count its own prefix?
         "length_includes_header": true,   # does the length count the TPDU header?
         "tpdu_bytes": 0,               # inbound TPDU header width to strip
@@ -56,6 +57,7 @@ import time
 
 from .. import socket_registry
 from ..base.base_adapter import BaseAdapter, StepResult
+from . import framing
 from .protocols import EncodedMessage, make_protocol
 
 log = logging.getLogger(__name__)
@@ -91,6 +93,7 @@ class TcpAdapter(BaseAdapter):
                 "required to frame messages on a multiplexed connection."
             )
         self.byte_order = f.get("length_byte_order", "big")
+        self.length_encoding = framing.length_encoding(f)
         self.length_includes_prefix = bool(f.get("length_includes_prefix", False))
         self.length_includes_header = bool(f.get("length_includes_header", True))
         self.tpdu_bytes = int(f.get("tpdu_bytes", 0))
@@ -339,7 +342,9 @@ class TcpAdapter(BaseAdapter):
         payload = self.tpdu_out + body
         counted = len(payload) if self.length_includes_header else len(body)
         length_value = counted + (self.prefix_bytes if self.length_includes_prefix else 0)
-        prefix = length_value.to_bytes(self.prefix_bytes, self.byte_order)
+        prefix = framing.encode_length(
+            length_value, self.prefix_bytes, self.byte_order, self.length_encoding
+        )
         return prefix + payload
 
     # -- background reader ---------------------------------------------------
@@ -362,7 +367,7 @@ class TcpAdapter(BaseAdapter):
 
     async def _read_frame(self) -> bytes | None:
         prefix = await self._reader.readexactly(self.prefix_bytes)
-        length_value = int.from_bytes(prefix, self.byte_order)
+        length_value = framing.decode_length(prefix, self.byte_order, self.length_encoding)
         core = length_value - (self.prefix_bytes if self.length_includes_prefix else 0)
         remaining = core if self.length_includes_header else core + self.tpdu_bytes
         if remaining <= 0:

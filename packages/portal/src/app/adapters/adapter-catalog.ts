@@ -893,7 +893,13 @@ export const ADAPTERS: AdapterSpec[] = [
             key: "framing.length_byte_order",
             type: "string",
             default: "big",
-            desc: '"big" | "little".',
+            desc: '"big" | "little" (binary prefixes only).',
+          },
+          {
+            key: "framing.length_encoding",
+            type: "string",
+            default: "binary",
+            desc: '"binary" | "ascii". ascii = zero-padded decimal digits (6 digits: 43 → "000043").',
           },
           {
             key: "framing.length_includes_prefix",

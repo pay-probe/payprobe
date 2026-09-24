@@ -151,6 +151,10 @@ class ConnectionDraft(BaseModel):
                 raise ValueError("framing.length_prefix_bytes must be an integer")
             if lpb < 1:
                 raise ValueError("framing.length_prefix_bytes must be >= 1")
+        if isinstance(framing, dict) and "length_encoding" in framing:
+            enc = str(framing["length_encoding"] or "").strip().lower()
+            if enc not in ("binary", "ascii"):
+                raise ValueError('framing.length_encoding must be "binary" or "ascii"')
         return self
 
 

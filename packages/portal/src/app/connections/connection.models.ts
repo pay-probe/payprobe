@@ -15,6 +15,9 @@ export type AdapterImpl =
   | "db_probe_switch";
 export type TcpProtocol = "iso8583" | "header_echo";
 export type ByteOrder = "big" | "little";
+/** How the length prefix carries its value: a binary integer, or zero-padded
+ *  decimal digits (e.g. Tieto Card Suite links: 6 digits, 43 = "000043"). */
+export type LengthEncoding = "binary" | "ascii";
 
 /** A gRPC call metadata header (key/value), edited as rows in the form. */
 export interface GrpcMetaEntry {
@@ -90,6 +93,7 @@ function protoFilesFromConfig(raw: unknown): GrpcProtoFile[] {
 export interface FramingConfig {
   lengthPrefixBytes: number;
   byteOrder: ByteOrder;
+  lengthEncoding: LengthEncoding;
   lengthIncludesPrefix: boolean;
   lengthIncludesHeader: boolean;
   tpduBytes: number;
@@ -260,6 +264,7 @@ export const DEFAULT_NATS: NatsConfig = {
 export const DEFAULT_FRAMING: FramingConfig = {
   lengthPrefixBytes: 2,
   byteOrder: "big",
+  lengthEncoding: "binary",
   lengthIncludesPrefix: false,
   lengthIncludesHeader: true,
   tpduBytes: 0,
@@ -455,7 +460,10 @@ export function toAdapterConfig(i: Connection): Record<string, unknown> {
   const framing: Record<string, unknown> = {};
   if (f.lengthPrefixBytes !== DEFAULT_FRAMING.lengthPrefixBytes)
     framing["length_prefix_bytes"] = f.lengthPrefixBytes;
-  if (f.byteOrder !== DEFAULT_FRAMING.byteOrder)
+  if (f.lengthEncoding !== DEFAULT_FRAMING.lengthEncoding)
+    framing["length_encoding"] = f.lengthEncoding;
+  // byte order only means something for a binary prefix
+  if (f.lengthEncoding === "binary" && f.byteOrder !== DEFAULT_FRAMING.byteOrder)
     framing["length_byte_order"] = f.byteOrder;
   if (f.lengthIncludesPrefix) framing["length_includes_prefix"] = true;
   if (!f.lengthIncludesHeader) framing["length_includes_header"] = false;
@@ -666,6 +674,8 @@ export function fromAdapterConfig(
         f["length_prefix_bytes"] ?? DEFAULT_FRAMING.lengthPrefixBytes,
       byteOrder: (f["length_byte_order"] ??
         DEFAULT_FRAMING.byteOrder) as ByteOrder,
+      lengthEncoding: (f["length_encoding"] ??
+        DEFAULT_FRAMING.lengthEncoding) as LengthEncoding,
       lengthIncludesPrefix: f["length_includes_prefix"] ?? false,
       lengthIncludesHeader: f["length_includes_header"] ?? true,
       tpduBytes: f["tpdu_bytes"] ?? 0,

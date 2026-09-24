@@ -35,6 +35,8 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
+from . import framing
+
 # Recognised malformed-frame strategies.
 MALFORMED_MODES = ("garbage", "bad_mti", "bad_length", "flip_bits")
 
@@ -113,6 +115,7 @@ class ChaosEngine:
         *,
         prefix_bytes: int = 2,
         byte_order: str = "big",
+        length_encoding: str = "binary",
     ) -> bytes:
         """Return a deliberately broken version of a fully framed reply.
 
@@ -132,9 +135,10 @@ class ChaosEngine:
         prefix, rest = frame[:prefix_bytes], frame[prefix_bytes:]
 
         if mode == "bad_length":
-            declared = int.from_bytes(prefix, byte_order)
-            bogus = (declared + max(8, len(rest))) & ((1 << (prefix_bytes * 8)) - 1)
-            return bogus.to_bytes(prefix_bytes, byte_order) + rest
+            declared = framing.decode_length(prefix, byte_order, length_encoding)
+            limit = framing.max_length(prefix_bytes, length_encoding) + 1
+            bogus = (declared + max(8, len(rest))) % limit
+            return framing.encode_length(bogus, prefix_bytes, byte_order, length_encoding) + rest
 
         if mode == "bad_mti":
             if len(rest) >= 4:
