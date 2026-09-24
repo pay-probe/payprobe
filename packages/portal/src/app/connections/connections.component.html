@@ -422,61 +422,215 @@
               </label>
             </div>
 
-            <details class="sect">
+            <details class="sect sect--framing">
               <summary>
                 <pp-icon name="package" [size]="14" /> Framing
                 <span class="sect__info">{{ framingSummary(d) }}</span>
               </summary>
+              <p class="muted fr__lead">
+                How message boundaries are marked on the TCP stream. Both ends
+                must agree: a mismatch shows up as a read that never completes
+                or a message that will not decode.
+              </p>
+
+              <div class="fr__presets">
+                <span class="muted">Presets</span>
+                @for (p of framingPresets; track p.key) {
+                  <button
+                    type="button"
+                    class="fr__preset"
+                    [class.active]="framingPresetActive(d, p.key)"
+                    [title]="p.hint"
+                    (click)="applyFramingPreset(d, p.key)"
+                  >
+                    {{ p.label }}
+                  </button>
+                }
+              </div>
+
+              @if (framingPreview(d); as w) {
+                <div class="wire" [class.wire--bad]="w.overflow">
+                  <div class="wire__seg wire__seg--prefix">
+                    <span class="wire__cap"
+                      >length prefix · {{ w.n }}
+                      {{
+                        d.framing.lengthEncoding === "ascii" ? "digit" : "byte"
+                      }}{{ w.n === 1 ? "" : "s" }}</span
+                    >
+                    <span class="wire__bytes">
+                      @for (c of w.prefix; track $index) {
+                        <span class="wire__byte">
+                          @if (c.char) {
+                            <span class="wire__char">{{ c.char }}</span>
+                          }
+                          <span class="wire__hex">{{ c.hex }}</span>
+                        </span>
+                      }
+                    </span>
+                  </div>
+                  @if (w.tpdu.length) {
+                    <div
+                      class="wire__seg wire__seg--tpdu"
+                      [class.wire__seg--counted]="
+                        d.framing.lengthIncludesHeader
+                      "
+                    >
+                      <span class="wire__cap"
+                        >TPDU · {{ w.tpdu.length }} bytes</span
+                      >
+                      <span class="wire__bytes">
+                        @for (h of w.tpdu; track $index) {
+                          <span class="wire__byte"
+                            ><span class="wire__hex">{{ h }}</span></span
+                          >
+                        }
+                      </span>
+                    </div>
+                  }
+                  <div class="wire__seg wire__seg--body wire__seg--counted">
+                    <span class="wire__cap">message · {{ w.body }} bytes</span>
+                    <span class="wire__bytes">
+                      <span class="wire__byte"
+                        ><span class="wire__hex">30</span></span
+                      >
+                      <span class="wire__byte"
+                        ><span class="wire__hex">32</span></span
+                      >
+                      <span class="wire__byte"
+                        ><span class="wire__hex">30</span></span
+                      >
+                      <span class="wire__byte"
+                        ><span class="wire__hex">30</span></span
+                      >
+                      <span class="wire__more">… {{ w.body - 4 }} more</span>
+                    </span>
+                  </div>
+                </div>
+                <p class="wire__formula">
+                  <span class="wire__k">length</span> = {{ w.formula }} =
+                  <strong>{{ w.counted }}</strong>
+                  @if (w.overflow) {
+                    <span class="wire__warn">
+                      does not fit a {{ w.n }}-{{
+                        d.framing.lengthEncoding === "ascii" ? "digit" : "byte"
+                      }}
+                      prefix
+                    </span>
+                  }
+                  <span class="muted">· {{ w.total }} bytes on the wire</span>
+                </p>
+              }
+
+              <h4 class="fr__h">
+                <pp-icon name="package" [size]="13" /> Length prefix
+              </h4>
               <div class="grid2">
                 <label class="fld">
-                  <span>Length prefix bytes</span>
+                  <span
+                    >Width
+                    <small class="muted"
+                      >(bytes, or digits for ASCII)</small
+                    ></span
+                  >
                   <input
                     type="number"
                     min="1"
+                    max="8"
                     [(ngModel)]="d.framing.lengthPrefixBytes"
                     (ngModelChange)="markDirty()"
                   />
                 </label>
                 <label class="fld">
-                  <span>Length encoding</span>
+                  <span
+                    >Length encoding
+                    <small class="muted"
+                      >(how the number is written)</small
+                    ></span
+                  >
                   <select
                     [(ngModel)]="d.framing.lengthEncoding"
                     (ngModelChange)="markDirty()"
                   >
-                    <option value="binary">binary integer</option>
-                    <option value="ascii">ASCII digits (e.g. 000043)</option>
+                    <option value="binary">binary integer (00 2B)</option>
+                    <option value="ascii">ASCII digits (0043)</option>
                   </select>
                 </label>
                 <label class="fld">
-                  <span>Byte order</span>
+                  <span
+                    >Byte order
+                    <small class="muted">{{
+                      d.framing.lengthEncoding === "ascii"
+                        ? "(not used for ASCII digits)"
+                        : "(binary integers only)"
+                    }}</small></span
+                  >
                   <select
                     [(ngModel)]="d.framing.byteOrder"
                     (ngModelChange)="markDirty()"
                     [disabled]="d.framing.lengthEncoding === 'ascii'"
-                    title="Only applies to a binary length prefix"
                   >
-                    <option value="big">big-endian</option>
-                    <option value="little">little-endian</option>
+                    <option value="big">big-endian (high byte first)</option>
+                    <option value="little">
+                      little-endian (low byte first)
+                    </option>
                   </select>
                 </label>
-                <label class="fld chk">
+                <div class="fld fld--stack">
+                  <span>What the length counts</span>
+                  <label class="chkrow">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="d.framing.lengthIncludesHeader"
+                      (ngModelChange)="markDirty()"
+                    />
+                    <span
+                      >the TPDU header
+                      <small class="muted">(when one is sent)</small></span
+                    >
+                  </label>
+                  <label class="chkrow">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="d.framing.lengthIncludesPrefix"
+                      (ngModelChange)="markDirty()"
+                    />
+                    <span
+                      >its own prefix bytes
+                      <small class="muted">(rare)</small></span
+                    >
+                  </label>
+                </div>
+              </div>
+
+              <h4 class="fr__h">
+                <pp-icon name="layers" [size]="13" /> TPDU header
+                <small class="muted"
+                  >(optional transport header before the message)</small
+                >
+              </h4>
+              <div class="grid2">
+                <label class="fld">
+                  <span
+                    >Outbound TPDU
+                    <small class="muted"
+                      >(hex, sent before every message)</small
+                    ></span
+                  >
                   <input
-                    type="checkbox"
-                    [(ngModel)]="d.framing.lengthIncludesPrefix"
+                    type="text"
+                    class="mono"
+                    [(ngModel)]="d.framing.tpduOutboundHex"
                     (ngModelChange)="markDirty()"
+                    placeholder="6000000000"
                   />
-                  <span>Length counts the prefix bytes</span>
-                </label>
-                <label class="fld chk">
-                  <input
-                    type="checkbox"
-                    [(ngModel)]="d.framing.lengthIncludesHeader"
-                    (ngModelChange)="markDirty()"
-                  />
-                  <span>Length counts the TPDU header</span>
                 </label>
                 <label class="fld">
-                  <span>TPDU bytes (inbound)</span>
+                  <span
+                    >Inbound TPDU bytes
+                    <small class="muted"
+                      >(stripped from every reply)</small
+                    ></span
+                  >
                   <input
                     type="number"
                     min="0"
@@ -484,29 +638,39 @@
                     (ngModelChange)="markDirty()"
                   />
                 </label>
+              </div>
+
+              <h4 class="fr__h">
+                <pp-icon name="format" [size]="13" /> Message body
+              </h4>
+              <div class="grid2">
                 <label class="fld">
-                  <span>TPDU outbound (hex)</span>
+                  <span
+                    >Text encoding
+                    <small class="muted"
+                      >(of the message bytes, ascii unless the host says
+                      otherwise)</small
+                    ></span
+                  >
                   <input
                     type="text"
-                    [(ngModel)]="d.framing.tpduOutboundHex"
-                    (ngModelChange)="markDirty()"
-                    placeholder="6000000000"
-                  />
-                </label>
-                <label class="fld">
-                  <span>Encoding</span>
-                  <input
-                    type="text"
+                    class="mono"
                     [(ngModel)]="d.framing.encoding"
                     (ngModelChange)="markDirty()"
+                    placeholder="ascii"
                   />
                 </label>
               </div>
-              <p class="hint">
-                <pp-icon name="info" [size]="13" /> On the wire, a 43-byte
-                message is framed as
-                <code>{{ framingExample(d) }}</code>
-              </p>
+
+              @if (framingIssues(d); as issues) {
+                @if (issues.length) {
+                  <ul class="fr__issues">
+                    @for (i of issues; track i) {
+                      <li><pp-icon name="info" [size]="13" /> {{ i }}</li>
+                    }
+                  </ul>
+                }
+              }
             </details>
 
             @if (!d.extends && d.protocol === "iso8583") {
