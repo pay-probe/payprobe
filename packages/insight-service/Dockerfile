@@ -18,6 +18,11 @@ COPY report_service ./report_service
 # The learned layer ships in the image (it's quarantined HERE, not in the
 # orchestrator/worker images — ADR-0005). The service still degrades to the
 # heuristic + frequency baselines if the import ever fails.
+# A slow PyPI read (the whole stack builds its images at once) must not fail
+# the image: wait longer per read and retry the download.
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5
+
 RUN pip install --no-cache-dir ./report_service ".[ml]"
 
 ENV RUN_API_URL=http://orchestrator:8100 \

@@ -16,6 +16,11 @@ COPY payprobe_common ./payprobe_common
 # and chat stores use REDIS_URL when set, memory otherwise).
 COPY payprobe-assistant ./payprobe-assistant
 
+# A slow PyPI read (the whole stack builds its images at once) must not fail
+# the image: wait longer per read and retry the download.
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5
+
 RUN pip install --no-cache-dir ./payprobe_common \
  && pip install --no-cache-dir ./payprobe-assistant \
  && pip install --no-cache-dir "redis>=5.0" \

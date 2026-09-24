@@ -17,6 +17,11 @@ COPY pyproject.toml README.md ./
 COPY api ./api
 COPY models ./models
 
+# A slow PyPI read (the whole stack builds its images at once) must not fail
+# the image: wait longer per read and retry the download.
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5
+
 RUN pip install --no-cache-dir .
 
 # User DB persists on a volume mounted at /data (AUTH_DB=/data/auth.db).

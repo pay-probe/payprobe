@@ -24,6 +24,11 @@ WORKDIR /app
 # without it `python -m worker.load_worker` crashes on `import redis.asyncio`.
 # nats-py lets a standalone load worker drive a NATS target (ADR-0006);
 # imported lazily by the adapter, so it is harmless when unused.
+# A slow PyPI read (the whole stack builds its images at once) must not fail
+# the image: wait longer per read and retry the download.
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5
+
 RUN pip install --no-cache-dir uvloop "httpx>=0.27" "pycryptodome>=3.20" "redis>=5" \
     "nats-py>=2.6"
 

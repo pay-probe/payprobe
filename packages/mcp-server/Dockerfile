@@ -11,6 +11,11 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY mcp_server ./mcp_server
 
+# A slow PyPI read (the whole stack builds its images at once) must not fail
+# the image: wait longer per read and retry the download.
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5
+
 RUN pip install --no-cache-dir .
 
 # Streamable HTTP transport so the server runs as a long-lived container that
