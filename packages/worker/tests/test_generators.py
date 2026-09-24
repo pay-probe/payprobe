@@ -158,3 +158,32 @@ def test_card_empty_pool_raises():
 def test_card_is_a_generator_namespace():
     assert GeneratorContext.is_generator("card.pan")
     assert GeneratorContext.is_generator("seq.ksn")
+
+
+def test_now_fmt_formats_current_time_with_optional_utc_offset():
+    from datetime import UTC, datetime, timedelta
+
+    g = GeneratorContext()
+    before = datetime.now(UTC)
+    ymd = g.resolve("now.fmt(%y%m%d)")
+    local = g.resolve("now.fmt(%y%m%d%H%M%S,4)")
+    after = datetime.now(UTC)
+    assert ymd in {before.strftime("%y%m%d"), after.strftime("%y%m%d")}
+    assert len(local) == 12 and local.isdigit()
+    shifted = {(t + timedelta(hours=4)).strftime("%y%m%d%H%M") for t in (before, after)}
+    assert local[:10] in shifted
+
+
+def test_now_fmt_rejects_missing_pattern_and_bad_offset():
+    g = GeneratorContext()
+    with pytest.raises(GeneratorError):
+        g.resolve("now.fmt")
+    with pytest.raises(GeneratorError):
+        g.resolve("now.fmt(%y,abc)")
+
+
+def test_now_fmt_resolves_through_payload_interpolation():
+    from worker.engine.variables import VAR_REF_RE
+
+    m = VAR_REF_RE.fullmatch("${now.fmt(%y%m%d%H%M%S,4)}")
+    assert m and m.group("expr") == "now.fmt(%y%m%d%H%M%S,4)"
