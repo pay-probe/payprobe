@@ -522,7 +522,11 @@ built 2026-09-23 on branch `adr-0010`: registry, heartbeats, workflow engine
 with approvals, wake sources, alert webhook, egress allowlist, injection pack;
 phase 5 and the security review followed on 2026-09-24 and the ADR is
 Accepted on David's Go/No-Go; handoff in
-`docs/history/2026-09-23-agent-hub-handoff.md`). The finished build specs of the major
+`docs/history/2026-09-23-agent-hub-handoff.md`), 0011 one ISO 8583 codec +
+one field dictionary + binary wire encodings (proposed 2026-09-24, not built;
+closes standards-gap recommendation #1 — the worker, analyzer and catalog
+codecs collapse into `payprobe_common/iso8583`, the bound format's
+`encoding` reaches the socket, precedence flip flag-gated). The finished build specs of the major
 subsystems live in `docs/history/`, in the order they landed;
 `docs/history/PROGRESS.md` and `docs/history/project-review.md` capture the
 mid-project hardening pass. The
