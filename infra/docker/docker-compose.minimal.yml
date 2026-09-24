@@ -115,7 +115,7 @@ services:
     # host without network. The config is mounted, so nothing there is needed.
     entrypoint: ["nginx", "-g", "daemon off;"]
     ports:
-      - "${PORTAL_TLS_PORT}:443"
+      - "${PORTAL_TLS_PORT}:8443"
     volumes:
       - ${PAYPROBE_SRC:-../..}/infra/nginx/nginx.minimal.conf:/etc/nginx/nginx.conf:ro
       - ${PAYPROBE_TLS}:/etc/nginx/tls:ro

@@ -8,7 +8,7 @@ inside a closed network.
 
 | Service | Image | Store | Notes |
 |---|---|---|---|
-| portal | `payprobe-portal` (nginx) | — | TLS terminated here; proxies `/api/*` |
+| portal | `payprobe-portal` (nginx, unprivileged, listens on 8443) | — | TLS terminated here; proxies `/api/*` |
 | scenario-service | `payprobe-scenario-service` | SQLite `/data/scenarios.db` | formats, packs, pools, connections |
 | orchestrator | `payprobe-orchestrator` | SQLite `/data/runs.db` | worker engine **in-process**; Instant Client for thick Oracle |
 | auth-service | `payprobe-auth-service` | SQLite `/data/auth.db` | local accounts, HS256 JWT |
@@ -42,7 +42,9 @@ host before building.
   daemon's `data-root` at a filesystem with room for the images (a small
   `/var` is common on RHEL hosts).
 - Directories: `PAYPROBE_DATA` (volumes), `PAYPROBE_TLS` (`server.crt`,
-  `server.key`, readable by root only), `PAYPROBE_TNS_ADMIN`
+  `server.key`; the portal's nginx runs as its image's `nginx` user, uid
+  101, so the key must be readable by that uid and nobody else:
+  `chown 101 server.key && chmod 400 server.key`), `PAYPROBE_TNS_ADMIN`
   (`tnsnames.ora`, optional `sqlnet.ora`). The service images run as uid
   10001, so the data directories must be writable by it:
   `chown -R 10001:10001 "$PAYPROBE_DATA"`.
