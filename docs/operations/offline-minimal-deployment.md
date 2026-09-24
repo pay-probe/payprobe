@@ -15,10 +15,10 @@ inside a closed network.
 | redis | `redis:7-alpine` | AOF on a volume | durable run-event streams (run monitor resumes) |
 | mcp-server | `payprobe-mcp-server` | — | Streamable HTTP at `/mcp`; **loopback-bound** (`MCP_BIND`), no client auth of its own |
 
-Not deployed: Postgres, NATS, insight-service, assistant,
-Prometheus/Grafana, the load-worker fleet. The nginx config answers `503` on
-`/api/assistant/` and `/api/insights/` so the portal's optional panels fail
-fast. `PAYPROBE_WORKER_PROVISIONER=none`: no Docker socket is mounted.
+Not deployed: Postgres, NATS, insight-service, the assistant and agent-hub
+(ADR-0010), Prometheus/Grafana, the load-worker fleet. The nginx config
+answers `503` on `/api/assistant/`, `/api/insights/` and `/api/agents/` so
+the portal's optional panels and the Agents page fail fast. `PAYPROBE_WORKER_PROVISIONER=none`: no Docker socket is mounted.
 
 Footprint on a real host: about 1–1.5 GB RAM for the five containers and
 about 2 GB of images.
@@ -43,7 +43,9 @@ host before building.
   `/var` is common on RHEL hosts).
 - Directories: `PAYPROBE_DATA` (volumes), `PAYPROBE_TLS` (`server.crt`,
   `server.key`, readable by root only), `PAYPROBE_TNS_ADMIN`
-  (`tnsnames.ora`, optional `sqlnet.ora`).
+  (`tnsnames.ora`, optional `sqlnet.ora`). The service images run as uid
+  10001, so the data directories must be writable by it:
+  `chown -R 10001:10001 "$PAYPROBE_DATA"`.
 - Check the intended portal port is free and that the host reaches the
   payment endpoints you will configure.
 

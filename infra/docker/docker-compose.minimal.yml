@@ -1,8 +1,7 @@
 # Minimal PayProbe stack for a single air-gapped host: portal (TLS), scenario-
 # service, orchestrator (worker engine in-process), auth-service, Redis and the
-# MCP server (loopback-bound). No
-# Postgres (every store is SQLite on a volume), no NATS, no assistant/insight/
-# MCP, no load-worker fleet. Images come from infra/docker/offline/ builds
+# MCP server (loopback-bound). No Postgres (every store is SQLite on a volume),
+# no NATS, no assistant / insight-service / agent-hub, no load-worker fleet. Images come from infra/docker/offline/ builds
 # (tagged ${PAYPROBE_TAG}); see docs/operations/offline-minimal-deployment.md.
 #
 #   docker compose -f infra/docker/docker-compose.minimal.yml --env-file /opt/payprobe/.env up -d
