@@ -13,21 +13,13 @@ import { ThemeService } from "../shared/theme.service";
 import { UiService } from "../shared/ui.service";
 import { IconComponent } from "../shared/ui/icon.component";
 import { BadgeComponent, BadgeTone } from "../shared/ui/badge.component";
+import {
+  FramingEditorComponent,
+  framingSummary,
+} from "../shared/framing-editor.component";
 
-/** One sample frame, rendered by the framing diagram. */
-interface FramingPreview {
-  n: number;
-  prefix: { hex: string; char?: string }[];
-  tpdu: string[];
-  body: number;
-  counted: number;
-  formula: string;
-  overflow: boolean;
-  total: number;
-}
 import {
   Connection,
-  FramingConfig,
   blankConnection,
   toAdapterConfig,
 } from "./connection.models";
@@ -61,7 +53,13 @@ import { PageHeaderComponent } from "../shared/ui/page-header.component";
 @Component({
   selector: "app-connections",
   standalone: true,
-  imports: [PageHeaderComponent, FormsModule, IconComponent, BadgeComponent],
+  imports: [
+    PageHeaderComponent,
+    FormsModule,
+    IconComponent,
+    BadgeComponent,
+    FramingEditorComponent,
+  ],
   templateUrl: "./connections.component.html",
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: "./connections.component.scss",
@@ -363,17 +361,7 @@ export class ConnectionsComponent implements OnInit {
 
   /** One-line state of a collapsed section, so nothing is hidden by folding. */
   framingSummary(d: Connection): string {
-    const f = d.framing;
-    const width =
-      f.lengthEncoding === "ascii"
-        ? `${f.lengthPrefixBytes}-digit ASCII`
-        : `${f.lengthPrefixBytes}-byte ${f.byteOrder}-endian`;
-    const parts = [width];
-    if (f.lengthIncludesPrefix) parts.push("counts prefix");
-    if (!f.lengthIncludesHeader) parts.push("excludes TPDU");
-    if (f.tpduBytes || f.tpduOutboundHex) parts.push("TPDU");
-    if (f.encoding && f.encoding !== "ascii") parts.push(f.encoding);
-    return parts.join(" · ");
+    return framingSummary(d.framing);
   }
   correlationSummary(d: Connection): string {
     const c = d.correlation;
@@ -413,167 +401,6 @@ export class ConnectionsComponent implements OnInit {
       ev.preventDefault();
       if (this.dirty()) this.save();
     }
-  }
-
-  /** Common framings, one click each; the active one is highlighted. */
-  readonly framingPresets: {
-    key: string;
-    label: string;
-    hint: string;
-    set: Partial<FramingConfig>;
-  }[] = [
-    {
-      key: "iso",
-      label: "2-byte binary",
-      hint: "ISO 8583 default: big-endian, no TPDU",
-      set: {
-        lengthPrefixBytes: 2,
-        lengthEncoding: "binary",
-        byteOrder: "big",
-        lengthIncludesPrefix: false,
-        lengthIncludesHeader: true,
-        tpduBytes: 0,
-        tpduOutboundHex: "",
-      },
-    },
-    {
-      key: "tpdu",
-      label: "2-byte + TPDU",
-      hint: "POS terminals: 60 00 00 00 00 before the message",
-      set: {
-        lengthPrefixBytes: 2,
-        lengthEncoding: "binary",
-        byteOrder: "big",
-        lengthIncludesPrefix: false,
-        lengthIncludesHeader: true,
-        tpduBytes: 5,
-        tpduOutboundHex: "6000000000",
-      },
-    },
-    {
-      key: "ascii4",
-      label: "4-digit ASCII",
-      hint: "zero-padded digits, e.g. 0043",
-      set: {
-        lengthPrefixBytes: 4,
-        lengthEncoding: "ascii",
-        lengthIncludesPrefix: false,
-        lengthIncludesHeader: true,
-        tpduBytes: 0,
-        tpduOutboundHex: "",
-      },
-    },
-    {
-      key: "le",
-      label: "2-byte little-endian",
-      hint: "low byte first, some host systems",
-      set: {
-        lengthPrefixBytes: 2,
-        lengthEncoding: "binary",
-        byteOrder: "little",
-        lengthIncludesPrefix: false,
-        lengthIncludesHeader: true,
-        tpduBytes: 0,
-        tpduOutboundHex: "",
-      },
-    },
-  ];
-
-  applyFramingPreset(d: Connection, key: string): void {
-    const p = this.framingPresets.find((x) => x.key === key);
-    if (!p) return;
-    Object.assign(d.framing, p.set);
-    this.markDirty();
-  }
-
-  framingPresetActive(d: Connection, key: string): boolean {
-    const p = this.framingPresets.find((x) => x.key === key);
-    if (!p) return false;
-    return Object.entries(p.set).every(
-      ([k, v]) =>
-        String((d.framing as unknown as Record<string, unknown>)[k] ?? "") ===
-        String(v),
-    );
-  }
-
-  /** The frame a 43-byte sample message gets on the wire, byte by byte, so
-   *  every framing choice is visible before anything is sent. */
-  framingPreview(d: Connection): FramingPreview {
-    const f = d.framing;
-    const n = Math.max(1, Math.min(8, Number(f.lengthPrefixBytes) || 2));
-    const hex = (f.tpduOutboundHex || "")
-      .replace(/[^0-9a-fA-F]/g, "")
-      .toUpperCase();
-    const tpdu = hex.length % 2 === 0 ? (hex.match(/../g) ?? []) : [];
-    const body = 43;
-    const counted =
-      (f.lengthIncludesHeader ? body + tpdu.length : body) +
-      (f.lengthIncludesPrefix ? n : 0);
-    const terms = [`${body} body`];
-    if (f.lengthIncludesHeader && tpdu.length)
-      terms.push(`${tpdu.length} TPDU`);
-    if (f.lengthIncludesPrefix) terms.push(`${n} prefix`);
-    let prefix: { hex: string; char?: string }[];
-    let overflow = false;
-    if (f.lengthEncoding === "ascii") {
-      overflow = counted > 10 ** n - 1;
-      const digits = String(Math.min(counted, 10 ** n - 1)).padStart(n, "0");
-      prefix = [...digits].map((c) => ({
-        char: c,
-        hex: c.charCodeAt(0).toString(16).toUpperCase(),
-      }));
-    } else {
-      overflow = counted > 256 ** n - 1;
-      const bytes =
-        counted
-          .toString(16)
-          .toUpperCase()
-          .padStart(n * 2, "0")
-          .match(/../g) ?? [];
-      prefix = (f.byteOrder === "little" ? bytes.reverse() : bytes).map(
-        (h) => ({ hex: h }),
-      );
-    }
-    return {
-      n,
-      prefix,
-      tpdu,
-      body,
-      counted,
-      formula: terms.join(" + "),
-      overflow,
-      total: n + tpdu.length + body,
-    };
-  }
-
-  /** Combinations that cannot work, said before the first stalled read. */
-  framingIssues(d: Connection): string[] {
-    const f = d.framing;
-    const out: string[] = [];
-    const n = Number(f.lengthPrefixBytes);
-    if (!(n >= 1)) out.push("The length prefix needs at least one byte.");
-    if (f.lengthEncoding === "ascii" && n >= 1 && n <= 2) {
-      out.push(
-        `A ${n}-digit ASCII prefix caps a message at ${10 ** n - 1} bytes.`,
-      );
-    }
-    const hex = (f.tpduOutboundHex || "").trim();
-    if (hex && (!/^[0-9a-fA-F]*$/.test(hex) || hex.length % 2 === 1)) {
-      out.push(
-        "The outbound TPDU must be an even number of hex digits (e.g. 6000000000).",
-      );
-    }
-    if (hex && !f.tpduBytes) {
-      out.push(
-        "A TPDU is sent but none is stripped on the way in: replies will carry it as message bytes.",
-      );
-    }
-    if (f.tpduBytes && !hex && d.mode !== "inbound") {
-      out.push(
-        "Inbound TPDU bytes are stripped but nothing is sent; fine only if the host does not expect one.",
-      );
-    }
-    return out;
   }
 
   private fmtVal(v: unknown): string {

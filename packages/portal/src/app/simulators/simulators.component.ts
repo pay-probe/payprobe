@@ -29,6 +29,15 @@ import { IconComponent } from "../shared/ui/icon.component";
 import { BadgeComponent } from "../shared/ui/badge.component";
 import { KpiCardComponent } from "../shared/ui/kpi-card.component";
 import { CodeEditorComponent } from "../shared/code-editor.component";
+import {
+  FramingEditorComponent,
+  framingSummary,
+} from "../shared/framing-editor.component";
+import {
+  FramingConfig,
+  framingFromApi,
+  framingToApi,
+} from "../connections/connection.models";
 
 const TEMPLATE = `{
   "protocol": "iso8583",
@@ -264,6 +273,7 @@ interface Breakdown {
     BadgeComponent,
     KpiCardComponent,
     CodeEditorComponent,
+    FramingEditorComponent,
     FormsModule,
     RouterLink,
     StaleChipComponent,
@@ -439,6 +449,35 @@ interface Breakdown {
                 (valueChange)="config = $event"
               />
             </label>
+
+            @if (framingPresets.has(preset())) {
+              <details class="fr-sim" open>
+                <summary>
+                  <pp-icon name="package" [size]="14" [strokeWidth]="2.5" />
+                  Framing
+                  @if (simFraming(); as f) {
+                    <span class="fr-sim__info">{{ simFramingSummary(f) }}</span>
+                  }
+                </summary>
+                @if (simFraming(); as f) {
+                  <p class="hint">
+                    The same framing the connection form edits, written into the
+                    <code>framing</code> key of the JSON above as you change it.
+                    A client must frame the same way to talk to this simulator.
+                  </p>
+                  <pp-framing-editor
+                    [framing]="f"
+                    mode="inbound"
+                    (changed)="onSimFraming(f)"
+                  />
+                } @else {
+                  <p class="hint">
+                    The JSON above does not parse yet; fix it and the framing
+                    editor reads it.
+                  </p>
+                }
+              </details>
+            }
 
             <label class="check">
               <input type="checkbox" [(ngModel)]="enabled" />
@@ -895,6 +934,30 @@ interface Breakdown {
   changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
+      .fr-sim {
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        padding: 8px 12px;
+      }
+      .fr-sim summary {
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        padding: 4px 0;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .fr-sim summary pp-icon {
+        color: var(--brand, var(--color-primary));
+      }
+      .fr-sim__info {
+        margin-left: auto;
+        font-weight: 500;
+        font-size: 11px;
+        color: var(--color-text-muted, var(--color-text));
+        font-family: var(--font-mono, ui-monospace, monospace);
+      }
       :host {
         display: block;
         height: 100%;
@@ -1526,6 +1589,47 @@ export class SimulatorsComponent implements OnInit, OnDestroy {
   label = "switch-sim";
   port = 0;
   config = TEMPLATE;
+
+  /** Presets whose responder frames a TCP stream (the JSON has a `framing` key). */
+  readonly framingPresets = new Set(["basic", "chaos", "hsm", "visa", "proxy"]);
+  private _simFraming: { json: string; f: FramingConfig } | null = null;
+
+  /** The `framing` of the config JSON as a draft the editor mutates in place;
+   *  the same object is returned while the JSON is the one it produced, so
+   *  typing in the editor keeps its inputs. Null while the JSON is invalid. */
+  simFraming(): FramingConfig | null {
+    if (this._simFraming && this._simFraming.json === this.config) {
+      return this._simFraming.f;
+    }
+    try {
+      const cfg = JSON.parse(this.config);
+      const f = framingFromApi(
+        cfg && typeof cfg === "object" ? cfg["framing"] : null,
+      );
+      this._simFraming = { json: this.config, f };
+      return f;
+    } catch {
+      this._simFraming = null;
+      return null;
+    }
+  }
+
+  simFramingSummary(f: FramingConfig): string {
+    return framingSummary(f);
+  }
+
+  /** Write the edited framing back into the JSON, keeping every other key. */
+  onSimFraming(f: FramingConfig): void {
+    let cfg: Record<string, unknown>;
+    try {
+      cfg = JSON.parse(this.config);
+    } catch {
+      return;
+    }
+    cfg["framing"] = framingToApi(f, true);
+    this.config = JSON.stringify(cfg, null, 2);
+    this._simFraming = { json: this.config, f };
+  }
   enabled = false;
   captureName = "";
 
