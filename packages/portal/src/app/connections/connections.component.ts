@@ -11,6 +11,7 @@ import { FormsModule } from "@angular/forms";
 import { ThemeService } from "../shared/theme.service";
 import { UiService } from "../shared/ui.service";
 import { IconComponent } from "../shared/ui/icon.component";
+import { BadgeComponent, BadgeTone } from "../shared/ui/badge.component";
 import {
   Connection,
   blankConnection,
@@ -46,7 +47,7 @@ import { PageHeaderComponent } from "../shared/ui/page-header.component";
 @Component({
   selector: "app-connections",
   standalone: true,
-  imports: [PageHeaderComponent, FormsModule, IconComponent],
+  imports: [PageHeaderComponent, FormsModule, IconComponent, BadgeComponent],
   templateUrl: "./connections.component.html",
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: "./connections.component.scss",
@@ -197,6 +198,96 @@ export class ConnectionsComponent implements OnInit {
       default:
         return c.protocol === "header_echo" ? "header echo (HSM)" : "ISO 8583";
     }
+  }
+
+  /** Icon per adapter kind, so the list reads at a glance. */
+  adapterIcon(c: Connection): string {
+    switch (c.adapter as string) {
+      case "grpc":
+        return "box";
+      case "http":
+        return "globe";
+      case "nats":
+        return "message";
+      case "payshield":
+      case "hsm_client":
+        return "key";
+      case "db_probe_core":
+      case "db_probe_switch":
+        return "database";
+      default:
+        return c.protocol === "header_echo" ? "cpu" : "network";
+    }
+  }
+
+  /** Colour family per adapter kind (a data-tone attribute the styles read). */
+  adapterTone(c: Connection): BadgeTone {
+    switch (c.adapter as string) {
+      case "grpc":
+        return "info";
+      case "http":
+        return "info";
+      case "nats":
+        return "success";
+      case "payshield":
+      case "hsm_client":
+        return "warning";
+      case "db_probe_core":
+      case "db_probe_switch":
+        return "neutral";
+      default:
+        return "brand";
+    }
+  }
+
+  /** Quick filter over the list: name, adapter label, host or URL. */
+  readonly filter = signal("");
+  readonly filtered = computed(() => {
+    const q = this.filter().trim().toLowerCase();
+    const all = this.connections();
+    if (!q) return all;
+    return all.filter((c) =>
+      [
+        c.name,
+        this.connLabel(c),
+        c.host,
+        c.rest?.baseUrl,
+        c.grpc?.target,
+        c.mode,
+      ]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q)),
+    );
+  });
+
+  /** What the length prefix looks like on the wire for a sample message, so
+   *  the framing choice is visible before anything is sent. */
+  framingExample(d: Connection): string {
+    const n = Math.max(
+      1,
+      Math.min(8, Number(d.framing.lengthPrefixBytes) || 2),
+    );
+    const body =
+      43 +
+      (d.framing.tpduOutboundHex?.length
+        ? d.framing.tpduOutboundHex.length / 2
+        : 0);
+    const counted =
+      (d.framing.lengthIncludesHeader ? body : 43) +
+      (d.framing.lengthIncludesPrefix ? n : 0);
+    if (d.framing.lengthEncoding === "ascii") {
+      const max = 10 ** n - 1;
+      if (counted > max)
+        return `a ${n}-digit prefix cannot carry ${counted} (max ${max})`;
+      return `"${String(counted).padStart(n, "0")}" then the message`;
+    }
+    const hex = counted
+      .toString(16)
+      .toUpperCase()
+      .padStart(n * 2, "0");
+    const bytes = hex.match(/../g) ?? [];
+    const ordered = d.framing.byteOrder === "little" ? bytes.reverse() : bytes;
+    return `${ordered.join(" ")} then the message`;
   }
 
   private fmtVal(v: unknown): string {

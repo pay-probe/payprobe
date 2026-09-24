@@ -14,12 +14,36 @@
   <div class="inst__body">
     <!-- list -->
     <aside class="inst__list">
-      @for (i of connections(); track i.name) {
+      <label class="list__filter">
+        <pp-icon name="search" [size]="14" />
+        <input
+          type="text"
+          placeholder="Filter connections…"
+          [ngModel]="filter()"
+          (ngModelChange)="filter.set($event)"
+        />
+        <span class="muted list__count"
+          >{{ filtered().length }}/{{ connections().length }}</span
+        >
+      </label>
+      @for (i of filtered(); track i.name) {
         <button class="row" [class.active]="isActive(i)" (click)="edit(i)">
-          <span class="row__ico"><pp-icon name="cpu" [size]="16" /></span>
+          <span class="row__ico" [attr.data-tone]="adapterTone(i)"
+            ><pp-icon [name]="adapterIcon(i)" [size]="16"
+          /></span>
           <span class="row__main">
             <span class="row__name">{{ i.name }}</span>
             <span class="row__sub">
+              @if (i.mode === "inbound") {
+                <span class="tag tag--in" title="Inbound: listens">in</span>
+              }
+              @if (i.default) {
+                <span
+                  class="tag tag--default"
+                  title="Default for its adapter type"
+                  >default</span
+                >
+              }
               {{ connLabel(i) }}
               @if (i.adapter === "grpc") {
                 @if (i.grpc.target) {
@@ -40,7 +64,11 @@
         </button>
       } @empty {
         <p class="muted empty">
-          No connections yet. Create one to get started.
+          @if (connections().length) {
+            Nothing matches “{{ filter() }}”.
+          } @else {
+            No connections yet. Create one to get started.
+          }
         </p>
       }
     </aside>
@@ -49,6 +77,33 @@
     <section class="inst__editor">
       @if (draft(); as d) {
         <div class="form">
+          <div class="edhead">
+            <span class="edhead__ico" [attr.data-tone]="adapterTone(d)"
+              ><pp-icon [name]="adapterIcon(d)" [size]="18"
+            /></span>
+            <div class="edhead__main">
+              <strong class="edhead__name">{{
+                d.name || "New connection"
+              }}</strong>
+              <span class="edhead__sub muted">{{ connLabel(d) }}</span>
+            </div>
+            <div class="edhead__badges">
+              @if (d.mode === "inbound") {
+                <pp-badge tone="info">inbound · listens</pp-badge>
+              } @else {
+                <pp-badge tone="neutral">outbound · connects</pp-badge>
+              }
+              @if (d.default) {
+                <pp-badge tone="brand">default for {{ connLabel(d) }}</pp-badge>
+              }
+              @if (d.extends) {
+                <pp-badge tone="neutral">extends {{ d.extends }}</pp-badge>
+              }
+              @if (dirty()) {
+                <pp-badge tone="warning">unsaved changes</pp-badge>
+              }
+            </div>
+          </div>
           <div class="grid2">
             <label class="fld">
               <span>Name</span>
@@ -123,7 +178,9 @@
           </div>
 
           <details class="sect">
-            <summary>Environment overrides</summary>
+            <summary>
+              <pp-icon name="layers" [size]="14" /> Environment overrides
+            </summary>
             <p class="muted">
               Override this connection's parameters per environment (e.g.
               <code>host</code>, <code>port</code>). Blank = inherit the base
@@ -304,7 +361,7 @@
             </div>
 
             <details class="sect">
-              <summary>Framing</summary>
+              <summary><pp-icon name="package" [size]="14" /> Framing</summary>
               <div class="grid2">
                 <label class="fld">
                   <span>Length prefix bytes</span>
@@ -330,6 +387,7 @@
                   <select
                     [(ngModel)]="d.framing.byteOrder"
                     (ngModelChange)="markDirty()"
+                    [disabled]="d.framing.lengthEncoding === 'ascii'"
                     title="Only applies to a binary length prefix"
                   >
                     <option value="big">big-endian</option>
@@ -379,11 +437,18 @@
                   />
                 </label>
               </div>
+              <p class="hint">
+                <pp-icon name="info" [size]="13" /> On the wire, a 43-byte
+                message is framed as
+                <code>{{ framingExample(d) }}</code>
+              </p>
             </details>
 
             @if (!d.extends && d.protocol === "iso8583") {
               <details class="sect" open>
-                <summary>Correlation (ISO 8583)</summary>
+                <summary>
+                  <pp-icon name="list" [size]="14" /> Correlation (ISO 8583)
+                </summary>
                 <div class="grid2">
                   <label class="fld">
                     <span>Correlation DE</span>
@@ -416,7 +481,9 @@
 
             @if (!d.extends && d.protocol === "header_echo") {
               <details class="sect" open>
-                <summary>Header echo (HSM)</summary>
+                <summary>
+                  <pp-icon name="cpu" [size]="14" /> Header echo (HSM)
+                </summary>
                 <div class="grid2">
                   <label class="fld">
                     <span>Header bytes</span>
@@ -459,7 +526,7 @@
             }
 
             <details class="sect">
-              <summary>Session</summary>
+              <summary><pp-icon name="clock" [size]="14" /> Session</summary>
               <div class="grid2">
                 <label class="fld chk">
                   <input
@@ -653,7 +720,8 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
 
               <details class="sect">
                 <summary>
-                  Advanced <small class="muted">(worker-host paths)</small>
+                  <pp-icon name="settings" [size]="14" /> Advanced
+                  <small class="muted">(worker-host paths)</small>
                 </summary>
                 <div class="grid2">
                   <label class="fld">
@@ -701,7 +769,7 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
             }
 
             <details class="sect">
-              <summary>TLS</summary>
+              <summary><pp-icon name="lock" [size]="14" /> TLS</summary>
               <div class="grid2">
                 <label class="fld chk">
                   <input
@@ -729,7 +797,7 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
 
             <details class="sect">
               <summary>
-                Call metadata
+                <pp-icon name="list" [size]="14" /> Call metadata
                 <small class="muted">(headers sent on every call)</small>
               </summary>
               <div class="rows">
@@ -767,7 +835,7 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
 
             <details class="sect" open>
               <summary>
-                Actions
+                <pp-icon name="send" [size]="14" /> Actions
                 <small class="muted"
                   >(friendly name → package.Service/Method)</small
                 >
@@ -1152,17 +1220,22 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
               (click)="save()"
               [disabled]="!dirty()"
             >
-              Save
+              <pp-icon name="check" [size]="14" /> Save
             </button>
-            <button class="btn" (click)="cancel()">Cancel</button>
+            <button class="btn" (click)="cancel()">
+              <pp-icon name="undo" [size]="14" /> Cancel
+            </button>
             <button
               class="btn"
               (click)="testConnection()"
               [disabled]="testing()"
             >
+              <pp-icon name="zap" [size]="14" />
               {{ testing() ? "Testing…" : "Test" }}
             </button>
-            <button class="btn" (click)="clone()">Clone</button>
+            <button class="btn" (click)="clone()">
+              <pp-icon name="copy" [size]="14" /> Clone
+            </button>
             @if (testResult(); as t) {
               <span class="test-result" [class.ok]="t.ok" [class.bad]="!t.ok">
                 {{ t.ok ? "✓ " + t.latency_ms + " ms" : "✗ " + t.error }}
@@ -1170,14 +1243,14 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
             }
             @if (originalName()) {
               <button class="btn btn--danger" (click)="remove(d)">
-                Delete
+                <pp-icon name="x" [size]="14" /> Delete
               </button>
             }
           </div>
         </div>
       } @else {
         <div class="placeholder">
-          <pp-icon name="cpu" [size]="28" />
+          <pp-icon name="plug" [size]="28" />
           <p>Select a connection to edit, or create a new one.</p>
         </div>
       }
