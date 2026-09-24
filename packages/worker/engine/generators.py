@@ -21,6 +21,9 @@ meaningless. The supported tokens:
     ${now.rrn}               -> a 12-digit retrieval reference number
     ${now.epoch}             -> unix seconds
     ${now.iso}               -> ISO-8601 UTC timestamp
+    ${now.fmt(%y%m%d)}       -> current time through a strftime pattern (UTC)
+    ${now.fmt(%y%m%d%H%M%S,4)} -> ... at a fixed UTC offset in hours (e.g. UTC+4),
+                                for dialect fields a host checks against its local clock
     ${pool.terminal}         -> next terminal id from the run's terminal pool
     ${pool.card}             -> next entry from the run's card pool
 
@@ -52,7 +55,7 @@ from __future__ import annotations
 
 import random
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 #: Reserved leading tokens that route a ``${...}`` reference to a generator
@@ -161,7 +164,7 @@ class GeneratorContext:
         if ns == "rand":
             return self._rand(fname, args, expr)
         if ns == "now":
-            return self._now(fname, expr)
+            return self._now(fname, expr, args)
         if ns == "pool":
             return self._pool(fname, expr)
         if ns == "card":
@@ -220,7 +223,16 @@ class GeneratorContext:
             raise GeneratorError(f"{expr}: {exc}") from exc
         raise GeneratorError(expr)
 
-    def _now(self, fname: str, expr: str) -> Any:
+    def _now(self, fname: str, expr: str, args: list[str] | None = None) -> Any:
+        if fname == "fmt":
+            args = args or []
+            if not args:
+                raise GeneratorError(f"{expr}: now.fmt needs a strftime pattern")
+            try:
+                offset = float(args[1]) if len(args) > 1 else 0.0
+            except ValueError as exc:
+                raise GeneratorError(f"{expr}: UTC offset must be hours, e.g. 4 or -2.5") from exc
+            return datetime.now(timezone(timedelta(hours=offset))).strftime(args[0])
         if fname == "epoch":
             return int(time.time())
         if fname == "iso":
