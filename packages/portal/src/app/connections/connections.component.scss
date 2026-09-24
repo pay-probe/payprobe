@@ -98,9 +98,73 @@
   white-space: nowrap;
 }
 
-/* adapter colour families (list icon + editor header icon) */
+/* family chips (quick filter) and group headers */
+.fam {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 8px;
+
+  &__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: transparent;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--color-node);
+    }
+    &.active {
+      border-color: currentColor;
+      background: color-mix(in srgb, currentColor 12%, transparent);
+    }
+  }
+
+  &__n {
+    opacity: 0.7;
+  }
+}
+
+.grp {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 4px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+
+  &__n {
+    margin-left: auto;
+    font-weight: 500;
+    opacity: 0.7;
+  }
+}
+
+.linkbtn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--brand, var(--color-primary));
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* adapter colour families (list icon, editor header icon, chips, groups, legend) */
 .row__ico,
-.edhead__ico {
+.edhead__ico,
+.fam__chip,
+.grp,
+.legend__item {
   &[data-tone="brand"] {
     color: var(--brand, var(--color-primary));
   }
@@ -143,6 +207,78 @@
   }
 }
 
+/* segmented direction control */
+.seg {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--color-bg);
+
+  &__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 9px;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-muted, var(--color-text));
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+
+    small {
+      font-size: 11px;
+      opacity: 0.75;
+    }
+
+    & + & {
+      border-left: 1px solid var(--color-border);
+    }
+
+    &:hover {
+      background: var(--color-node);
+    }
+
+    &.active {
+      color: var(--brand, var(--color-primary));
+      background: color-mix(
+        in srgb,
+        var(--brand, var(--color-primary)) 12%,
+        transparent
+      );
+      font-weight: 600;
+    }
+  }
+}
+
+/* collapsed-section state, right-aligned in the summary */
+.sect__info {
+  float: right;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--color-text-muted, var(--color-text));
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* legend under the empty state */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 12px;
+
+  &__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+}
+
 /* editor header: what am I editing, at a glance */
 .edhead {
   display: flex;
@@ -172,6 +308,14 @@
 
   &__sub {
     font-size: 12px;
+  }
+
+  &__ep {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 11px;
+    background: var(--color-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
   }
 
   &__badges {
@@ -463,6 +607,32 @@
   padding: 2px 6px;
   font-size: 12px;
   line-height: 1;
+}
+
+.actions__right {
+  margin-left: auto;
+}
+
+.test-badge {
+  display: inline-flex;
+  max-width: 220px;
+  min-width: 0;
+
+  pp-badge {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.actions--sticky {
+  position: sticky;
+  bottom: -16px; /* the editor's padding */
+  margin: 0 -16px -16px;
+  padding: 10px 16px;
+  background: var(--color-bg);
+  border-top: 1px solid var(--color-border);
 }
 
 .actions {

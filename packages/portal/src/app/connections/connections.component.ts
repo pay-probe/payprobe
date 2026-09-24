@@ -1,5 +1,6 @@
 import {
   Component,
+  HostListener,
   OnInit,
   computed,
   inject,
@@ -240,25 +241,166 @@ export class ConnectionsComponent implements OnInit {
     }
   }
 
-  /** Quick filter over the list: name, adapter label, host or URL. */
+  /** Adapter families the list is grouped and filtered by. */
+  readonly families: {
+    key: string;
+    label: string;
+    icon: string;
+    tone: BadgeTone;
+  }[] = [
+    { key: "iso", label: "ISO 8583", icon: "network", tone: "brand" },
+    { key: "hsm", label: "HSM", icon: "key", tone: "warning" },
+    { key: "http", label: "REST", icon: "globe", tone: "info" },
+    { key: "grpc", label: "gRPC", icon: "box", tone: "info" },
+    { key: "nats", label: "NATS", icon: "message", tone: "success" },
+    { key: "db", label: "DB probe", icon: "database", tone: "neutral" },
+  ];
+
+  family(c: Connection): string {
+    switch (c.adapter as string) {
+      case "grpc":
+        return "grpc";
+      case "http":
+        return "http";
+      case "nats":
+        return "nats";
+      case "payshield":
+      case "hsm_client":
+        return "hsm";
+      case "db_probe_core":
+      case "db_probe_switch":
+        return "db";
+      default:
+        return c.protocol === "header_echo" ? "hsm" : "iso";
+    }
+  }
+
+  /** Quick filter over the list: a family chip plus free text over name,
+   *  adapter label, host, URL or direction. */
   readonly filter = signal("");
+  readonly familyFilter = signal<string | null>(null);
+  readonly familyCounts = computed(() => {
+    const counts: Record<string, number> = {};
+    for (const c of this.connections()) {
+      const k = this.family(c);
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    return counts;
+  });
   readonly filtered = computed(() => {
     const q = this.filter().trim().toLowerCase();
-    const all = this.connections();
-    if (!q) return all;
-    return all.filter((c) =>
-      [
+    const fam = this.familyFilter();
+    return this.connections().filter((c) => {
+      if (fam && this.family(c) !== fam) return false;
+      if (!q) return true;
+      return [
         c.name,
         this.connLabel(c),
         c.host,
         c.rest?.baseUrl,
         c.grpc?.target,
+        c.nats?.servers,
         c.mode,
       ]
         .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q)),
-    );
+        .some((v) => String(v).toLowerCase().includes(q));
+    });
   });
+  /** The filtered list in family groups, empty groups dropped. */
+  readonly grouped = computed(() =>
+    this.families
+      .map((f) => ({
+        ...f,
+        items: this.filtered().filter((c) => this.family(c) === f.key),
+      }))
+      .filter((g) => g.items.length > 0),
+  );
+  toggleFamily(key: string): void {
+    this.familyFilter.set(this.familyFilter() === key ? null : key);
+  }
+  clearFilters(): void {
+    this.filter.set("");
+    this.familyFilter.set(null);
+  }
+
+  /** Where the connection points, in one line, for the list and the header. */
+  endpoint(c: Connection): string {
+    switch (c.adapter as string) {
+      case "grpc":
+        return c.grpc?.target || "";
+      case "http":
+        return c.rest?.baseUrl || "";
+      case "nats":
+        return c.nats?.servers || "";
+      case "db_probe_core":
+      case "db_probe_switch":
+        return c.db?.dbname
+          ? `${c.db.engine} · ${c.db.dbname}`
+          : c.db?.engine || "";
+      default:
+        return c.host ? `${c.host}:${c.port}` : "";
+    }
+  }
+
+  setMode(d: Connection, mode: "outbound" | "inbound"): void {
+    if (d.mode === mode) return;
+    d.mode = mode;
+    this.markDirty();
+  }
+
+  /** One-line state of a collapsed section, so nothing is hidden by folding. */
+  framingSummary(d: Connection): string {
+    const f = d.framing;
+    const width =
+      f.lengthEncoding === "ascii"
+        ? `${f.lengthPrefixBytes}-digit ASCII`
+        : `${f.lengthPrefixBytes}-byte ${f.byteOrder}-endian`;
+    const parts = [width];
+    if (f.lengthIncludesPrefix) parts.push("counts prefix");
+    if (!f.lengthIncludesHeader) parts.push("excludes TPDU");
+    if (f.tpduBytes || f.tpduOutboundHex) parts.push("TPDU");
+    if (f.encoding && f.encoding !== "ascii") parts.push(f.encoding);
+    return parts.join(" · ");
+  }
+  correlationSummary(d: Connection): string {
+    const c = d.correlation;
+    const parts = [`DE ${c.field || "?"}`];
+    if (c.autoGenerate) parts.push("auto STAN");
+    if (c.matchMti) parts.push("match MTI");
+    return parts.join(" · ");
+  }
+  headerEchoSummary(d: Connection): string {
+    const h = d.headerEcho;
+    return `${h.headerBytes}-byte header · ${h.responseCommandBytes}+${h.errorFieldBytes} reply bytes`;
+  }
+  sessionSummary(d: Connection): string {
+    const parts = [d.signOn ? "sign-on" : "no sign-on"];
+    parts.push(
+      d.keepalive.enabled
+        ? `keep-alive ${d.keepalive.intervalSec} s`
+        : "no keep-alive",
+    );
+    parts.push(`timeout ${d.responseTimeoutSec} s`);
+    return parts.join(" · ");
+  }
+  overridesSummary(): string {
+    const n = this.overrideEnvList().filter(
+      (e) => this.rowsFor(e.name).length,
+    ).length;
+    return n ? `${n} environment${n === 1 ? "" : "s"} overridden` : "none";
+  }
+
+  @HostListener("document:keydown", ["$event"])
+  onKeydown(ev: KeyboardEvent): void {
+    if (
+      (ev.metaKey || ev.ctrlKey) &&
+      ev.key.toLowerCase() === "s" &&
+      this.draft()
+    ) {
+      ev.preventDefault();
+      if (this.dirty()) this.save();
+    }
+  }
 
   /** What the length prefix looks like on the wire for a sample message, so
    *  the framing choice is visible before anything is sent. */

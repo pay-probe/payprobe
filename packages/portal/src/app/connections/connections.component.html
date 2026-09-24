@@ -26,46 +26,69 @@
           >{{ filtered().length }}/{{ connections().length }}</span
         >
       </label>
-      @for (i of filtered(); track i.name) {
-        <button class="row" [class.active]="isActive(i)" (click)="edit(i)">
-          <span class="row__ico" [attr.data-tone]="adapterTone(i)"
-            ><pp-icon [name]="adapterIcon(i)" [size]="16"
-          /></span>
-          <span class="row__main">
-            <span class="row__name">{{ i.name }}</span>
-            <span class="row__sub">
-              @if (i.mode === "inbound") {
-                <span class="tag tag--in" title="Inbound: listens">in</span>
-              }
-              @if (i.default) {
-                <span
-                  class="tag tag--default"
-                  title="Default for its adapter type"
-                  >default</span
-                >
-              }
-              {{ connLabel(i) }}
-              @if (i.adapter === "grpc") {
-                @if (i.grpc.target) {
-                  · {{ i.grpc.target }}
+      <div class="fam">
+        @for (f of families; track f.key) {
+          @if (familyCounts()[f.key]) {
+            <button
+              class="fam__chip"
+              [class.active]="familyFilter() === f.key"
+              [attr.data-tone]="f.tone"
+              [title]="'Only ' + f.label"
+              (click)="toggleFamily(f.key)"
+            >
+              <pp-icon [name]="f.icon" [size]="12" /> {{ f.label }}
+              <span class="fam__n">{{ familyCounts()[f.key] }}</span>
+            </button>
+          }
+        }
+      </div>
+      @for (g of grouped(); track g.key) {
+        <div class="grp" [attr.data-tone]="g.tone">
+          <pp-icon [name]="g.icon" [size]="12" /> {{ g.label }}
+          <span class="grp__n">{{ g.items.length }}</span>
+        </div>
+        @for (i of g.items; track i.name) {
+          <button class="row" [class.active]="isActive(i)" (click)="edit(i)">
+            <span class="row__ico" [attr.data-tone]="adapterTone(i)"
+              ><pp-icon [name]="adapterIcon(i)" [size]="16"
+            /></span>
+            <span class="row__main">
+              <span class="row__name">{{ i.name }}</span>
+              <span class="row__sub">
+                @if (i.mode === "inbound") {
+                  <span class="tag tag--in" title="Inbound: listens">in</span>
                 }
-              } @else if (i.adapter === "http") {
-                @if (i.rest.baseUrl) {
-                  · {{ i.rest.baseUrl }}
+                @if (i.default) {
+                  <span
+                    class="tag tag--default"
+                    title="Default for its adapter type"
+                    >default</span
+                  >
                 }
-              } @else if (i.host) {
-                · {{ i.host }}:{{ i.port }}
-              }
-              @if (i.extends) {
-                · extends {{ i.extends }}
-              }
+                {{ connLabel(i) }}
+                @if (i.adapter === "grpc") {
+                  @if (i.grpc.target) {
+                    · {{ i.grpc.target }}
+                  }
+                } @else if (i.adapter === "http") {
+                  @if (i.rest.baseUrl) {
+                    · {{ i.rest.baseUrl }}
+                  }
+                } @else if (i.host) {
+                  · {{ i.host }}:{{ i.port }}
+                }
+                @if (i.extends) {
+                  · extends {{ i.extends }}
+                }
+              </span>
             </span>
-          </span>
-        </button>
+          </button>
+        }
       } @empty {
         <p class="muted empty">
           @if (connections().length) {
-            Nothing matches “{{ filter() }}”.
+            Nothing matches the current filters.
+            <button class="linkbtn" (click)="clearFilters()">Clear</button>
           } @else {
             No connections yet. Create one to get started.
           }
@@ -85,7 +108,15 @@
               <strong class="edhead__name">{{
                 d.name || "New connection"
               }}</strong>
-              <span class="edhead__sub muted">{{ connLabel(d) }}</span>
+              <span class="edhead__sub muted">
+                {{ connLabel(d) }}
+                @if (endpoint(d)) {
+                  · <code class="edhead__ep">{{ endpoint(d) }}</code>
+                }
+                @if (d.poolSize) {
+                  · pool {{ d.poolSize }}
+                }
+              </span>
             </div>
             <div class="edhead__badges">
               @if (d.mode === "inbound") {
@@ -101,6 +132,22 @@
               }
               @if (dirty()) {
                 <pp-badge tone="warning">unsaved changes</pp-badge>
+              }
+              @if (testResult(); as t) {
+                <span
+                  class="test-badge"
+                  [title]="
+                    t.ok ? 'Reachable in ' + t.latency_ms + ' ms' : t.error
+                  "
+                >
+                  <pp-badge [tone]="t.ok ? 'success' : 'danger'">
+                    {{
+                      t.ok
+                        ? "reachable · " + t.latency_ms + " ms"
+                        : "test failed · " + t.error
+                    }}
+                  </pp-badge>
+                </span>
               }
             </div>
           </div>
@@ -153,14 +200,28 @@
             </label>
             <label class="fld">
               <span>Direction</span>
-              <select [(ngModel)]="d.mode" (ngModelChange)="markDirty()">
-                <option value="outbound">
-                  Outbound — connect to a host (client)
-                </option>
-                <option value="inbound">
-                  Inbound — listen for messages (server)
-                </option>
-              </select>
+              <span class="seg" role="radiogroup">
+                <button
+                  type="button"
+                  class="seg__btn"
+                  [class.active]="d.mode !== 'inbound'"
+                  (click)="setMode(d, 'outbound')"
+                  title="Client: the worker connects to the host"
+                >
+                  <pp-icon name="send" [size]="13" /> Outbound
+                  <small>connects</small>
+                </button>
+                <button
+                  type="button"
+                  class="seg__btn"
+                  [class.active]="d.mode === 'inbound'"
+                  (click)="setMode(d, 'inbound')"
+                  title="Server: a participant flow binds and listens on the port"
+                >
+                  <pp-icon name="server" [size]="13" /> Inbound
+                  <small>listens</small>
+                </button>
+              </span>
             </label>
             <label class="fld chk">
               <input
@@ -180,6 +241,7 @@
           <details class="sect">
             <summary>
               <pp-icon name="layers" [size]="14" /> Environment overrides
+              <span class="sect__info">{{ overridesSummary() }}</span>
             </summary>
             <p class="muted">
               Override this connection's parameters per environment (e.g.
@@ -361,7 +423,10 @@
             </div>
 
             <details class="sect">
-              <summary><pp-icon name="package" [size]="14" /> Framing</summary>
+              <summary>
+                <pp-icon name="package" [size]="14" /> Framing
+                <span class="sect__info">{{ framingSummary(d) }}</span>
+              </summary>
               <div class="grid2">
                 <label class="fld">
                   <span>Length prefix bytes</span>
@@ -448,6 +513,7 @@
               <details class="sect" open>
                 <summary>
                   <pp-icon name="list" [size]="14" /> Correlation (ISO 8583)
+                  <span class="sect__info">{{ correlationSummary(d) }}</span>
                 </summary>
                 <div class="grid2">
                   <label class="fld">
@@ -483,6 +549,7 @@
               <details class="sect" open>
                 <summary>
                   <pp-icon name="cpu" [size]="14" /> Header echo (HSM)
+                  <span class="sect__info">{{ headerEchoSummary(d) }}</span>
                 </summary>
                 <div class="grid2">
                   <label class="fld">
@@ -526,7 +593,10 @@
             }
 
             <details class="sect">
-              <summary><pp-icon name="clock" [size]="14" /> Session</summary>
+              <summary>
+                <pp-icon name="clock" [size]="14" /> Session
+                <span class="sect__info">{{ sessionSummary(d) }}</span>
+              </summary>
               <div class="grid2">
                 <label class="fld chk">
                   <input
@@ -769,7 +839,12 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
             }
 
             <details class="sect">
-              <summary><pp-icon name="lock" [size]="14" /> TLS</summary>
+              <summary>
+                <pp-icon name="lock" [size]="14" /> TLS
+                <span class="sect__info">{{
+                  d.grpc.tlsEnabled ? "on" : "off"
+                }}</span>
+              </summary>
               <div class="grid2">
                 <label class="fld chk">
                   <input
@@ -799,6 +874,7 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
               <summary>
                 <pp-icon name="list" [size]="14" /> Call metadata
                 <small class="muted">(headers sent on every call)</small>
+                <span class="sect__info">{{ d.grpc.metadata.length }}</span>
               </summary>
               <div class="rows">
                 @for (m of d.grpc.metadata; track $index) {
@@ -839,6 +915,7 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
                 <small class="muted"
                   >(friendly name → package.Service/Method)</small
                 >
+                <span class="sect__info">{{ d.grpc.actions.length }}</span>
               </summary>
               <div class="rows">
                 @for (a of d.grpc.actions; track $index) {
@@ -1214,11 +1291,12 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
             </p>
           }
 
-          <div class="actions">
+          <div class="actions actions--sticky">
             <button
               class="btn btn--primary"
               (click)="save()"
               [disabled]="!dirty()"
+              title="Save (⌘S / Ctrl+S)"
             >
               <pp-icon name="check" [size]="14" /> Save
             </button>
@@ -1236,13 +1314,11 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
             <button class="btn" (click)="clone()">
               <pp-icon name="copy" [size]="14" /> Clone
             </button>
-            @if (testResult(); as t) {
-              <span class="test-result" [class.ok]="t.ok" [class.bad]="!t.ok">
-                {{ t.ok ? "✓ " + t.latency_ms + " ms" : "✗ " + t.error }}
-              </span>
-            }
             @if (originalName()) {
-              <button class="btn btn--danger" (click)="remove(d)">
+              <button
+                class="btn btn--danger actions__right"
+                (click)="remove(d)"
+              >
                 <pp-icon name="x" [size]="14" /> Delete
               </button>
             }
@@ -1252,6 +1328,16 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
         <div class="placeholder">
           <pp-icon name="plug" [size]="28" />
           <p>Select a connection to edit, or create a new one.</p>
+          <button class="btn btn--primary" (click)="newConnection()">
+            <pp-icon name="plus" [size]="14" /> New connection
+          </button>
+          <div class="legend">
+            @for (f of families; track f.key) {
+              <span class="legend__item" [attr.data-tone]="f.tone">
+                <pp-icon [name]="f.icon" [size]="13" /> {{ f.label }}
+              </span>
+            }
+          </div>
         </div>
       }
     </section>
