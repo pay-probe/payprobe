@@ -621,6 +621,29 @@ class RegistryStore:
             raise Conflict(f"agent '{hb['agent']}' already has a running heartbeat") from exc
         return await self.get_heartbeat(hb["id"])
 
+    async def append_journal(self, hb_id: str, record: dict) -> None:
+        """Write-through journalling: one record, appended the moment it is
+        made (before the write it protects), so a process that dies mid-wake
+        leaves every ``before`` snapshot behind and the row stays revertable."""
+        await self._pool.execute(
+            "UPDATE agent_hub_heartbeats SET journal = journal || $2::jsonb "
+            "WHERE id=$1 AND status='running'",
+            hb_id,
+            json.dumps([record]),
+        )
+
+    async def append_node_journal(self, run_id: str, node_id: str, record: dict) -> None:
+        """The same for a workflow ``tool`` node: the record lands on the run
+        row's node state before the call executes."""
+        await self._pool.execute(
+            "UPDATE agent_hub_runs SET node_states = jsonb_set(node_states, $2, "
+            "COALESCE(node_states #> $2, '[]'::jsonb) || $3::jsonb, true), updated_at=NOW() "
+            "WHERE id=$1",
+            run_id,
+            [node_id, "journal"],
+            json.dumps([record]),
+        )
+
     async def record_heartbeat(
         self,
         hb_id: str,
@@ -633,12 +656,13 @@ class RegistryStore:
         result: str | None,
         error: str | None,
     ) -> dict:
-        """Persist the outcome of a finished wake (from a running row) or of a
-        refused wake (status other than running, inserted directly)."""
+        """Persist the outcome of a finished wake. Only a row still ``running``
+        is written: a row the restart watchdog already failed (and a human may
+        have reverted) is never resurrected by a late runner."""
         await self._pool.execute(
             "UPDATE agent_hub_heartbeats SET status=$2, steps=$3::jsonb, proposed=$4::jsonb, "
             "journal=$5::jsonb, tokens_in=$6, tokens_out=$7, result=$8, error=$9, "
-            "finished_at=NOW() WHERE id=$1",
+            "finished_at=NOW() WHERE id=$1 AND status='running'",
             hb_id,
             status,
             json.dumps(steps),

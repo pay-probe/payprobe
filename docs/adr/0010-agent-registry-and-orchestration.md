@@ -275,7 +275,11 @@
 > secret and the compose placeholder secret is refused outside dev (all
 > three gates). Accepted as designed and recorded: unscoped reads, five
 > minute webhook replay, direct human wakes of `plan-executor`, authority
-> snapshotted at run start, per-wake (not per-write) journal persistence.
+> snapshotted at run start. Write-through journalling followed the same
+> day: every journal record is on the heartbeat row (or the run row for
+> tool nodes) before the write it protects, a record that cannot be
+> persisted refuses the write, and a watchdog-failed row keeps its journal
+> and reverts (`test_hub_journal_writethrough.py`).
 > 205 agent-hub tests. Real-provider runs the same day: the `observer`
 > workflow parked at its human gate (David's to decide), `certification-plan`
 > blocked by the reviewer with correct reasons (exit criterion three on a

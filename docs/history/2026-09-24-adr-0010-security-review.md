@@ -66,11 +66,17 @@ itself is David's; this document is the input to it.
   token as a service: it may wake and run, never decide, revert, pause or
   execute a `full` heartbeat. Putting a bearer on the MCP transport is the
   MCP server's item, not this ADR's.
-- **Journal persistence is per wake, not per write.** A container killed
-  mid-heartbeat after three of five executed writes loses their `before`
-  snapshots (the watchdog marks the row `orphaned by restart` with an empty
-  journal). Write-through journalling is the next hardening step; it needs
-  a store hook on `ChangeJournal.record` and is not in this change.
+- ~~**Journal persistence is per wake, not per write.**~~ Closed the same
+  day, after this review was written: `ChangeJournal.on_record` fires as
+  each record is made and agent-hub persists it onto the heartbeat row (or
+  the workflow run's node state for `tool` nodes) *before* the write it
+  protects executes; a record that cannot be persisted refuses the write.
+  Every update and delete handler in the toolkit now records first, then
+  writes (creates still record after, since the key is the id the write
+  assigns). A row the watchdog failed keeps its journal and reverts; a late
+  runner can no longer resurrect it (`record_heartbeat` only updates rows
+  still `running`). No migration was needed: the records append into the
+  existing `journal` jsonb column. `test_hub_journal_writethrough.py`.
 
 ## 3. Verification ledger
 

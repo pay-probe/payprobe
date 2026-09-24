@@ -85,6 +85,10 @@ in `docs/adr/`.
    records `before` state; restore is a pure function of
    (resource, key, before) — JSON-serializable, replayable by any replica.
    Never register a write tool without journalling + a `restore_one` branch.
+   Update and delete handlers record **before** they write (agent-hub
+   persists the record write-through, so a process that dies mid-wake
+   still leaves every `before` behind, and a record that cannot be
+   persisted refuses the write). Keep that order.
 3. **The assistant tool layer lives ONCE** in
    `payprobe_common/agent_toolkit.py`. A new tool/domain = one handler there +
    one primitive op in each backend (`StoresBackend` in scenario-service,

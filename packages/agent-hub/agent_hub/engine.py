@@ -452,6 +452,17 @@ class Engine:
         if not isinstance(args, dict):
             raise ExpressionError(f"node '{node.id}': args must render to an object")
         loop = asyncio.get_running_loop()
+        run_id, node_id = run["id"], node.id
+
+        def journal_sink(rec: dict) -> None:
+            # write-through onto the run row before the call executes
+            fut = asyncio.run_coroutine_threadsafe(
+                self.store.append_node_journal(run_id, node_id, default_box.encrypt_doc(rec)),
+                loop,
+            )
+            fut.result(timeout=10)
+
+        tctx.journal.on_record = journal_sink
         res = await loop.run_in_executor(
             None, lambda: tk.scoped_dispatch(tctx, scope, node.tool, args)
         )

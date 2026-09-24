@@ -111,11 +111,16 @@ def run_heartbeat(
     flags: Callable[[], dict],
     *,
     now: Callable[[], float] = time.monotonic,
+    journal_sink: Callable[[dict], None] | None = None,
 ) -> Outcome:
     """Run one wake to completion or to a limit. Never raises for ordinary
-    failures: everything ends in an :class:`Outcome` the API persists."""
+    failures: everything ends in an :class:`Outcome` the API persists.
+    ``journal_sink`` receives every journal record as it is made, before the
+    write it protects (write-through: the record outlives a process that dies
+    mid-wake)."""
     scope = scope_for(spec)
     ctx = tk.ToolContext(backend=backend)
+    ctx.journal.on_record = journal_sink
     convo = build_convo(spec, input_text)
     schemas = scope.schemas()
     out = Outcome(status="done", model=llm.model)

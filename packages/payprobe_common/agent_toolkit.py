@@ -170,15 +170,24 @@ class ChangeRecord:
 
 @dataclass
 class ChangeJournal:
-    """Records reversible writes for one assistant session, as plain data."""
+    """Records reversible writes for one assistant session, as plain data.
+
+    ``on_record`` (optional) is called with each record's dict the moment it
+    is made, which is *before* the write it protects executes: a caller that
+    persists the record there (agent-hub does, per heartbeat) makes the
+    ``before`` snapshot durable first, and if persisting fails the exception
+    stops the write, so no change ever happens without a journal entry."""
 
     records: list[ChangeRecord] = field(default_factory=list)
+    on_record: Callable[[dict], None] | None = None
     _seq: int = 0
 
     def record(self, tool: str, resource: str, key: str, summary: str,
                before: Any) -> ChangeRecord:
         self._seq += 1
         rec = ChangeRecord(self._seq, tool, resource, key, summary, before)
+        if self.on_record is not None:
+            self.on_record(rec.to_dict())  # durable before the write; a failure refuses it
         self.records.append(rec)
         return rec
 
@@ -737,6 +746,13 @@ def _run_flakiness(ctx: ToolContext, args: dict) -> Any:
 
 # =============================================================================
 # WRITE tools (journalled, guard-railed)
+#
+# Order inside every update/delete handler: capture `before`, record the
+# journal entry, THEN write. With a write-through `ChangeJournal.on_record`
+# the entry is durable before the change exists, and a failure to persist it
+# refuses the change. A record whose write then fails restores to the state
+# that already holds, which is harmless. Creates record after the write
+# because the key is the id the write assigns.
 # =============================================================================
 
 @_tool("upsert_connection", "write",
@@ -746,10 +762,10 @@ def _run_flakiness(ctx: ToolContext, args: dict) -> Any:
 def _upsert_connection(ctx: ToolContext, args: dict) -> Any:
     name = args["name"]
     before = ctx.backend.get_connection(name)
-    saved = ctx.backend.put_connection(name, args.get("config") or {})
     verb = "updated" if before else "created"
     ctx.journal.record("upsert_connection", "connection", name,
                        f"{verb} connection '{name}'", before)
+    saved = ctx.backend.put_connection(name, args.get("config") or {})
     return {"saved": saved, "action": verb}
 
 
@@ -765,9 +781,9 @@ def _delete_connection(ctx: ToolContext, args: dict) -> Any:
     before = ctx.backend.get_connection(name)
     if before is None:
         raise ToolError(f"no connection '{name}'")
-    ctx.backend.delete_connection(name)
     ctx.journal.record("delete_connection", "connection", name,
                        f"deleted connection '{name}'", before)
+    ctx.backend.delete_connection(name)
     return {"deleted": name}
 
 
@@ -777,9 +793,9 @@ def _delete_connection(ctx: ToolContext, args: dict) -> Any:
 def _save_table(ctx: ToolContext, args: dict) -> Any:
     name = args["name"]
     before = ctx.backend.get_table(name)
-    saved = ctx.backend.put_table(name, args.get("draft") or {})
     verb = "updated" if before else "created"
     ctx.journal.record("save_table", "table", name, f"{verb} table '{name}'", before)
+    saved = ctx.backend.put_table(name, args.get("draft") or {})
     return {"saved": saved, "action": verb}
 
 
@@ -790,8 +806,8 @@ def _delete_table(ctx: ToolContext, args: dict) -> Any:
     before = ctx.backend.get_table(name)
     if before is None:
         raise ToolError(f"no table '{name}'")
-    ctx.backend.delete_table(name)
     ctx.journal.record("delete_table", "table", name, f"deleted table '{name}'", before)
+    ctx.backend.delete_table(name)
     return {"deleted": name}
 
 
@@ -801,10 +817,10 @@ def _delete_table(ctx: ToolContext, args: dict) -> Any:
              "secrets": {"type": "array", "items": _STR}}, ["variables"]))
 def _set_global_variables(ctx: ToolContext, args: dict) -> Any:
     before = ctx.backend.get_global_variables()
-    saved = ctx.backend.set_global_variables(
-        args.get("variables") or {}, args.get("secrets") or [])
     ctx.journal.record("set_global_variables", "variables", "global",
                        "replaced global variables", before)
+    saved = ctx.backend.set_global_variables(
+        args.get("variables") or {}, args.get("secrets") or [])
     return saved
 
 
@@ -827,9 +843,9 @@ def _delete_starter_flow(ctx: ToolContext, args: dict) -> Any:
     before = ctx.backend.get_starter_flow(fid)
     if before is None:
         raise ToolError(f"no starter flow '{fid}'")
-    ctx.backend.delete_starter_flow(fid)   # GuardrailError for builtins
     ctx.journal.record("delete_starter_flow", "starter_flow", fid,
                        f"deleted starter flow '{fid}'", before)
+    ctx.backend.delete_starter_flow(fid)   # GuardrailError for builtins
     return {"deleted": fid}
 
 
@@ -879,10 +895,10 @@ def _update_scenario(ctx: ToolContext, args: dict) -> Any:
     if before is None:
         raise ToolError(f"no scenario '{sid}'")
     draft = _validated_scenario(ctx, args)
+    ctx.journal.record("update_scenario", "scenario", sid,
+                       f"updated scenario '{draft.get('name') or before.get('name')}'", before)
     updated = ctx.backend.update_scenario(
         sid, draft, args.get("comment") or "updated via assistant")
-    ctx.journal.record("update_scenario", "scenario", sid,
-                       f"updated scenario '{updated.get('name')}'", before)
     return _scenario_summary(updated)
 
 
@@ -902,10 +918,10 @@ def _save_network(ctx: ToolContext, args: dict) -> Any:
     if errors:
         raise ToolError("network is invalid: " + "; ".join(errors))
     before = ctx.backend.get_network(nid)
-    saved = ctx.backend.put_network(nid, net)
     verb = "updated" if before else "created"
     ctx.journal.record("save_network", "network_flow", nid,
-                       f"{verb} network '{saved.get('name')}'", before)
+                       f"{verb} network '{net.get('name') or nid}'", before)
+    saved = ctx.backend.put_network(nid, net)
     return {"saved": _network_summary(saved), "action": verb}
 
 
@@ -918,9 +934,9 @@ def _delete_network(ctx: ToolContext, args: dict) -> Any:
     before = ctx.backend.get_network(nid)
     if before is None:
         raise ToolError(f"no network '{nid}'")
-    ctx.backend.delete_network(nid)
     ctx.journal.record("delete_network", "network_flow", nid,
                        f"deleted network '{nid}'", before)
+    ctx.backend.delete_network(nid)
     return {"deleted": nid}
 
 

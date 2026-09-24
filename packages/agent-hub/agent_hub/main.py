@@ -574,10 +574,21 @@ async def launch_heartbeat(
 
         return asyncio.run_coroutine_threadsafe(read(), loop).result(timeout=10)
 
+    def journal_sink(rec: dict) -> None:
+        # write-through: the `before` snapshot is on the row before the write
+        # it protects runs; if this fails the exception refuses that write
+        fut = asyncio.run_coroutine_threadsafe(
+            store.append_journal(hb["id"], default_box.encrypt_doc(rec)), loop
+        )
+        fut.result(timeout=10)
+
     async def execute() -> None:
         try:
             out: Outcome = await loop.run_in_executor(
-                None, lambda: run_heartbeat(spec, input_text, backend, llm, flags)
+                None,
+                lambda: run_heartbeat(
+                    spec, input_text, backend, llm, flags, journal_sink=journal_sink
+                ),
             )
         except Exception as exc:  # noqa: BLE001 — never leave a row 'running'
             out = Outcome(status="failed", error=f"{type(exc).__name__}: {exc}")
