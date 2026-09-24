@@ -182,9 +182,7 @@ async def test_config_validation():
 
 async def test_stdio_transport_end_to_end(tmp_path):
     script = tmp_path / "stdio_server.py"
-    script.write_text(
-        textwrap.dedent(
-            """
+    script.write_text(textwrap.dedent("""
         from mcp.server.fastmcp import FastMCP
 
         srv = FastMCP("payprobe-stdio-test")
@@ -194,9 +192,7 @@ async def test_stdio_transport_end_to_end(tmp_path):
             return "echo:" + text
 
         srv.run("stdio")
-        """
-        )
-    )
+        """))
     a = McpAdapter(
         {"adapter": "mcp", "transport": "stdio", "command": sys.executable, "args": [str(script)]}
     )
