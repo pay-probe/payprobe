@@ -615,10 +615,20 @@ def _binary_format(fid="iso8583-binary", encoding="binary"):
     }}
 
 
+def test_format_encoding_flag_defaults_on():
+    """Phase 5 (2026-09-24): the default is ON; only an explicit 0/false/no opts out.
+    (The module constant is read at import; this asserts the unset-env posture.)"""
+    import os
+
+    if os.environ.get("PAYPROBE_ISO8583_FORMAT_ENCODING") is None:
+        assert m._ISO8583_FORMAT_ENCODING is True
+    else:
+        pytest.skip("PAYPROBE_ISO8583_FORMAT_ENCODING is set in this environment")
+
+
 async def test_format_encoding_is_not_injected_while_the_flag_is_off(monkeypatch):
-    """Default posture (PAYPROBE_ISO8583_FORMAT_ENCODING unset): the DE table binds
-    as before, the encoding is left alone, so nothing changes on the wire until an
-    operator flips the flag."""
+    """Escape hatch (PAYPROBE_ISO8583_FORMAT_ENCODING=0): the DE table binds as
+    before and the encoding is left alone, the pre-ADR posture."""
     async def _fake_get(url):
         return _binary_format()
 

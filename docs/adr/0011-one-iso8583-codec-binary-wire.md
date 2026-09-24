@@ -1,9 +1,8 @@
 # ADR-0011: One ISO 8583 codec, one field dictionary, binary on the live wire
 
-**Status:** Proposed — phases 0 to 4 built 2026-09-24 on branch
-`feature/adr-0011-iso8583-codec` (see Implementation status); phase 5 (the
-`PAYPROBE_ISO8583_FORMAT_ENCODING` flip after a real-environment run, plus the
-doc flips) owed. Accepted only after that flip.
+**Status:** Accepted (2026-09-24) — phases 0 to 5 built the same day on
+`feature/adr-0011-iso8583-codec`; `PAYPROBE_ISO8583_FORMAT_ENCODING` default ON
+after the real-environment run recorded under Implementation status.
 **Date:** 2026-09-24
 **Deciders:** PayProbe maintainers (David + reviewers)
 **Extends:** `docs/history/standards-gap-analysis.md` recommendation #1
@@ -416,8 +415,8 @@ skill's ambition 1 status, ATLAS §13 and this ADR's status.
       and the scenario validator; `docs/operations/configuration.md` row.
 - [x] Phase 4: builtin `iso8583-binary` format; loopback test
       `test_iso8583_binary_wire.py`; playground binary sample.
-- [ ] Phase 5: flag default ON after a real-environment run; remove exec'd
-      source strings; docs and skills updated; ADR status to Accepted.
+- [x] Phase 5: flag default ON after a real-environment run; exec'd source
+      strings removed (phase 1); docs and skills updated; ADR status Accepted.
 
 ## Implementation status
 
@@ -432,6 +431,8 @@ by tests in the branch; nothing is claimed beyond what they assert.
 | 2 | Per-field `encoding` overrides (`pad`, `pad_nibble`, `separator`), `length: binary`, optional `mti` axis, profile-aware `bad_mti`, `unpack` reports `truncated` + `error`, `framing.length_encoding: "bcd"` | `test_iso8583_golden.py`, `test_tcp_framing.py`, `test_chaos.py` |
 | 3 | `wire_encoding_from_config` precedence + fold + refusal in `Iso8583Protocol`, `TcpResponder`, `ProxyResponder`, NATS codec; orchestrator injects the format `encoding` behind `PAYPROBE_ISO8583_FORMAT_ENCODING` (default `0`), refuses a disagreeing pair with 400 when on, warns when off | `orchestrator/tests/test_simulators.py` (6 new), `test_iso8583_binary_wire.py::test_disagreeing_encoding_keys_*` |
 | 4 | `VisaSimulator` passes the ASCII suite's flow set over a live socket under `binary`; raw binary frames decode byte-identically with the shared codec; ASCII client vs binary host fails loudly; `iso8583-binary` builtin format; playground binary sample | `test_iso8583_binary_wire.py` (10 tests) |
+
+| 5 | Real-environment run, then the flip. The branch's orchestrator was run against the **live** scenario-service (compose stack, fail-closed auth, service JWT) with the flag on: a temporary Message Format (the 1987 table, `encoding: binary`) was created in the live registry over `POST /formats`; `POST /simulators` with `message_format_id` bound to it and `framing.encoding: ascii` was refused **400** naming both keys; the same start with BCD framing returned **201**; a raw 41-byte binary 0200 got a 31-byte binary reply whose bytes decode (shared codec, `binary`) to MTI `0210`, DE 39 `00`, STAN echoed, no trailing bytes; the worker adapter under `binary` was approved with an auth code and got `0810` for `0800`; an ASCII adapter against the same host failed with the framing mismatch named in the responder log (`BCD length prefix b'\x00L' holds non-decimal nibbles`). Simulator stopped (204), temporary format deleted (204). Default flipped to ON, `0` kept as the escape hatch; standards-gap row, VISA simulator doc, config/flags and payments-domain skills updated. | this table; `test_format_encoding_flag_defaults_on` |
 
 Suite counts after phase 4 (2026-09-24, per package, `PYTHONPATH=packages`):
 worker **601 passed / 6 skipped** (was 482 / 6), scenario-service **341**

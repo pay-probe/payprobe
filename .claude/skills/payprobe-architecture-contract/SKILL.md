@@ -376,11 +376,13 @@ Verified against `docs/history/project-review.md` and
 `docs/standards-gap-analysis.md` (2026-07-03). These are open; do not let new
 work silently depend on them being better than they are.
 
-1. **ISO 8583 WIRE codec is ASCII-only.** No binary/BCD/EBCDIC encodings or binary
-   length prefixes on the live socket path; it will not interoperate with most
-   production switches. (The offline Inspector/analyzer CAN analyze/build
-   binary/BCD/EBCDIC profiles — see payments-domain-reference. Gap doc:
-   `docs/standards-gap-analysis.md`, "ASCII representation only".)
+1. ~~**ISO 8583 WIRE codec is ASCII-only.**~~ **Closed 2026-09-24 by ADR-0011**
+   (`docs/adr/0011-one-iso8583-codec-binary-wire.md`): one codec in
+   `packages/payprobe_common/iso8583/` speaks ASCII, binary bitmap, BCD, EBCDIC and
+   raw binary on the live socket, with BCD/binary length indicators; the worker,
+   the Inspector and the catalog share it. Still open on the same line: no
+   published-edition field dictionary and no DE padding/justification rules
+   (see payments-domain-reference §1.5 and the standards gap doc's ISO 8583 row).
 2. **Portal unit-test coverage is near zero.** ~12k+ lines of Angular; a
    Playwright e2e harness exists (golden paths, backend-free in CI; full flows
    gated behind `E2E_FULL`) but component unit coverage is thin and the

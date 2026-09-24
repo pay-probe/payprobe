@@ -17,7 +17,21 @@ Legend: ✅ covered · 🟡 partial · ❌ missing
 ## 1. Message & protocol standards (what you test against)
 
 ### ISO 8583 — card transaction messaging
-**Status: 🟡 partial (functional but ASCII-only)**
+**Status: ✅ binary / BCD / EBCDIC on the live wire since 2026-09-24 (ADR-0011); the
+remaining gaps are the published-edition dictionary and DE-level padding rules.**
+
+> **Status update 2026-09-24 (ADR-0011).** The "ASCII representation only" gap
+> below is closed: one codec in `packages/payprobe_common/iso8583/` packs and
+> unpacks under a wire profile (`ascii` | `binary` | axis dict for bitmap /
+> numeric / text / binary / length / mti, plus per-field overrides), the worker
+> wire path, the Inspector and the catalog code steps share it, framing gained a
+> BCD length prefix, and a Message Format's `encoding` reaches a bound simulator
+> (`PAYPROBE_ISO8583_FORMAT_ENCODING`, default on). Proof: the VISA simulator
+> passes its flow set over a live socket under `binary`
+> (`packages/worker/tests/test_iso8583_binary_wire.py`) and a real-environment
+> run against the live registry (ADR-0011 Implementation status). The text below
+> is kept as the record of the gap as it stood.
+
 
 What exists: a configuration-driven codec (`iso_catalog.py`,
 `iso8583_analyzer.py`) with MTI + primary/secondary bitmap, `fixed/llvar/lllvar`
@@ -155,7 +169,7 @@ Gaps:
 
 | Standard / framework | Area | Status |
 |---|---|---|
-| ISO 8583 (1987/1993) | card messaging | 🟡 ASCII-only codec, no binary/BCD/EBCDIC |
+| ISO 8583 (1987/1993) | card messaging | ✅ ASCII + binary/BCD/EBCDIC profiles on the wire (ADR-0011, 2026-09-24); 🟡 no published-edition dictionary / padding rules |
 | ISO 20022 | modern messaging | 🟡 XML build/parse, no XSD validation |
 | EMV (EMVCo) | chip/contactless | 🟡 tooling rich, no L2/L3 conformance |
 | ISO 9564 | PIN block | 🟡 partial format coverage |
@@ -173,10 +187,9 @@ Gaps:
 
 Ordered by leverage (impact per unit effort), given what already exists:
 
-1. **Binary ISO 8583 codec path** — biggest interoperability unlock. Add
-   binary-bitmap, BCD/EBCDIC field encoding, and binary length prefixes alongside
-   the current ASCII path, selectable per message format. Without this, real
-   switches are out of reach.
+1. ~~**Binary ISO 8583 codec path**~~ — **DONE 2026-09-24 (ADR-0011):** binary
+   bitmap, BCD/EBCDIC field encoding, BCD/binary length indicators, selectable
+   per message format (`definition.encoding`) and per field.
 2. **Real scheme packs + traceability export** — you already have the
    pack/certification/badge engine; populate one real suite (e.g. a Mastercard
    M-TIP subset) with requirement IDs and add a requirement→case→result export.

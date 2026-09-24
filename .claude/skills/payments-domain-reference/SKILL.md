@@ -65,21 +65,24 @@ menu follows the selected dialect's edition (0xxx ↔ 1xxx).
 - **Primary bitmap**: 64 bits; bit *n* set ⇒ DE *n* present.
 - **Bit 1 set** ⇒ a **secondary bitmap** follows, covering DEs 65–128.
 
-Implemented twice, deliberately (the worker must not import scenario-service code):
+Implemented **once** since ADR-0011 (2026-09-24) in the shared leaf package, so the worker still never imports scenario-service code:
 
 | Codec | File | Notes |
 |---|---|---|
-| Worker wire codec | `packages/worker/adapters/tcp/iso8583.py` (`iso_unpack`, `_bits_from_hex`, `_bitmap`) | ASCII-hex bitmaps (16 hex chars each). **ASCII-only end to end.** |
-| Inspector/analyzer codec | `packages/scenario-service/models/iso8583_analyzer.py` (`iso_pack`, `iso_pack_bytes`, `_dec_bitmap`) | ASCII by default; also has byte-level profiles (see 1.5) |
+| The codec | `packages/payprobe_common/iso8583/codec.py` (`pack`, `unpack`, `resolve_encoding`, `encode_bitmap` / `decode_bitmap`, `field_options`) | Bytes in, bytes out, under a wire profile (see 1.5). `fields.py` holds the dictionaries (`ISO8583_1987`, `ISO8583_1993`, `VISA_BASE_I`), `validate.py` the dialect validator, `tlv.py` the EMV BER-TLV helpers, `portable.py` the ASCII paste for code steps. |
+| Worker wire entry point | `packages/worker/adapters/tcp/iso8583.py` | Re-export plus the legacy `str` helpers `iso_pack` / `iso_unpack` (ASCII profile; `iso_unpack` strips all whitespace, so it is not used on the wire). |
+| Inspector/analyzer | `packages/scenario-service/models/iso8583_analyzer.py` (`analyze_message`, `build_message`, `diff_messages`) | The analysis layer (rows, per-field messages, interpretations, TLV trees) over the shared codec; `iso_pack` / `iso_pack_bytes` kept as thin wrappers. |
 
 ### 1.3 Field classes and length types
 
-Field **type classes** (validated in `_charset_ok` in the worker codec and
-`validate_field` in the analyzer): `n` digits, `an` alphanumeric, `ans` printable,
-`b` binary (carried as opaque text in the ASCII codec, never charset-failed),
-`z` track-2 (digits plus `=`/`D` separators).
+Field **type classes** (one rule set, `charset_error` in
+`packages/payprobe_common/iso8583/validate.py`, used by the responder's
+`iso_validate` and the analyzer's `validate_field`): `n` digits, `a` alphabetic,
+`an` alphanumeric, `ans`/`anp`/`p`/`s` printable ASCII, `b` binary (hex, whole
+bytes), `z` track-2 (digits plus `=`/`D` separators). Lengths are in **logical
+units** whatever the wire profile: digits/characters, hex characters for `b`.
 
-**Length types** — a fixed length, or a decimal ASCII length prefix:
+**Length types** — a fixed length, or a length indicator whose wire form follows the profile's `length` axis (ASCII digits, packed BCD, 1–2 binary bytes, or EBCDIC digits):
 
 | len_type | Prefix width (digits) | Example |
 |---|---|---|
@@ -89,9 +92,8 @@ Field **type classes** (validated in `_charset_ok` in the worker codec and
 | `llllvar` | 4 | supported by both codecs |
 | `lllllvar` | 5 | supported by both codecs |
 
-All five are handled in both codecs (`{"llvar": 2, "lllvar": 3, "llllvar": 4,
-"lllllvar": 5}` in `packages/worker/adapters/tcp/iso8583.py` and
-`_prefix_width` in the analyzer).
+All five are handled by the one codec (`LEN_PREFIX` in
+`packages/payprobe_common/iso8583/codec.py`).
 
 ### 1.4 Dialects = MessageFormats (the format registry)
 
@@ -99,11 +101,13 @@ A "dialect" is a concrete DE table + MTI list + presence matrix. In PayProbe tha
 **MessageFormat**: model in `packages/scenario-service/models/message_format.py`,
 persistence in `packages/scenario-service/api/format_store.py` (builtin seeds live in
 code; user formats are file-backed and may override a builtin id). Builtins
-(`BUILTIN_FORMATS`), all `encoding: "ascii"`, all cloneable:
+(`BUILTIN_FORMATS`), all cloneable; `definition.encoding` is the wire profile the
+bound simulator and the packing steps use (ADR-0011):
 
 | id | What it is |
 |---|---|
-| `iso8583-1987` | Standard 1987-style ASCII field table |
+| `iso8583-1987` | The 50-DE 1987 directory (`payprobe_common.iso8583.ISO8583_1987`), `encoding: ascii` |
+| `iso8583-binary` | The same 1987 table under the representative `binary` profile (binary bitmap, BCD numerics + MTI, raw binary fields, BCD length indicators). A profile, not a scheme spec; clone and adjust axes / per-field overrides to match a host |
 | `iso8583-1993` | 1993 changes: DE 22 → 12-char POS Data Code, DE 39 → 3-char Action Code, DE 56 message reason |
 | `visa-base1` | DE table for the bundled VISA Base I simulator (1987 core + VISA-touched DEs 43/44/48/54/60/62/63/90/95; DE 62/63 opaque) |
 | `iso20022-pacs008` | ISO 20022 `pacs.008.001.08` (XML, not 8583) |
@@ -112,21 +116,37 @@ Simulators can **bind a MessageFormat** for inbound validation (warn/reject), an
 tcp_iso8583 send_message steps carry a dialect picker whose fields override the
 default table.
 
-### 1.5 Encodings — what is ASCII-only and what is not
+### 1.5 Encodings — the wire profile (ADR-0011, built 2026-09-24)
 
-- **On the wire** (TcpAdapter/TcpResponder), the codec is **ASCII-only**: ASCII MTI,
-  ASCII-hex bitmaps, ASCII decimal length prefixes, values as ASCII text
-  (`packages/worker/adapters/tcp/iso8583.py`, stated in its module docstring).
-  A binary/BCD/EBCDIC production host will NOT interoperate over a live PayProbe
-  TCP connection. This is the highest-impact standards gap (see §9).
-- **In the Inspector/analyzer only**, byte-level profiles exist:
-  `resolve_encoding()` in `packages/scenario-service/models/iso8583_analyzer.py`
-  accepts `"ascii"` (default), `"binary"` (binary bitmap + packed-BCD numerics +
-  raw binary fields + BCD length prefixes), or a dict overriding individual axes
-  (`bitmap/numeric/text/binary/length`, incl. `text: "ebcdic"`). `iso_pack_bytes` /
-  `_dec_field_bytes` implement it, and the `/iso8583/analyze` + `/iso8583/build`
-  request models take an `encoding` argument. So you can *analyze/build* binary
-  messages offline, but not *speak* them on a socket.
+One profile drives the wire, the Inspector and the code-step defaults. It is a
+name (`"ascii"`, the default and the historical behaviour; `"binary"`) or an axis
+dict overriding the ASCII profile:
+
+| Axis | Values | Governs |
+|---|---|---|
+| `bitmap` | `hex` \| `binary` \| `ebcdic` | 16 hex chars, 8 raw bytes, or hex chars in EBCDIC |
+| `numeric` | `ascii` \| `bcd` \| `ebcdic` | `n` fields, and the MTI unless `mti` says otherwise |
+| `text` | `ascii` \| `ebcdic` | `a` / `an` / `ans` / `z` fields (EBCDIC = cp037) |
+| `binary` | `hex` \| `raw` | `b` fields as hex text or raw bytes |
+| `length` | `ascii` \| `bcd` \| `binary` \| `ebcdic` | the LL / LLL indicators |
+| `mti` | `ascii` \| `bcd` \| `ebcdic` | optional; defaults to `bcd` when `numeric` is `bcd` |
+
+A field spec may carry its own `encoding` override for `numeric` / `text` /
+`binary` / `length`, plus `pad` (`left` default, `right`), `pad_nibble` (`0` /
+`F`) for odd BCD digit counts, and `separator` (`D` default) for a BCD-packed
+track-2 field (a `z` field is BCD only when *its own* override says so).
+
+Where the profile comes from on the live path (`wire_encoding_from_config`):
+the config's top-level `encoding` wins (that is where the orchestrator injects a
+bound Message Format's `definition.encoding`, flag `PAYPROBE_ISO8583_FORMAT_ENCODING`,
+default on); otherwise the legacy `framing.encoding` text codec is folded
+(`ascii`/`utf-8`/`latin-1` → ascii profile, `cp037`/`ebcdic` → `text: ebcdic`);
+an unknown value or a disagreeing pair is refused before anything binds.
+`framing.length_encoding` (`binary` | `ascii` | `bcd`) is the *frame* length
+prefix and is separate from the body profile. Proof that a binary host
+interoperates over a live socket: `packages/worker/tests/test_iso8583_binary_wire.py`.
+Unknown-DE decodes stop with `truncated: true` + `error`; a structurally broken
+message raises `Iso8583DecodeError`.
 
 ### 1.6 Where ISO 8583 lives (map)
 

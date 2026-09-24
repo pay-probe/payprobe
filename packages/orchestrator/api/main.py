@@ -790,14 +790,16 @@ _CONNECTION_OVERRIDE_WINS = os.environ.get(
     "PAYPROBE_CONNECTION_OVERRIDE_WINS", "1"
 ).lower() not in ("0", "false", "no")
 
-#: ADR-0011 phase 3 — when set, a simulator bound to a Message Format also takes
-#: the format's wire ``encoding`` profile (binary bitmap / BCD / EBCDIC …), so a
-#: dialect declared binary really binds binary. Default OFF until a real
-#: environment has run under it (phase 5 flips it); a format whose ``encoding``
-#: disagrees with the config's own ``encoding`` is refused (400) either way.
+#: ADR-0011 — a simulator bound to a Message Format also takes the format's wire
+#: ``encoding`` profile (binary bitmap / BCD / EBCDIC …), so a dialect declared
+#: binary really binds binary, and a format whose ``encoding`` disagrees with
+#: the config's own is refused (400). Default ON since 2026-09-24 (phase 5, after
+#: a real-environment run against the live registry). Escape hatch: set
+#: ``PAYPROBE_ISO8583_FORMAT_ENCODING=0`` to restore the pre-ADR posture (only
+#: the DE table and presence matrix bind; a disagreement is logged, not refused).
 _ISO8583_FORMAT_ENCODING = os.environ.get(
-    "PAYPROBE_ISO8583_FORMAT_ENCODING", "0"
-).lower() in ("1", "true", "yes")
+    "PAYPROBE_ISO8583_FORMAT_ENCODING", "1"
+).lower() not in ("0", "false", "no")
 
 #: Default-connection model — now the DEFAULT (docs/history/DEFAULT-CONNECTION-MODEL-SPEC.md).
 #: An action step that names NO connection resolves to the **default connection**

@@ -33,6 +33,15 @@ built from public knowledge and PayProbe's existing code.
 VISA Base I is ISO 8583, so the wire and framing are unchanged from the generic
 ISO responder. Only the *reply decision* is VISA-specific.
 
+**Wire encoding.** The simulator speaks whatever profile its bound Message
+Format declares (ADR-0011): `visa-base1` is ASCII; bind `iso8583-binary` (or a
+clone of `visa-base1` with `definition.encoding` set to `binary` or an axis
+dict) and the same flows run over a binary bitmap, packed-BCD numerics and BCD
+length indicators, typically with `framing.length_encoding: "bcd"`. A config
+whose own `encoding` / legacy `framing.encoding` disagrees with the bound format
+is refused at start. The binary flow set is exercised in
+`packages/worker/tests/test_iso8583_binary_wire.py`.
+
 | Request | Response | Flow | Default behaviour |
 |---|---|---|---|
 | `0100` | `0110` | Authorization request | Stand-in approve, or decline per rules |
