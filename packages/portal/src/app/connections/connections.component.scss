@@ -327,6 +327,115 @@
   }
 }
 
+/* sub-headings inside an adapter block */
+.sub-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted, var(--color-text));
+
+  pp-icon {
+    color: var(--brand, var(--color-primary));
+  }
+
+  small {
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+  }
+}
+
+/* stacked checkbox rows under one label */
+.fld--stack {
+  gap: 6px;
+}
+
+.chkrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+/* what this connection does, in one line */
+.flow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border: 1px solid
+    color-mix(in srgb, var(--brand, var(--color-primary)) 35%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--brand, var(--color-primary)) 7%,
+    transparent
+  );
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+
+  pp-icon {
+    flex: none;
+    margin-top: 2px;
+    color: var(--brand, var(--color-primary));
+  }
+}
+
+/* what happens at connect: numbered steps */
+.timeline {
+  list-style: none;
+  counter-reset: step;
+  margin: 8px 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    counter-increment: step;
+
+    &::before {
+      content: counter(step);
+      flex: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: color-mix(
+        in srgb,
+        var(--brand, var(--color-primary)) 14%,
+        transparent
+      );
+      color: var(--brand, var(--color-primary));
+      font-size: 10px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+    }
+  }
+
+  &__ico {
+    flex: none;
+    display: inline-flex;
+    margin-top: 2px;
+    color: var(--color-text-muted, var(--color-text));
+  }
+}
+
 /* inline hint under a section (framing example) */
 .hint {
   display: flex;

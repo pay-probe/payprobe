@@ -403,6 +403,140 @@ export class ConnectionsComponent implements OnInit {
     }
   }
 
+  /** How a reply finds its request, in one sentence. */
+  correlationExplain(d: Connection): string {
+    const c = d.correlation;
+    const de = c.field || "11";
+    const parts = [
+      `A reply is matched to the request that carries the same DE ${de}` +
+        (c.autoGenerate && de === "11"
+          ? " (a fresh STAN is generated when the step sets none)"
+          : "") +
+        (c.matchMti
+          ? " and whose MTI is the request's + 10 (0200 → 0210)"
+          : "") +
+        ".",
+      `A request waits ${d.responseTimeoutSec} s for it; a reply nothing is waiting for is logged and dropped.`,
+    ];
+    return parts.join(" ");
+  }
+
+  /** What happens at connect, as steps. */
+  sessionSteps(d: Connection): { icon: string; text: string }[] {
+    const inbound = d.mode === "inbound";
+    const steps: { icon: string; text: string }[] = [];
+    if (inbound) {
+      steps.push({
+        icon: "server",
+        text: `Bind ${d.host || "0.0.0.0"}:${d.port || "a free port"} and accept clients; every client gets its own session.`,
+      });
+    } else {
+      steps.push({
+        icon: "send",
+        text:
+          `Dial ${d.host || "the host"}:${d.port || "?"}, giving up after ${d.connectTimeoutSec} s` +
+          (d.poolSize && d.poolSize > 1
+            ? `, ${d.poolSize} sockets in rotation`
+            : "") +
+          ".",
+      });
+    }
+    if (d.protocol === "iso8583") {
+      steps.push(
+        d.signOn
+          ? {
+              icon: "key",
+              text: inbound
+                ? "Expect a sign-on (0800) from the client and answer it (0810) before traffic."
+                : "Send a sign-on (0800 network management) and wait for the 0810 before any request.",
+            }
+          : {
+              icon: "minus",
+              text: "No sign-on: traffic starts on the first request.",
+            },
+      );
+      steps.push(
+        d.keepalive.enabled
+          ? {
+              icon: "activity",
+              text: `Every ${d.keepalive.intervalSec} s of silence, ${inbound ? "answer the client's" : "send an"} echo (0800) so the link is known alive.`,
+            }
+          : {
+              icon: "minus",
+              text: "No keep-alive: an idle link is not probed.",
+            },
+      );
+    }
+    steps.push({
+      icon: "clock",
+      text: inbound
+        ? `Each request is answered by the participant flow; a client that goes quiet is dropped when the socket closes.`
+        : `Each request waits ${d.responseTimeoutSec} s for its correlated reply, then fails the step as a timeout.`,
+    });
+    steps.push({
+      icon: "undo",
+      text: inbound
+        ? "Stopping the network closes the listener and every client session."
+        : "A dropped socket fails in-flight requests; the next step reconnects and signs on again.",
+    });
+    return steps;
+  }
+
+  /** How messages move for a NATS connection, given its direction. */
+  natsFlow(d: Connection): string {
+    const n = d.nats;
+    const broker = n.servers?.trim()
+      ? n.servers.trim().split(/\s+/).length + " servers"
+      : `${d.host || "the broker"}:${d.port || 4222}`;
+    const codec =
+      n.codec === "iso8583"
+        ? "ISO 8583"
+        : n.codec === "bytes"
+          ? "raw bytes"
+          : "JSON";
+    if (d.mode === "inbound") {
+      const subs = (n.subjects || "")
+        .split(/[\n,]/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      return (
+        `Connects to ${broker} and subscribes to ${subs.length ? subs.join(", ") : "its subjects"}` +
+        (n.queueGroup
+          ? ` in queue group “${n.queueGroup}” (instances share the load)`
+          : "") +
+        `; each message is decoded as ${codec}, handled by the participant flow and answered on the reply subject.` +
+        (n.jetstreamStream
+          ? ` Messages are also durable on JetStream stream ${n.jetstreamStream}.`
+          : "")
+      );
+    }
+    return (
+      `Connects to ${broker} and requests on “${n.subject || "the subject"}” as ${codec}, waiting ${n.requestTimeoutSec} s for a reply on the inbox.` +
+      (n.jetstreamStream
+        ? ` Publishes land on JetStream stream ${n.jetstreamStream}.`
+        : "")
+    );
+  }
+
+  /** What a gRPC connection does in one line. */
+  grpcSummary(d: Connection): string {
+    const g = d.grpc;
+    const schema =
+      g.schemaSource === "descriptor"
+        ? "schema from a descriptor set"
+        : g.schemaSource === "proto"
+          ? `schema from ${g.protoFiles.length || "the"} .proto file${g.protoFiles.length === 1 ? "" : "s"}`
+          : "schema discovered by server reflection at connect";
+    return (
+      `Calls ${g.target || "the target"} over ${g.tlsEnabled ? "TLS" : "plaintext"}, ${schema}, ` +
+      `${g.actions.length} named action${g.actions.length === 1 ? "" : "s"}` +
+      (g.metadata.length
+        ? `, ${g.metadata.length} metadata header${g.metadata.length === 1 ? "" : "s"} on every call`
+        : "") +
+      `, ${g.timeoutSec} s per call.`
+    );
+  }
+
   private fmtVal(v: unknown): string {
     if (v === undefined) return "—";
     if (v !== null && typeof v === "object") return JSON.stringify(v);
