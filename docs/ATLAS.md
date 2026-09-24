@@ -436,7 +436,9 @@ at all (the branch alone triggers nothing), quotas beyond the per-agent daily
 budget and David's defaults for `AGENT_LOAD_APPROVAL_TPS` / budgets,
 insight-service as a first-class agent tool, retiring the `assistant` alias
 container, the ADR status flip to Accepted after David's security review and
-Go/No-Go. The honest gate here is the same as insight-service's: if the
+Go/No-Go (all done by 2026-09-24: the review found 17 real gaps, fixed on
+the branch with tests, David reviewed it and gave the Go; the ADR is
+Accepted). The honest gate here is the same as insight-service's: if the
 agents' findings are not acted on within a few weeks of running, the schedule
 is a cost with no reader and should be turned off, not defended.
 
@@ -518,7 +520,8 @@ signed webhook emission + a diagnostics providers layer; portal presets owed a
 host build), 0010 agent registry + orchestration (proposed; phases 1 to 4
 built 2026-09-23 on branch `adr-0010`: registry, heartbeats, workflow engine
 with approvals, wake sources, alert webhook, egress allowlist, injection pack;
-status flips to Accepted after David's review; handoff in
+phase 5 and the security review followed on 2026-09-24 and the ADR is
+Accepted on David's Go/No-Go; handoff in
 `docs/history/2026-09-23-agent-hub-handoff.md`). The finished build specs of the major
 subsystems live in `docs/history/`, in the order they landed;
 `docs/history/PROGRESS.md` and `docs/history/project-review.md` capture the

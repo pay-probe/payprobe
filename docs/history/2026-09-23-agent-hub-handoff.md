@@ -446,9 +446,9 @@ correctly), and `certification-plan` was blocked by the reviewer for real
 defects in the plan. CI is green on the review commit `cd3b9239`. Write-through journalling
 landed after it (`ChangeJournal.on_record` → `store.append_journal` /
 `append_node_journal`, record-before-write in every update and delete
-handler, `record_heartbeat` never resurrects a failed row). The sign-off page of the run used for the click-through showed no "Agent verdicts" section because that run was never certified (the section renders from a snapshot). Still David's: deciding that approval in the inbox,
-the Go/No-Go on the review, the status flip and the merge of PR #2, the
-alert-webhook URL, rebuilding the agent-hub image on the stack (the fixes
+handler, `record_heartbeat` never resurrects a failed row). The sign-off page of the run used for the click-through showed no "Agent verdicts" section because that run was never certified (the section renders from a snapshot). David reviewed the security document and accepted it on 2026-09-24 (Go);
+the ADR status is Accepted. Still David's: deciding that approval in the
+inbox, the merge of PR #2, the alert-webhook URL, rebuilding the agent-hub image on the stack (the fixes
 are on the branch, not deployed), and the `nats-demo-net` driver repoint
 (`PUT /network-flows/nats-demo-net` with `scn-1dfe7190`; a live-registry
 write this session left to him).

@@ -12,6 +12,8 @@ each fix has a test that encodes the exploit.
 the branch (`agent-hub` suite 185 → 205 tests, green twice in a row). What is
 accepted as designed, and what stays owed, is listed at the end. The Go/No-Go
 itself is David's; this document is the input to it.
+**Decision:** David reviewed this document and accepted it on 2026-09-24
+(Go). ADR-0010 is Accepted from that date.
 
 ## 1. Findings fixed on the branch
 

@@ -30,7 +30,7 @@ product.
 | `packages/auth-service` | JWT auth + users/roles | 8300 |
 | `packages/payprobe-assistant` | LLM-gateway assistant (REST-backed), a library mounted inside agent-hub at `/assistant` (ADR-0010 D2); the standalone :8400 container was removed 2026-09-23, nginx `/api/assistant/` → agent-hub | (8600) |
 | `packages/insight-service` | Advisory ML insights: failure categorization + explanation + outcome prediction (ADR-0005; read-only, advise-only) | 8500 |
-| `packages/agent-hub` | Agents (ADR-0010): registry of versioned agent principals and JSON-DAG workflows, heartbeat runner with journal/revert, workflow engine with human approvals, wake sources (portal, MCP, schedule, orchestrator events, signed inbound webhooks), alert webhook, LLM egress allowlist, hub-wide quotas, deterministic post-checks (regression vs run history), insight/run-history tools; also serves the folded-in assistant at `/assistant`; PostgreSQL only (phases 1 to 5 built 2026-09-23; security review 2026-09-24 with 17 fixes on the branch, see `docs/history/2026-09-24-adr-0010-security-review.md`; David's Go/No-Go and the status flip owed) | 8600 |
+| `packages/agent-hub` | Agents (ADR-0010): registry of versioned agent principals and JSON-DAG workflows, heartbeat runner with journal/revert, workflow engine with human approvals, wake sources (portal, MCP, schedule, orchestrator events, signed inbound webhooks), alert webhook, LLM egress allowlist, hub-wide quotas, deterministic post-checks (regression vs run history), insight/run-history tools; also serves the folded-in assistant at `/assistant`; PostgreSQL only (phases 1 to 5 built 2026-09-23; security review 2026-09-24 with 17 fixes on the branch, see `docs/history/2026-09-24-adr-0010-security-review.md`; ADR Accepted 2026-09-24 on David's Go/No-Go) | 8600 |
 | `packages/payprobe_common` | Shared: `agent_toolkit` (tool layer + scoped dispatch), `rest_backend`, `llm_provider`, `crypto` (SecretBox) | — |
 | `packages/report_service` | Shared report/gates/provenance library (orchestrator imports it) | — |
 | `packages/portal` | Angular 22 UI (standalone components, signals, `pp-*` design system) | 4200 |
@@ -183,9 +183,9 @@ in `docs/adr/`.
   registry + orchestration) proposed, phases 1 to 5 built 2026-09-23 (registry,
   heartbeats, workflow engine + approvals, wake sources, alert webhook, egress
   allowlist, injection pack, quotas, regression post-check, insight tools,
-  sign-off annotation, assistant alias removed); status flips to Accepted
-  after David's security review and Go/No-Go; statuses in the files are kept
-  truthful.
+  sign-off annotation, assistant alias removed), security review 2026-09-24
+  and **Accepted** the same day on David's Go/No-Go; statuses in the files
+  are kept truthful.
 - `.claude/skills/payprobe-run-and-operate`, `payprobe-config-and-flags` and
   `payprobe-agents` — operator-grade API/env-flag/agent reference, kept current.
 - `docs/history/` — finished build specs, plans and working notes (accurate at
