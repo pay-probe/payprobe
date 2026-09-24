@@ -198,7 +198,7 @@ def test_full_mode_needs_approval_ancestor_outside_mock():
     # no approval anywhere → refused
     wf = _wf([apply], [])
     p = validate_workflow_spec(wf, _registry(cfg="full"))
-    assert p and "needs an approval node before it" in p[0]
+    assert p and "needs an approval node" in p[0]
     # approval as a sibling, not an ancestor → still refused
     wf = _wf(
         [apply, {"id": "gate", "type": "approval", "roles": ["admin"]}],

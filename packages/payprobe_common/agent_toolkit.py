@@ -30,8 +30,11 @@ Design notes
 """
 from __future__ import annotations
 
+import math as _math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
+
+from .crypto import fingerprint, is_secret_key
 
 
 class GuardrailError(Exception):
@@ -1008,14 +1011,36 @@ def _start_load_run(ctx: ToolContext, args: dict) -> Any:
 #: runtime state, captured traffic, simulator output, model advice. Their
 #: results are wrapped as untrusted so a runner never treats content found in
 #: them as instructions (prompt-injection boundary).
-UNTRUSTED_RESULT_TOOLS: frozenset[str] = frozenset({
-    "platform_status", "list_runs", "get_run_regression", "list_network_runs",
-    "list_running_participants", "list_running_simulators",
-    "list_load_runs", "get_load_run", "get_run_insights",
-    "list_insight_predictions", "insight_status", "get_scenario_prediction",
-    "list_insight_categories", "train_insights", "run_trend", "run_flakiness",
-    "playground_targets", "playground_execute",
-})
+#:
+#: Since the ADR-0010 security review (2026-09-24) this is every read and
+#: execute tool: registry content is authored by users and by other agents
+#: (a scenario description is as good a place for an injected directive as a
+#: captured message), so nothing a tool returns is ever an instruction.
+UNTRUSTED_RESULT_TOOLS: frozenset[str] = frozenset(
+    n for n, t in REGISTRY.items() if t.tier in ("read", "execute")
+)
+
+
+def mask_secrets(node: Any) -> Any:
+    """Deep copy of ``node`` with every non-empty string under a secret-named
+    key (``password``, ``api_key``, ``*_secret``, ...; see
+    :func:`payprobe_common.crypto.is_secret_key`) replaced by
+    ``<secret:fingerprint>``. Applied to every tool result before the model
+    sees it and to heartbeat records before an API caller does: a credential
+    the registry holds never reaches an LLM provider or a viewer (CLAUDE.md
+    invariant #8). The journal keeps plaintext, SecretBox-encrypted at rest,
+    because restore needs the real value."""
+    if isinstance(node, dict):
+        out: dict = {}
+        for k, v in node.items():
+            if is_secret_key(str(k)) and isinstance(v, str) and v:
+                out[k] = f"<secret:{fingerprint(v)}>"
+            else:
+                out[k] = mask_secrets(v)
+        return out
+    if isinstance(node, list):
+        return [mask_secrets(v) for v in node]
+    return node
 
 #: Arg names that name a project or an environment (top level, or one level
 #: down inside ``spec`` / ``target``), used by the write-scope check.
@@ -1067,7 +1092,7 @@ def _scope_values(args: dict, keys: tuple[str, ...]) -> list[str]:
         v = args.get(k)
         if isinstance(v, str) and v:
             found.append(v)
-    for nested in ("spec", "target"):
+    for nested in ("spec", "target", "extra"):  # `extra` is merged into the load body
         inner = args.get(nested)
         if isinstance(inner, dict):
             for k in keys:
@@ -1124,22 +1149,28 @@ def _cap_result(result: Any, cap: int) -> tuple[Any, bool]:
 
 #: the one tool that fires real traffic; its rate knobs, top level or in `extra`
 _LOAD_TOOL = "start_load_run"
-_LOAD_RATE_KEYS = ("target_tps", "end_tps", "spike_tps", "start_tps")
+_LOAD_RATE_KEYS = ("target_tps", "end_tps", "spike_tps", "start_tps", "base_tps")
 
 
 def requested_tps(args: dict) -> float:
-    """The highest rate a ``start_load_run`` call asks for (0 if none)."""
+    """The highest rate a ``start_load_run`` call asks for (0 if none). A
+    nan/inf value, which would slip past every ``> cap`` comparison, counts
+    as unbounded."""
     peak = 0.0
     for holder in (args, args.get("extra") if isinstance(args.get("extra"), dict) else {}):
         for k in _LOAD_RATE_KEYS:
             v = holder.get(k)
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                peak = max(peak, float(v))
-            elif isinstance(v, str):
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, str):
                 try:
-                    peak = max(peak, float(v))
+                    v = float(v)
                 except ValueError:
-                    pass
+                    continue
+            if isinstance(v, (int, float)):
+                if not _math.isfinite(float(v)):
+                    return float("inf")
+                peak = max(peak, float(v))
     return peak
 
 
@@ -1170,8 +1201,9 @@ def scoped_dispatch(ctx: ToolContext, scope: ToolScope, name: str,
       "describe it in your plan" hint so the runner can record a *proposed*
       call instead;
     * write/execute calls are checked against the write scope;
-    * results are capped and, for :data:`UNTRUSTED_RESULT_TOOLS`, wrapped as
-      ``{"kind": "untrusted", "source": <tool>, "data": ...}``.
+    * results have secret-named values masked (:func:`mask_secrets`), are
+      capped and, for :data:`UNTRUSTED_RESULT_TOOLS` (every read and execute
+      tool), wrapped as ``{"kind": "untrusted", "source": <tool>, "data": ...}``.
     """
     args = args or {}
     if name not in scope.allow:
@@ -1188,7 +1220,7 @@ def scoped_dispatch(ctx: ToolContext, scope: ToolScope, name: str,
             return {"tool": name, "ok": False, "guardrail": True, "error": reason}
     out = dispatch(ctx, name, args, tiers=scope.tiers)
     if out.get("ok"):
-        result, truncated = _cap_result(out.get("result"), scope.result_cap)
+        result, truncated = _cap_result(mask_secrets(out.get("result")), scope.result_cap)
         if name in UNTRUSTED_RESULT_TOOLS:
             result = {"kind": "untrusted", "source": name, "data": result}
         out["result"] = result

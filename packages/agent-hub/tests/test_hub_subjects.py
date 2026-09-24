@@ -37,8 +37,9 @@ def test_wake_records_explicit_or_inferred_subject_and_lists_by_it(client):
     explicit = client.post(
         "/agents/observer/wake", json={"input": "please look", "subject": "run:run-42"}
     ).json()
+    _wait_done(client, explicit["id"])  # else the next wake coalesces onto this one
     untargeted = client.post("/agents/observer/wake", json={"input": "general look"}).json()
-    for hb in (inferred, explicit, untargeted):
+    for hb in (inferred, untargeted):
         _wait_done(client, hb["id"])
     assert client.get(f"/heartbeats/{inferred['id']}").json()["subject"] == "run:run-42"
     assert client.get(f"/heartbeats/{explicit['id']}").json()["subject"] == "run:run-42"

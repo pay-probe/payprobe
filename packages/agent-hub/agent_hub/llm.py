@@ -81,6 +81,18 @@ class FakeLLMBackend:
         return {"text": entry.get("text") or "", "tool_calls": calls}
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect: a provider answer is 2xx or an error."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        raise urllib.error.HTTPError(
+            req.full_url, code, f"redirect to {newurl} refused (egress fence)", headers, fp
+        )
+
+
+_NO_REDIRECT = urllib.request.build_opener(_NoRedirect)
+
+
 def _post_json(url: str, headers: dict, body: dict) -> dict:
     # The one place a prompt leaves agent-hub: refuse hosts outside the egress
     # allowlist before anything is sent (a refusal fails the heartbeat, which
@@ -94,7 +106,9 @@ def _post_json(url: str, headers: dict, body: dict) -> dict:
         headers={"Content-Type": "application/json", **headers},
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        # no redirects: the default opener would follow a 3xx to any host
+        # with the API key still attached, past the fence checked above
+        with _NO_REDIRECT.open(req, timeout=60) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:300]

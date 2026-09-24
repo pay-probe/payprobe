@@ -30,7 +30,7 @@ product.
 | `packages/auth-service` | JWT auth + users/roles | 8300 |
 | `packages/payprobe-assistant` | LLM-gateway assistant (REST-backed), a library mounted inside agent-hub at `/assistant` (ADR-0010 D2); the standalone :8400 container was removed 2026-09-23, nginx `/api/assistant/` → agent-hub | (8600) |
 | `packages/insight-service` | Advisory ML insights: failure categorization + explanation + outcome prediction (ADR-0005; read-only, advise-only) | 8500 |
-| `packages/agent-hub` | Agents (ADR-0010): registry of versioned agent principals and JSON-DAG workflows, heartbeat runner with journal/revert, workflow engine with human approvals, wake sources (portal, MCP, schedule, orchestrator events, signed inbound webhooks), alert webhook, LLM egress allowlist, hub-wide quotas, deterministic post-checks (regression vs run history), insight/run-history tools; also serves the folded-in assistant at `/assistant`; PostgreSQL only (phases 1 to 5 built 2026-09-23; David's review, Go/No-Go and the status flip owed) | 8600 |
+| `packages/agent-hub` | Agents (ADR-0010): registry of versioned agent principals and JSON-DAG workflows, heartbeat runner with journal/revert, workflow engine with human approvals, wake sources (portal, MCP, schedule, orchestrator events, signed inbound webhooks), alert webhook, LLM egress allowlist, hub-wide quotas, deterministic post-checks (regression vs run history), insight/run-history tools; also serves the folded-in assistant at `/assistant`; PostgreSQL only (phases 1 to 5 built 2026-09-23; security review 2026-09-24 with 17 fixes on the branch, see `docs/history/2026-09-24-adr-0010-security-review.md`; David's Go/No-Go and the status flip owed) | 8600 |
 | `packages/payprobe_common` | Shared: `agent_toolkit` (tool layer + scoped dispatch), `rest_backend`, `llm_provider`, `crypto` (SecretBox) | — |
 | `packages/report_service` | Shared report/gates/provenance library (orchestrator imports it) | — |
 | `packages/portal` | Angular 22 UI (standalone components, signals, `pp-*` design system) | 4200 |
@@ -124,9 +124,16 @@ in `docs/adr/`.
 10. **No agent side effect without journal and gate.** Every agent write is a
     journalled toolkit write (invariant #2 applies); `plan` mode records
     *proposed* calls instead of executing; `full` mode outside `mock` needs an
-    `approval` node before it, checked when a workflow is published. Agents
-    are autonomous only inside one bounded heartbeat (per-wake limits, daily
-    budget = schedulability, global pause).
+    `approval` node on **every path** to it, checked when a workflow is
+    published and again by the engine over the edges that actually fired
+    (a gate a condition skipped, or one crossed on its `rejected` edge, gates
+    nothing). A `full` heartbeat needs a human behind it: a user with an
+    invoke role, or an approved gate; service tokens and event / schedule /
+    webhook wakes are refused, and a `full` agent cannot carry an unattended
+    trigger. Agents are autonomous only inside one bounded heartbeat (per-wake
+    limits, daily budget = schedulability, global pause, which stops tool
+    nodes too). Secret-named values are masked before any model or API viewer
+    sees them (invariant #8 applies to heartbeat records).
 
 ## Operational gotchas
 

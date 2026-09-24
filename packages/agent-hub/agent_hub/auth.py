@@ -15,7 +15,13 @@ Two credential kinds are accepted:
   claims stashed on ``request.state.auth``.
 
 Fails closed: if nothing is configured and we are not in an explicit dev/test
-environment, every request is rejected (503) rather than served open.
+environment, every request is rejected (503) rather than served open. The
+compose placeholder secret counts as "nothing configured" outside dev.
+
+Two token kinds are never accepted here: an on-behalf-of token agent-hub
+minted for a heartbeat (``act`` claim; agents never call agent-hub, so one
+presented at this door is a leak), and, for the routes that are a human's act
+(approve, revert, pause), a service credential (static bearer or ``svc`` JWT).
 
 Environment:
     PAYPROBE_ENV          dev | development | test | local → auth optional;
@@ -35,6 +41,9 @@ from typing import Any
 from fastapi import Header, HTTPException, Request, status
 
 _DEV_ENVS = {"dev", "development", "test", "local"}
+
+#: the placeholder every compose file falls back to; never a real secret
+INSECURE_DEFAULT_SECRET = "dev-insecure-change-me"
 
 #: Liveness + API reference stay open; everything else is gated.
 PUBLIC_PATHS: set[str] = {"/health", "/assistant/health", "/openapi.json", "/docs", "/redoc"}
@@ -74,6 +83,8 @@ def _verify_jwt(token: str) -> dict[str, Any] | None:
         kwargs["audience"] = aud
     if iss := os.environ.get("AUTH_JWT_ISSUER"):
         kwargs["issuer"] = iss
+    if token.count(".") != 2:
+        return None  # not a JWT at all: let the static-bearer comparison decide
     try:
         return jwt.decode(token, key, **kwargs)
     except Exception as exc:  # noqa: BLE001 - any verify failure ⇒ 401
@@ -90,6 +101,12 @@ def _check(authorization: str | None) -> dict[str, Any] | None:
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "auth is not configured; refusing to serve (set API_TOKEN or "
             "AUTH_JWT_SECRET, or PAYPROBE_ENV=dev to bypass)",
+        )
+    if not _is_dev() and os.environ.get("AUTH_JWT_SECRET") == INSECURE_DEFAULT_SECRET:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "AUTH_JWT_SECRET is the compose placeholder; refusing to serve outside dev "
+            "(anyone who has read the repo could mint an admin token)",
         )
 
     if not authorization or not authorization.startswith("Bearer "):
@@ -117,17 +134,35 @@ async def require_auth(request: Request, authorization: str | None = Header(defa
     # body (AGENT_HUB_WEBHOOK_SECRET), verified by the route itself.
     if request.url.path.startswith("/webhooks/"):
         return
-    request.state.auth = _check(authorization)
+    claims = _check(authorization)
+    if claims and claims.get("act"):
+        # a heartbeat's on-behalf-of token: valid downstream, never at this door
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "on-behalf-of tokens are not accepted by agent-hub"
+        )
+    request.state.auth = claims
 
 
-def require_roles(request: Request, roles: list[str] | set[str]) -> dict[str, Any]:
+def require_roles(
+    request: Request, roles: list[str] | set[str], *, human: bool = False
+) -> dict[str, Any]:
     """Return the caller's claims if they carry one of ``roles``.
 
     Dev mode, the static service bearer and minted service JWTs (``svc``)
-    pass — same trust model as the material endpoints in scenario-service.
-    A user JWT must carry an intersecting ``roles`` claim; otherwise 403."""
+    pass (the trust model of the material endpoints in scenario-service),
+    except where ``human`` is set: deciding an approval, reverting a
+    heartbeat and pausing the hub are a person's act, so a service credential
+    is 403 there. A user JWT must carry an intersecting ``roles`` claim."""
     claims = getattr(request.state, "auth", None) or {}
-    if claims.get("dev") or claims.get("static") or claims.get("svc"):
+    if claims.get("dev"):
+        return claims
+    if claims.get("static") or claims.get("svc"):
+        if human:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "this is a human's act: a user token with one of roles "
+                f"{', '.join(sorted(roles))} is required, not a service credential",
+            )
         return claims
     have = set(claims.get("roles") or [])
     if have & set(roles):

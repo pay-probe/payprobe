@@ -1,9 +1,16 @@
 """Workflow engine (ADR-0010 phase 3): a persisted state machine over the DAG.
 
 A run is a row in ``agent_hub_runs`` whose ``node_states`` and ``results`` are
-the whole truth: every step is written before the next one starts, so a
-process that dies mid-run is resumed by :meth:`Engine.reconcile` from the row
-alone. Nothing lives only in memory except the per-run asyncio lock.
+the whole truth: the row is saved after every node that starts or finishes, so
+a process that dies mid-run is resumed by :meth:`Engine.reconcile` from the
+row alone. Nothing lives only in memory except the per-run asyncio lock.
+
+The human gate is enforced here as well as at publish time (ADR-0010 D3): a
+``full``-mode task or a write/execute ``tool`` node outside ``mock`` runs only
+when every edge that actually fired into it descends from an ``approval`` that
+a human decided ``approved`` in this run. A gate a condition skipped, one
+reached on its ``rejected`` edge, or an agent republished as ``full`` after
+the workflow was validated therefore never executes a write.
 
 Node semantics:
 
@@ -42,11 +49,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from payprobe_common import agent_toolkit as tk
+from payprobe_common.crypto import default_box
 
 from .alerts import Alerter, extract_json
 from .exprs import ExpressionError, evaluate, render
 from .models import END, MODE_RANK, AgentSpec, Edge, Node, WorkflowSpec
 from .store import Conflict, NotFound, RegistryStore
+from .validate import MOCK_ENVIRONMENTS
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +116,11 @@ class Engine:
     async def tick(self) -> None:
         for ap in await self.store.expire_approvals():
             await self._approval_expired(ap)
+        # the restart watchdog, on the tick as well as at startup: a heartbeat
+        # orphaned inside its wall clock would otherwise stand until the next
+        # restart, and every run waiting on it with it
+        for hb in await self.store.reconcile_running():
+            self.alerts.emit_for(hb, mode=None)
 
     def stop(self) -> None:
         if self._ticker:
@@ -159,7 +173,13 @@ class Engine:
                 "node_states": {n.id: {"status": "pending"} for n in spec.nodes},
                 "results": {},
                 "invoked_by": str(caller.get("sub") or "anonymous"),
-                "principal": {"sub": caller.get("sub"), "roles": caller.get("roles") or []},
+                # what the heartbeat launcher needs to tell a human from a
+                # service: sub, roles, and the dev/test marker (never svc/static)
+                "principal": {
+                    "sub": caller.get("sub"),
+                    "roles": caller.get("roles") or [],
+                    **({"dev": True} if caller.get("dev") else {}),
+                },
             }
         )
         await self.advance(run["id"])
@@ -243,14 +263,36 @@ class Engine:
                         continue
                     await self._start_node(run, spec, node, states, results)
                     moved = True
+                    # persist before the next node: a tool node has already
+                    # written and journalled, an agent task's heartbeat is
+                    # running; a crash here must not replay either
+                    status, error = self._run_status(states)
+                    await self.store.save_run(
+                        run_id, status=status, node_states=states, results=results, error=error
+                    )
 
             status, error = self._run_status(states)
+            if status == "failed":
+                # one failed node ends the run: stop what is still running in
+                # parallel and close any gate a human might still decide
+                await self._stop_siblings(run, states)
             saved = await self.store.save_run(
                 run_id, status=status, node_states=states, results=results, error=error
             )
             if status == "failed":
                 self.alerts.emit("run.failed", self._run_payload(saved))
             return saved
+
+    async def _stop_siblings(self, run: dict, states: dict) -> None:
+        for st in states.values():
+            if st.get("status") == "running" and st.get("heartbeat_id"):
+                try:
+                    await self.store.request_cancel(st["heartbeat_id"])
+                except (Conflict, NotFound):
+                    pass
+            if st.get("status") in ("running", "waiting", "deferred"):
+                self._finish(st, None, "cancelled")
+        await self.store.close_pending_approvals(run["id"], "cancelled")
 
     def _run_status(self, states: dict) -> tuple[str, str | None]:
         for nid, st in states.items():
@@ -261,6 +303,43 @@ class Engine:
         if any(st.get("status") == "waiting" for st in states.values()):
             return "waiting", None
         return "running", None
+
+    def _approved_on_path(
+        self, node_id: str, spec: WorkflowSpec, states: dict, results: dict
+    ) -> bool:
+        """Run-time D3: did every edge that fired into ``node_id`` descend
+        from an approval a human decided ``approved`` in this run? Mirrors
+        :func:`agent_hub.validate.approval_gated` over the executed graph."""
+        by_id = {n.id: n for n in spec.nodes}
+        preds: dict[str, list[Edge]] = {n.id: [] for n in spec.nodes}
+        for e in spec.edges:
+            if e.to != END and e.from_ in preds and e.to in preds:
+                preds[e.to].append(e)
+        memo: dict[str, bool] = {}
+
+        def walk(n: str, stack: frozenset[str]) -> bool:
+            if n in memo:
+                return memo[n]
+            fired = [
+                e
+                for e in preds[n]
+                if states.get(e.from_, {}).get("status") == "done"
+                and self._edge_fires(e, by_id[e.from_], results)
+            ]
+            ok = bool(fired)
+            for e in fired:
+                src = by_id[e.from_]
+                if src.type == "approval" and (
+                    (results.get(src.id) or {}).get("decision") == "approved"
+                ):
+                    continue
+                if e.from_ in stack or not walk(e.from_, stack | {n}):
+                    ok = False
+                    break
+            memo[n] = ok
+            return ok
+
+        return walk(node_id, frozenset())
 
     @staticmethod
     def _edge_fires(edge: Edge, source: Node, results: dict) -> bool:
@@ -289,9 +368,9 @@ class Engine:
             elif node.type == "approval":
                 await self._request_approval(run, spec, node, st, results)
             elif node.type == "tool":
-                await self._run_tool(run, node, st, results, ctx)
+                await self._run_tool(run, spec, node, st, states, results, ctx)
             elif node.type == "agent_task":
-                await self._launch_task(run, node, st, ctx)
+                await self._launch_task(run, spec, node, st, states, results, ctx)
         except ExpressionError as exc:
             self._finish(st, str(exc), "failed")
         except Exception as exc:  # noqa: BLE001 - a node failure is data, never a crash
@@ -336,10 +415,37 @@ class Engine:
             },
         )
 
-    async def _run_tool(self, run: dict, node: Node, st: dict, results: dict, ctx: dict) -> None:
+    async def _run_tool(
+        self,
+        run: dict,
+        spec: WorkflowSpec,
+        node: Node,
+        st: dict,
+        states: dict,
+        results: dict,
+        ctx: dict,
+    ) -> None:
         assert node.tool is not None
+        tool = tk.REGISTRY.get(node.tool)
+        if tool is not None and tool.tier != "read":
+            if (await self.store.paused())["paused"]:
+                self._finish(st, "agents are paused", "failed")
+                return
+            if node.environment not in MOCK_ENVIRONMENTS and not self._approved_on_path(
+                node.id, spec, states, results
+            ):
+                self._finish(
+                    st,
+                    f"tool '{node.tool}' is tier '{tool.tier}' and no approved gate is on "
+                    "the executed path to it (ADR-0010 D3)",
+                    "failed",
+                )
+                return
+        # a node labelled with an environment may only write to that one; the
+        # label is what exempted it from the gate when it says mock
+        envs = (node.environment,) if node.environment else ("*",)
         scope = tk.ToolScope(
-            allow=frozenset({node.tool}), mode="full", projects=("*",), environments=("*",)
+            allow=frozenset({node.tool}), mode="full", projects=("*",), environments=envs
         )
         tctx = tk.ToolContext(backend=self.tool_backend(run))
         args = render(node.args, ctx)
@@ -349,14 +455,23 @@ class Engine:
         res = await loop.run_in_executor(
             None, lambda: tk.scoped_dispatch(tctx, scope, node.tool, args)
         )
-        st["journal"] = tctx.journal.dump()
+        st["journal"] = default_box.encrypt_doc(tctx.journal.dump())
         results[node.id] = res if isinstance(res, dict) else {"ok": True, "data": res}
         if isinstance(res, dict) and not res.get("ok", True):
             self._finish(st, str(res.get("error") or "tool call failed"), "failed")
         else:
             self._finish(st, None, "done")
 
-    async def _launch_task(self, run: dict, node: Node, st: dict, ctx: dict) -> None:
+    async def _launch_task(
+        self,
+        run: dict,
+        wspec: WorkflowSpec,
+        node: Node,
+        st: dict,
+        states: dict,
+        results: dict,
+        ctx: dict,
+    ) -> None:
         assert node.agent is not None
         hit = await self.store.resolve("agent", node.agent)
         if hit is None:
@@ -367,8 +482,35 @@ class Engine:
         mode = node.mode or spec.mode
         if MODE_RANK[mode] > MODE_RANK[spec.mode]:  # the validator forbids this; belt and braces
             mode = spec.mode
+        update: dict[str, Any] = {}
         if mode != spec.mode:
-            spec = spec.model_copy(update={"mode": mode})
+            update["mode"] = mode
+        if node.environment:
+            # the node's environment label narrows the agent's write scope to
+            # that environment (it is also what exempts a mock task from the gate)
+            ws = spec.write_scope
+            envs = (
+                [node.environment]
+                if ("*" in ws.environments or node.environment in ws.environments)
+                else []
+            )
+            update["write_scope"] = ws.model_copy(update={"environments": envs})
+        if update:
+            spec = spec.model_copy(update=update)
+        gated = False
+        if mode == "full" and node.environment not in MOCK_ENVIRONMENTS:
+            # run-time D3: the agent's mode is what it is *now* (it may have
+            # been republished since the workflow was validated) and the gate
+            # must sit on the path that actually fired
+            gated = self._approved_on_path(node.id, wspec, states, results)
+            if not gated:
+                self._finish(
+                    st,
+                    f"agent '{name}' would run in full mode and no approved gate is on "
+                    "the executed path to it (ADR-0010 D3)",
+                    "failed",
+                )
+                return
         ver = await self.store.get_version("agent", name, version)
         rendered = render(node.input, ctx)
         input_text = (
@@ -387,6 +529,7 @@ class Engine:
             wake="event",
             on_done=lambda hb: self._heartbeat_done(run_id, node_id, hb),
             subject=f"wfrun:{run_id}",
+            gated=gated,
         )
         st["mode"] = mode
         st["agent"] = f"{name}@{version}"

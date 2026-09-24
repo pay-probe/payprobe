@@ -77,16 +77,23 @@ class WakeSources:
         """Wake every agent triggered by ``event``; returns one row per agent."""
         woken: list[dict] = []
         for name, version, spec in agents_for_event(await self.store.active_specs("agent"), event):
-            ver = await self.store.get_version("agent", name, version)
-            row = await self.launch(
-                name=name,
-                version=version,
-                spec=spec,
-                spec_sha256=ver["spec_sha256"],
-                caller={"sub": f"event:{event}", "roles": []},
-                input_text=json.dumps(payload, indent=2, default=str),
-                wake="event",
-            )
+            try:
+                ver = await self.store.get_version("agent", name, version)
+                row = await self.launch(
+                    name=name,
+                    version=version,
+                    spec=spec,
+                    spec_sha256=ver["spec_sha256"],
+                    caller={"sub": f"event:{event}", "roles": []},
+                    input_text=json.dumps(payload, indent=2, default=str),
+                    wake="event",
+                )
+            except Exception as exc:  # noqa: BLE001 - one agent's launch never starves the rest
+                log.warning("event %s: wake of %s@%s failed: %s", event, name, version, exc)
+                woken.append(
+                    {"agent": name, "version": version, "status": "error", "error": str(exc)}
+                )
+                continue
             self.evented += 1
             woken.append(self._row(name, version, row))
         return woken
@@ -105,16 +112,23 @@ class WakeSources:
             last = await self.store.last_wake_at(name, "schedule")
             if not schedule_due(spec, last, now):
                 continue
-            ver = await self.store.get_version("agent", name, version)
-            row = await self.launch(
-                name=name,
-                version=version,
-                spec=spec,
-                spec_sha256=ver["spec_sha256"],
-                caller={"sub": "scheduler", "roles": []},
-                input_text=json.dumps({"wake": "schedule", "at": now.isoformat()}),
-                wake="schedule",
-            )
+            try:
+                ver = await self.store.get_version("agent", name, version)
+                row = await self.launch(
+                    name=name,
+                    version=version,
+                    spec=spec,
+                    spec_sha256=ver["spec_sha256"],
+                    caller={"sub": "scheduler", "roles": []},
+                    input_text=json.dumps({"wake": "schedule", "at": now.isoformat()}),
+                    wake="schedule",
+                )
+            except Exception as exc:  # noqa: BLE001 - one agent's launch never starves the rest
+                log.warning("schedule: wake of %s@%s failed: %s", name, version, exc)
+                woken.append(
+                    {"agent": name, "version": version, "status": "error", "error": str(exc)}
+                )
+                continue
             self.scheduled += 1
             woken.append(self._row(name, version, row))
         return woken

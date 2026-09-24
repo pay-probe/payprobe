@@ -44,6 +44,7 @@ from typing import Any, Literal
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from payprobe_common.crypto import default_box
 from pydantic import BaseModel, Field, ValidationError
 
 from . import egress, postcheck, rest
@@ -58,7 +59,7 @@ from .runner import Outcome, run_heartbeat
 from .seed import seed_builtin
 from .store import Conflict, Guardrail, NotFound, RegistryStore
 from .triggers import WakeSources
-from .validate import tool_catalog, validate_agent_spec, validate_workflow_spec
+from .validate import tool_catalog, validate_agent_spec, validate_workflow_spec, widens
 
 log = logging.getLogger(__name__)
 
@@ -299,9 +300,15 @@ async def _validate(kind: Kind, request: Request, name: str, version: int) -> di
     return {"name": name, "version": version, "valid": not problems, "problems": problems}
 
 
+def _is_admin(claims: dict) -> bool:
+    if claims.get("dev") or claims.get("static") or claims.get("svc"):
+        return True
+    return bool(set(claims.get("roles") or []) & _admin_roles())
+
+
 async def _publish(kind: Kind, request: Request, name: str, version: int) -> dict:
     store = _store(request)
-    require_roles(request, await _edit_roles(kind, name, store))
+    claims = require_roles(request, await _edit_roles(kind, name, store))
     v = await _wrap(store.get_version(kind, name, version))
     if v["status"] != "draft":
         raise HTTPException(
@@ -311,6 +318,17 @@ async def _publish(kind: Kind, request: Request, name: str, version: int) -> dic
     problems = await _problems(kind, spec, store)
     if problems:
         raise HTTPException(422, {"problems": problems})
+    if kind == "agent" and not _is_admin(claims):
+        # an editor named in rbac.edit maintains the agent; only an admin
+        # grows what it may do (mode, tools, scope, rbac, unattended wakes)
+        d = await _wrap(store.get(kind, name))
+        active = d.get("spec") or {}
+        grown = widens(active, spec.model_dump()) if active else []
+        if grown:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                {"error": "publishing a wider grant needs an admin", "widens": grown},
+            )
     return await _wrap(store.publish(kind, name, version, caller_sub(request)))
 
 
@@ -361,7 +379,7 @@ async def get_pause(request: Request) -> dict:
 
 @app.put("/pause")
 async def put_pause(request: Request, body: PauseBody) -> dict:
-    require_roles(request, _admin_roles())
+    require_roles(request, _admin_roles(), human=True)
     return await _store(request).set_paused(body.paused, caller_sub(request))
 
 
@@ -425,6 +443,15 @@ def _caller(request: Request) -> dict:
     return getattr(request.state, "auth", None) or {}
 
 
+def _human_principal(caller: dict) -> bool:
+    """A user (auth-service roles, or the dev/test marker): never a service
+    token, a minted ``svc`` JWT, or the role-less event/schedule/webhook
+    principals."""
+    if caller.get("svc") or caller.get("static"):
+        return False
+    return bool(caller.get("dev")) or bool(caller.get("roles"))
+
+
 _SUBJECT_RE = re.compile(r"^[a-z_]+:[A-Za-z0-9_.:/-]{1,120}$")
 
 
@@ -458,9 +485,16 @@ async def launch_heartbeat(
     wake: str,
     on_done: Callable[[dict], Awaitable[None]] | None = None,
     subject: str | None = None,
+    gated: bool = False,
 ) -> dict:
     """The one heartbeat code path, shared by ``POST /agents/{name}/wake`` and
     the workflow engine's ``agent_task`` nodes.
+
+    A ``full``-mode heartbeat executes writes, so it needs a human behind it:
+    either ``caller`` is a user (roles from auth-service, or the dev marker) or
+    the engine vouches with ``gated=True`` because an approval on the executed
+    path was decided ``approved``. Service tokens, event, schedule and webhook
+    principals get a recorded refusal instead (ADR-0010 D3).
 
     Returns the heartbeat row. A refusal (``paused`` / ``budget_exceeded``) is
     recorded and returned without running; a wake on an agent that already has
@@ -505,12 +539,30 @@ async def launch_heartbeat(
         refused = await store.refuse_heartbeat(hb, "quota_exceeded", reason)
         app_.state.alerts.emit_for(refused, mode=spec.mode)
         return refused
+    if spec.mode == "full" and not gated and not _human_principal(caller):
+        refused = await store.refuse_heartbeat(
+            hb,
+            "failed",
+            "full mode needs a human behind the wake (a user with an invoke role, or an "
+            "approved workflow gate); service, event, schedule and webhook wakes may not "
+            "execute writes (ADR-0010 D3)",
+        )
+        app_.state.alerts.emit_for(refused, mode=spec.mode)
+        return refused
 
     llm = app_.state.llm_factory(spec)  # 503 when not configured
     hb["model"] = llm.model
     token = mint_obo(caller, name, version, hb["id"], spec.limits.wall_clock_s + 60)
     backend = app_.state.backend_factory(token)
-    row = await store.start_heartbeat(hb)
+    try:
+        row = await store.start_heartbeat(hb)
+    except Conflict:
+        # two wakes raced past the coalesce check; the partial unique index
+        # keeps one running heartbeat per agent, so hand back that one
+        running = await store.running_heartbeat(name)
+        if running:
+            return {**running, "coalesced": True}
+        raise
     loop = asyncio.get_running_loop()
 
     def flags() -> dict:
@@ -537,8 +589,14 @@ async def launch_heartbeat(
                     None, lambda: postcheck.apply(out.result, backend)
                 )
             except Exception as exc:  # noqa: BLE001 — a check failure never loses the answer
-                checks = [{"kind": postcheck.STEP_KIND, "ok": False, "changed": False,
-                           "error": f"{type(exc).__name__}: {exc}"}]
+                checks = [
+                    {
+                        "kind": postcheck.STEP_KIND,
+                        "ok": False,
+                        "changed": False,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                ]
             for i, c in enumerate(checks, start=len(out.steps) + 1):
                 out.steps.append({"n": i, **c})
         finished = await store.record_heartbeat(
@@ -546,7 +604,9 @@ async def launch_heartbeat(
             out.status,
             steps=out.steps,
             proposed=out.proposed,
-            journal=out.journal,
+            # the journal's `before` snapshots can hold credentials: SecretBox
+            # at rest (a no-op without PAYPROBE_SECRET_KEY, like the registries)
+            journal=default_box.encrypt_doc(out.journal),
             tokens=out.tokens,
             result=out.result,
             error=out.error,
@@ -614,7 +674,13 @@ async def list_heartbeats(
 
 @app.get("/heartbeats/{hb_id}")
 async def get_heartbeat(request: Request, hb_id: str) -> dict:
-    return await _wrap(_store(request).get_heartbeat(hb_id))
+    """The full record. Secret-named values anywhere in it (journal snapshots,
+    proposed or executed call args) are shown as fingerprints, never revealed
+    (CLAUDE.md invariant #8); revert reads the stored row, not this view."""
+    from payprobe_common import agent_toolkit as tk
+
+    hb = await _wrap(_store(request).get_heartbeat(hb_id))
+    return tk.mask_secrets(default_box.decrypt_doc(hb))
 
 
 @app.post("/heartbeats/{hb_id}/cancel")
@@ -633,7 +699,7 @@ async def revert_heartbeat(request: Request, hb_id: str) -> dict:
     using the caller's own credential — reverting is the human's act."""
     store = _store(request)
     hb = await _wrap(store.get_heartbeat(hb_id))
-    require_roles(request, _admin_roles())
+    require_roles(request, _admin_roles(), human=True)
     if hb["status"] == "running":
         raise HTTPException(status.HTTP_409_CONFLICT, "heartbeat is still running")
     if not hb["journal"]:
@@ -643,8 +709,9 @@ async def revert_heartbeat(request: Request, hb_id: str) -> dict:
     bearer = (request.headers.get("authorization") or "")[len("Bearer ") :].strip()
     backend = request.app.state.backend_factory(bearer or "dev")
     ctx = tk.ToolContext(backend=backend)
+    journal = default_box.decrypt_doc(hb["journal"])
     n = await asyncio.get_running_loop().run_in_executor(
-        None, lambda: tk.restore_journal(ctx, hb["journal"])
+        None, lambda: tk.restore_journal(ctx, journal)
     )
     row = await store.mark_reverted(hb_id)
     return {**row, "reverted": n}
@@ -734,7 +801,7 @@ async def decide_approval(request: Request, ap_id: str, body: DecideBody) -> dic
     the decider is recorded and the run moves on (or ends ``rejected``)."""
     store = _store(request)
     ap = await _wrap(store.get_approval(ap_id))
-    require_roles(request, set(ap["roles"]) | _admin_roles())
+    require_roles(request, set(ap["roles"]) | _admin_roles(), human=True)
     return await _wrap(
         _engine(request).decide(ap_id, body.decision, caller_sub(request), body.note)
     )
@@ -796,6 +863,9 @@ async def _verified_webhook_body(request: Request) -> bytes:
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "inbound webhooks are not configured (set AGENT_HUB_WEBHOOK_SECRET)",
         )
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > 64_000:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "webhook body over 64 KB")
     raw = await request.body()
     if len(raw) > 64_000:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "webhook body over 64 KB")

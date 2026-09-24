@@ -1,6 +1,6 @@
 # ADR-0010: Agent registry and orchestration (agent-hub)
 
-**Status:** Proposed — phases 1 (registry) and 2 (heartbeat runner) implemented 2026-09-23
+**Status:** Proposed. Phases 1 to 5 implemented 2026-09-23, security review done 2026-09-24 (17 fixes on the branch); flips to Accepted on David's Go/No-Go
 **Date:** 2026-09-22
 **Deciders:** PayProbe maintainers (David + reviewers)
 
@@ -252,6 +252,34 @@
 > `_agent_verdict_annotation` + `_json_in_text` in the orchestrator;
 > `test_signoff.py` (+3, including "unreachable agent-hub still certifies")
 > and `test_generators.py` (+2).
+
+> **Security review (2026-09-24).** Three independent read-only reviews of
+> agent-hub, the toolkit and the auth gates, every finding re-verified and
+> fixed on the branch with a test that encodes the exploit
+> (`docs/history/2026-09-24-adr-0010-security-review.md`). The load-bearing
+> ones: the D3 gate was "some approval ancestor" and is now "an approved gate
+> on every path", checked at publish and again by the engine over the edges
+> that fired (a condition-skipped gate, a `rejected` edge and an agent
+> republished as `full` after validation all executed writes before);
+> `full` heartbeats need a human caller or an approved gate, so the
+> event / schedule / webhook principals and service tokens can never write
+> (the "downstream RBAC" the design relied on does not exist); secret-named
+> values reached the provider, the heartbeat row and any viewer in clear and
+> are now masked in every tool result and record, the journal
+> SecretBox-encrypted at rest; `svc` and static tokens cannot decide, revert
+> or pause; on-behalf-of tokens are refused at agent-hub's door; a `mock`
+> label now scopes the node it exempts; pause stops tool nodes; the run row
+> is saved per node; an `rbac.edit` holder cannot widen their grant;
+> `extra` and `base_tps` are inside the write scope and the load cap; every
+> read result is untrusted-wrapped; the static bearer works beside a JWT
+> secret and the compose placeholder secret is refused outside dev (all
+> three gates). Accepted as designed and recorded: unscoped reads, five
+> minute webhook replay, direct human wakes of `plan-executor`, authority
+> snapshotted at run start, per-wake (not per-write) journal persistence.
+> 205 agent-hub tests. Real-provider runs the same day: the `observer`
+> workflow parked at its human gate (David's to decide), `certification-plan`
+> blocked by the reviewer with correct reasons (exit criterion three on a
+> real model).
 
 Companions: [`../agentic-engine-evaluation.md`](../agentic-engine-evaluation.md)
 (Opus), [`../agentic-engine-evaluation-fable.md`](../agentic-engine-evaluation-fable.md)
@@ -506,7 +534,7 @@ Each phase ends in a commit and a review gate.
 - **Phase 2: Heartbeat runner.** Done: scoped toolkit, OBO tokens minted in agent-hub with the shared secret (no new auth-service endpoint needed), FakeLLM, provenance (`spec_sha256`, model, `act` claim) on every heartbeat, heartbeat records with cancel/revert, pause and budget stops. Portal heartbeat view, D11 alert webhook and restart watchdog all done 2026-09-23; phase 2 complete.
 - **Phase 3: Workflow engine.** State machine, node types, approvals inbox, reference workflows `observer` and `certification-plan`; fold :8400 in (D2). Exit: both workflows complete with a human approval mid-flow; container kill mid-workflow resumes; reviewer blocks a deliberately bad plan. Status 2026-09-23: engine, routes, seeds and all three exit criteria covered by tests under FakeLLM (`test_hub_engine.py`); the approvals inbox and runs view are in the portal (host build green, click-through owed), the :8400 assistant is mounted inside agent-hub with nginx and the orchestrator probe repointed (the standalone container is the deprecated alias until phase 5), and the exit criteria still want one run against a real provider.
 - **Phase 4: Triggers and exposure.** Run-lifecycle events, schedules via the existing scheduler, webhook trigger, MCP catalog entries, insight-service as a tool. Exit: a failing scheduled regression wakes `observer` unattended and a finding with evidence reaches a human. Status 2026-09-23: events (`POST /events`, emitted by the orchestrator for run and gate outcomes) and schedules (agent-hub's own tick, not the orchestrator scheduler: the trigger vocabulary is shared, the timer is local so agent-hub stays self-contained) are built and tested; webhook trigger, MCP entries and insight-service as a tool (`insight_status`, `get_scenario_prediction`, `list_insight_categories`, `train_insights`, plus `run_trend` / `run_flakiness`) landed the same day; the real-provider proof came from the first scheduled `observer` wake (13:23 UTC) and the `run.failed` wake of `failure-triage`; the alert-webhook half still wants a URL.
-- **Phase 5: Hardening and handover.** Injection pack, `agent-golden` CI, egress allowlist, quotas, ATLAS + CLAUDE.md invariants (D12), operator skill `payprobe-agents`, status flip to Accepted, :8400 alias removed. Exit: security review + Go/No-Go by David. Status 2026-09-23: injection pack (`test_hub_injection.py`, 10 tests) and the `agent-golden` CI step are in; D12 was done with phase 2. Egress allowlist done the same day (`egress.py`, enforced in the one provider caller). ATLAS (§6, §7, §11, §13) and the `payprobe-agents` operator skill written the same day, then quotas (`AGENT_HUB_DAILY_TOKENS`, `AGENT_HUB_MAX_CONCURRENT`, `AGENT_LOAD_APPROVAL_TPS` in the tool layer, seed budgets), the deterministic regression post-check, the insight/run-history tools, the sign-off annotation and the `assistant` alias removal, all the same day. Owed: David's security review and Go/No-Go, the status flip to Accepted, the browser click-through, one green CI run on the PR.
+- **Phase 5: Hardening and handover.** Injection pack, `agent-golden` CI, egress allowlist, quotas, ATLAS + CLAUDE.md invariants (D12), operator skill `payprobe-agents`, status flip to Accepted, :8400 alias removed. Exit: security review + Go/No-Go by David. Status 2026-09-23: injection pack (`test_hub_injection.py`, 10 tests) and the `agent-golden` CI step are in; D12 was done with phase 2. Egress allowlist done the same day (`egress.py`, enforced in the one provider caller). ATLAS (§6, §7, §11, §13) and the `payprobe-agents` operator skill written the same day, then quotas (`AGENT_HUB_DAILY_TOKENS`, `AGENT_HUB_MAX_CONCURRENT`, `AGENT_LOAD_APPROVAL_TPS` in the tool layer, seed budgets), the deterministic regression post-check, the insight/run-history tools, the sign-off annotation and the `assistant` alias removal, all the same day. Security review done 2026-09-24 (17 fixes, `docs/history/2026-09-24-adr-0010-security-review.md`); browser click-through of the Agents page, heartbeat waterfall (incl. `postcheck`), workflows tab, inbox, run-report verdict panel and dashboard done the same day with Playwright against the live portal. Owed: David's Go/No-Go on the review, the status flip to Accepted, CI green on the review commit, an alert-webhook URL.
 
 ## Action items
 
@@ -517,4 +545,6 @@ Each phase ends in a commit and a review gate.
 5. [x] ATLAS: agent-hub in §6 (the pattern generalised), §7 (security), §11 (follow-through) and §13 (decision log); operator skill `.claude/skills/payprobe-agents`.
 6. [x] Decide `AGENT_LOAD_APPROVAL_TPS` and the daily budget defaults for compose (2026-09-23: 100 tps enforced in the tool layer; seed budgets 300k to 3M per agent; hub-wide `AGENT_HUB_DAILY_TOKENS` 5M and `AGENT_HUB_MAX_CONCURRENT` 4 in compose).
 7. [x] Push the branch and get one green CI run: PR https://github.com/pay-probe/payprobe/pull/2 opened 2026-09-23; all 11 checks green on `f1eff727` (Test agent-hub 185, agent-golden 21, Trivy code scanning after the agent-hub image gained a non-root user and a HEALTHCHECK).
-8. [ ] Phase 2 loose ends: a real provider call through `ProviderLLMBackend`; the `nats-demo-net` driver still points at a deleted scenario (`scn-0039c642`); `delete_scenario` has no "referenced by a network" guard (pre-existing, outside this ADR).
+8. [ ] Phase 2 loose ends: a real provider call through `ProviderLLMBackend` (done 2026-09-23); the `nats-demo-net` driver still points at a deleted scenario (`scn-0039c642`; the replacement is `scn-1dfe7190`, "NATS messaging test", one `PUT /network-flows/nats-demo-net` on David's stack); `delete_scenario` has no "referenced by a network" guard (pre-existing, outside this ADR).
+9. [x] Security review (2026-09-24): three independent reviews, 17 findings fixed on the branch with tests, the rest recorded as accepted; `docs/history/2026-09-24-adr-0010-security-review.md`.
+10. [ ] Go/No-Go by David on the review, then flip this status to Accepted and merge PR #2.

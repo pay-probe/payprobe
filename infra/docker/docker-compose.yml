@@ -327,6 +327,8 @@ services:
       # Phase 4 inbound webhooks (unset = 503): HMAC secret for /webhooks/events/{event}
       # and /webhooks/agents/{name}; same t=,v1= scheme as the outbound alerts.
       AGENT_HUB_WEBHOOK_SECRET: ${AGENT_HUB_WEBHOOK_SECRET:-}
+      # SecretBox for the heartbeat journal at rest (the same key the registries use)
+      PAYPROBE_SECRET_KEY: ${PAYPROBE_SECRET_KEY:-}
       # Phase 5 LLM egress allowlist: extra provider/proxy hosts (exact or *.suffix,
       # optional :port) beyond api.openai.com / api.anthropic.com and ASSIST_LLM_BASE_URL.
       AGENT_HUB_EGRESS_ALLOW: ${AGENT_HUB_EGRESS_ALLOW:-}

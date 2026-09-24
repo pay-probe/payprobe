@@ -430,6 +430,26 @@ ADR status flip to Accepted, browser click-through (Agents page, heartbeat
 waterfall incl. the `postcheck` step, workflows, inbox, run-report verdict
 panel, sign-off "Agent verdicts" section), and an alert-webhook URL.
 
+**2026-09-24 (Claude Code session, David's checkout):** the security review
+was done as three independent read-only reviews and every real finding fixed
+on the branch with a test (`docs/history/2026-09-24-adr-0010-security-review.md`;
+agent-hub 185 → 205 tests, green twice; scenario-service 330, orchestrator
+393, assistant 63 green after the shared gate and toolkit changes). The
+browser click-through was done with Playwright driving the host's Chrome
+against the live portal (Agents list, observer heartbeats and waterfall,
+failure-triage `postcheck` step, Workflows tab with the pending inbox item,
+run report verdict panel, dashboard); screenshots stayed in the session
+scratchpad. Both reference workflows ran against the real provider: the
+`observer` run is parked at its gate with a pending approval that only a
+human may decide (the session's attempt was refused as a self-approval,
+correctly), and `certification-plan` was blocked by the reviewer for real
+defects in the plan. Still David's: deciding that approval in the inbox,
+the Go/No-Go on the review, the status flip and the merge of PR #2, the
+alert-webhook URL, rebuilding the agent-hub image on the stack (the fixes
+are on the branch, not deployed), and the `nats-demo-net` driver repoint
+(`PUT /network-flows/nats-demo-net` with `scn-1dfe7190`; a live-registry
+write this session left to him).
+
 ## 8. Gotchas learned this session
 
 - Postgres in the sandbox stopped between turns; a run that shows "49 skipped"

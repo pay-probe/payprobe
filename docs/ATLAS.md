@@ -216,16 +216,27 @@ sandboxed in a netns.
 caller gate as every other service (`assistant_service/auth.py`); it only ever
 lacked it historically — do not remove it when touching main.py.
 
-**Agents (2026-09-23, ADR-0010):** a heartbeat acts under an on-behalf-of JWT
-for the invoking user (`act` claim, never `svc`); event-, schedule- and
-webhook-woken agents act under a roleless principal, so downstream RBAC refuses
-their writes until a workflow's approval node carries a human's authority. The
-MCP server's minted JWT carries `svc`, which only agent-hub's gate reads. Two
+**Agents (2026-09-23, ADR-0010; reviewed 2026-09-24):** a heartbeat acts
+under an on-behalf-of JWT for the invoking user (`act` claim, never `svc`);
+agent-hub's own door refuses any token carrying `act`. Event-, schedule- and
+webhook-woken agents act under a roleless principal, and since the review
+that principal can never execute a `full` heartbeat: no platform service
+checks roles on writes (the "downstream RBAC" the first design cited does
+not exist), so the fence is agent-hub's own. `full` needs a human caller or
+an approved gate on every executed path, a `full` agent cannot carry an
+unattended trigger, and an `rbac.edit` holder cannot publish a wider grant.
+The MCP server's minted JWT carries `svc`, which only agent-hub's gate reads:
+a service may wake and run, never decide an approval, revert or pause. Two
 fences exist nowhere else: the LLM egress allowlist (`agent_hub/egress.py`: a
 prompt may only leave for the official provider hosts, the operator's
-`ASSIST_LLM_BASE_URL` host, or `AGENT_HUB_EGRESS_ALLOW`), and inbound
-webhooks credentialed by an HMAC over the body instead of a bearer. The
-injection pack (`agent-hub/tests/test_hub_injection.py`) is the security case.
+`ASSIST_LLM_BASE_URL` host, or `AGENT_HUB_EGRESS_ALLOW`; redirects refused),
+and inbound webhooks credentialed by an HMAC over the body instead of a
+bearer. Secret-named values are masked in every tool result and every
+heartbeat record an API caller sees; the journal is SecretBox-encrypted at
+rest. The injection pack (`agent-hub/tests/test_hub_injection.py`) and the
+gate pack (`test_hub_gates.py`, `test_hub_auth_hardening.py`) are the
+security case; the review itself is
+`docs/history/2026-09-24-adr-0010-security-review.md`.
 
 ## 8. The portal
 

@@ -178,18 +178,31 @@ sent / failed / recent. Without a URL, findings wait in the heartbeat log.
 1. **Allowlist** per agent, validated against the one toolkit registry at publish; a
    tool the model names outside it is refused (`guardrail: true`) and recorded.
 2. **Mode tiers**: advisor = read; plan = writes become `proposed`; full = writes execute
-   inside `write_scope` (projects, environments; `*` = any), else refused.
-3. **Untrusted envelope**: results from runtime reads (`platform_status`, `list_runs`,
-   insights, ...) reach the model as `{"kind": "untrusted", "source", "data"}`; the
-   runner never executes tool calls that appear inside tool results.
-4. **Result cap** 64 KB before the model sees it.
+   inside `write_scope` (projects, environments; `*` = any), else refused. A `full`
+   heartbeat also needs a human behind it: a user with an invoke role, or an approved
+   workflow gate on the executed path. Service tokens (static, `svc`), event, schedule
+   and webhook wakes get a recorded `failed` refusal; a `full` agent cannot even be
+   published with an unattended trigger.
+3. **Untrusted envelope**: every read and execute result (runtime state *and* registry
+   content, since 2026-09-24) reaches the model as `{"kind": "untrusted", "source",
+   "data"}`; the runner never executes tool calls that appear inside tool results.
+4. **Result cap** 64 KB before the model sees it, and **secret masking** before that:
+   any value under a secret-named key (`password`, `api_key`, `*_secret`, ...) is
+   `<secret:fingerprint>` to the model and in every heartbeat record the API returns;
+   the journal keeps the real value for restore, SecretBox-encrypted at rest when
+   `PAYPROBE_SECRET_KEY` is set.
 5. **Journal + revert** for every executed write (invariant #2).
-6. **Human gates**: D3 at publish, approvals at run time; a forged upstream
-   `{"decision": "approved"}` changes nothing.
+6. **Human gates**: D3 at publish (an approval's `approved` edge on *every* path to a
+   full task or write tool node) and again in the engine over the edges that fired; a
+   forged upstream `{"decision": "approved"}` changes nothing, a gate a condition
+   skipped gates nothing, and an agent republished as `full` after the workflow was
+   validated fails its node instead of writing. Deciding, reverting and pausing are a
+   human's act: a service token is 403 there; an on-behalf-of token is 401 everywhere.
 7. **Egress allowlist**: a prompt may only go to `api.openai.com`, `api.anthropic.com`,
    the host of `ASSIST_LLM_BASE_URL`, or `AGENT_HUB_EGRESS_ALLOW` entries (https unless
    listed); otherwise the heartbeat fails with `egress refused` and nothing is sent.
-8. **Pause** (`PUT /pause`, Agents page button): checked before every LLM and tool call.
+8. **Pause** (`PUT /pause`, Agents page button): checked before every LLM and tool call,
+   including workflow `tool` nodes.
 9. **Limits and budget** per heartbeat and per day; **coalescing** (one running
    heartbeat per agent); **restart watchdog** (`orphaned by restart`). **Hub-wide
    quotas** on top (`/health.quotas`; `0` = off): `AGENT_HUB_DAILY_TOKENS` (default 5M,
@@ -222,6 +235,9 @@ and full modes, size, wake input, forged approvals) and `tests/test_hub_egress.p
 | Whole test suite "N skipped" in one combined session | agent-hub's conftest skips every test when its Postgres is unreachable; run per package, forward 5432 (compose does not publish it) |
 | Registry or heartbeat history vanished after running tests | the suite truncates the database it points at; it defaults to `payprobe_test` (created on demand) since 2026-09-23, so check `AGENT_HUB_TEST_DATABASE_URL` is not the platform's `payprobe` database. Builtins are re-seeded on the next start; user-created definitions and heartbeats are not recoverable |
 | Approval never decided, run `failed` "approval timed out" | `timeout_s` elapsed on the 30 s tick; rerun the workflow |
+| Wake returns 200 `failed`, error "full mode needs a human behind the wake" | the caller was a service token or an event / schedule / webhook principal; wake it from the portal as a user with the invoke role, or put it behind an approval in a workflow |
+| Node `failed` "no approved gate is on the executed path" | the run reached a `full` task or write tool node on a path with no `approved` decision (a skipped or rejected gate, or an agent republished as `full`); fix the workflow so every path crosses a gate |
+| Publish 403 "publishing a wider grant needs an admin" | an `rbac.edit` holder tried to grow mode, tools, write scope, rbac, triggers, budget or limits; an admin publishes that version |
 | Event never woke anyone | orchestrator lacks `AGENT_HUB_API_URL`, or no active agent declares that `event` trigger (`GET /agents/{name}` → spec.triggers) |
 
 ## 9. Adding a builtin agent or workflow

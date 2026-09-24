@@ -354,7 +354,9 @@ def test_condition_routes_and_tool_node_runs_under_the_user(client):
     assert big["status"] == "done", big
     assert big["node_states"]["look"]["status"] == "done"
     assert big["results"]["look"]["ok"] is True
-    assert [c["name"] for c in big["results"]["look"]["result"]] == ["switch"]
+    # every read result is untrusted-wrapped, tool nodes included
+    assert big["results"]["look"]["result"]["kind"] == "untrusted"
+    assert [c["name"] for c in big["results"]["look"]["result"]["data"]] == ["switch"]
     assert big["node_states"]["look"]["journal"] == []  # a read leaves no journal
 
 
