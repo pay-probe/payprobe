@@ -1,0 +1,98 @@
+# Minimal PayProbe stack for a single air-gapped host: portal (TLS), scenario-
+# service, orchestrator (worker engine in-process), auth-service and Redis. No
+# Postgres (every store is SQLite on a volume), no NATS, no assistant/insight/
+# MCP, no load-worker fleet. Images come from infra/docker/offline/ builds
+# (tagged ${PAYPROBE_TAG}); see docs/operations/offline-minimal-deployment.md.
+#
+#   docker compose -f infra/docker/docker-compose.minimal.yml --env-file /opt/payprobe/.env up -d
+#
+# Required in the env file: AUTH_JWT_SECRET, AUTH_ADMIN_PASSWORD,
+# PAYPROBE_SECRET_KEY, PORTAL_TLS_PORT, PAYPROBE_TAG, PAYPROBE_DATA (host dir),
+# PAYPROBE_TLS (host dir with server.crt/server.key), PAYPROBE_TNS_ADMIN (host
+# dir with tnsnames.ora/sqlnet.ora), CORS_ORIGINS.
+
+x-restart: &restart
+  restart: unless-stopped
+
+x-common-env: &common-env
+  PAYPROBE_ENV: ${PAYPROBE_ENV:-prod}
+  AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET in the env file}
+  CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS to the portal origin}
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - ${PAYPROBE_DATA}/redis:/data
+    <<: *restart
+
+  auth-service:
+    image: payprobe-auth-service:${PAYPROBE_TAG}
+    environment:
+      <<: *common-env
+      AUTH_DB: /data/auth.db
+      AUTH_TOKEN_TTL_SEC: ${AUTH_TOKEN_TTL_SEC:-3600}
+      AUTH_ADMIN_USER: ${AUTH_ADMIN_USER:-admin}
+      AUTH_ADMIN_PASSWORD: ${AUTH_ADMIN_PASSWORD:?set the bootstrap admin password}
+    volumes:
+      - ${PAYPROBE_DATA}/auth:/data
+    <<: *restart
+
+  scenario-service:
+    image: payprobe-scenario-service:${PAYPROBE_TAG}
+    environment:
+      <<: *common-env
+      DATABASE_URL: /data/scenarios.db
+      RUN_API_URL: http://orchestrator:8100
+      SCENARIO_SEED_DIR: /seed
+      PAYPROBE_SECRET_KEY: ${PAYPROBE_SECRET_KEY:?set PAYPROBE_SECRET_KEY (connection secrets at rest)}
+    volumes:
+      - ${PAYPROBE_DATA}/scenario:/data
+      - ${PAYPROBE_SRC:-../..}/examples/scenarios:/seed:ro
+      - ${PAYPROBE_SRC:-../..}/examples/environments:/environments:ro
+      - ${PAYPROBE_SRC:-../..}/examples/connections:/connections:ro
+    depends_on:
+      auth-service:
+        condition: service_started
+    <<: *restart
+
+  orchestrator:
+    image: payprobe-orchestrator:${PAYPROBE_TAG}
+    environment:
+      <<: *common-env
+      REDIS_URL: redis://redis:6379
+      RUN_DB: /data/runs.db
+      SIMULATORS_FILE: /data/simulators.json
+      ORCH_RUNTIME_FILE: /data/runtime.json
+      SCENARIO_API_URL: http://scenario-service:8000
+      AUTH_API_URL: http://auth-service:8300
+      PAYPROBE_CODE_SANDBOX: ${PAYPROBE_CODE_SANDBOX:-auto}
+      # No Docker socket, no load-worker fleet: single-node in-process engine.
+      PAYPROBE_WORKER_PROVISIONER: none
+      # Oracle thick mode for adapters that open Oracle sessions (Instant Client in the image).
+      TNS_ADMIN: /config/oracle
+    volumes:
+      - ${PAYPROBE_DATA}/orchestrator:/data
+      - ${PAYPROBE_TNS_ADMIN}:/config/oracle:ro
+    depends_on:
+      redis:
+        condition: service_started
+      scenario-service:
+        condition: service_started
+      auth-service:
+        condition: service_started
+    <<: *restart
+
+  portal:
+    image: payprobe-portal:${PAYPROBE_TAG}
+    ports:
+      - "${PORTAL_TLS_PORT}:443"
+    volumes:
+      - ${PAYPROBE_SRC:-../..}/infra/nginx/nginx.minimal.conf:/etc/nginx/nginx.conf:ro
+      - ${PAYPROBE_TLS}:/etc/nginx/tls:ro
+    depends_on:
+      - scenario-service
+      - orchestrator
+      - auth-service
+    <<: *restart
