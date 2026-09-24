@@ -230,9 +230,12 @@ class GeneratorContext:
                 raise GeneratorError(f"{expr}: now.fmt needs a strftime pattern")
             try:
                 offset = float(args[1]) if len(args) > 1 else 0.0
-            except ValueError as exc:
-                raise GeneratorError(f"{expr}: UTC offset must be hours, e.g. 4 or -2.5") from exc
-            return datetime.now(timezone(timedelta(hours=offset))).strftime(args[0])
+                tz = timezone(timedelta(hours=offset))
+            except (ValueError, OverflowError) as exc:
+                raise GeneratorError(
+                    f"{expr}: UTC offset must be hours within -24..24, e.g. 4 or -2.5"
+                ) from exc
+            return datetime.now(tz).strftime(args[0])
         if fname == "epoch":
             return int(time.time())
         if fname == "iso":

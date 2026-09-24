@@ -180,6 +180,8 @@ def test_now_fmt_rejects_missing_pattern_and_bad_offset():
         g.resolve("now.fmt")
     with pytest.raises(GeneratorError):
         g.resolve("now.fmt(%y,abc)")
+    with pytest.raises(GeneratorError):
+        g.resolve("now.fmt(%y,25)")
 
 
 def test_now_fmt_resolves_through_payload_interpolation():
