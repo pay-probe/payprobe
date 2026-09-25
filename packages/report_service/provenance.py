@@ -32,6 +32,19 @@ def _scenario_versions(detail: dict) -> dict[str, Any]:
     return out
 
 
+def _fixture_outcomes(detail: dict) -> dict[str, dict[str, Any]]:
+    """{"before": {scenario: status}, "after": {...}} for the run's fixtures
+    (ADR-0012). Always both keys, so the shape (and hash) is stable."""
+    fx = (detail.get("summary") or {}).get("fixtures") or {}
+    return {
+        kind: {
+            str(sc.get("name") or sc.get("scenario_id")): sc.get("status")
+            for sc in (fx.get(kind) or [])
+        }
+        for kind in ("before", "after")
+    }
+
+
 def provenance(detail: dict, ctx: dict | None = None) -> dict:
     """Build the provenance stamp for a run.
 
@@ -58,6 +71,9 @@ def provenance(detail: dict, ctx: dict | None = None) -> dict:
         "baseline_run_id": ctx.get("baseline_run_id"),
         "playground_traffic": ctx.get("playground_traffic")
         or {"total": 0, "by_simulator": {}, "window": None},
+        # ADR-0012: what ran around the scenarios; fixtures never join the gates,
+        # so a sign-off reader must be able to see them here
+        "fixtures": _fixture_outcomes(detail),
     }
 
 

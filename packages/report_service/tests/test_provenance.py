@@ -45,8 +45,9 @@ def test_provenance_stable_shape_without_ctx():
     assert set(prov) == {
         "run_id", "scenario_versions", "pack", "environment", "endpoints",
         "system_under_test", "triggered_by", "started_at", "completed_at",
-        "baseline_run_id", "playground_traffic",
+        "baseline_run_id", "playground_traffic", "fixtures",
     }
+    assert prov["fixtures"] == {"before": {}, "after": {}}
 
 
 def test_provenance_records_playground_contamination():

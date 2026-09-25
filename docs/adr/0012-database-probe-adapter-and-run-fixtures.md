@@ -517,7 +517,7 @@ style artifact; attractive, not designed here).
 - [x] Phase 2: `writes`, `execute`, cleanup list in `ScenarioRunner`,
       `load_coordinator` refusal + `load_ok`, diagnostics databases layer,
       tests listed above.
-- [ ] Phase 3: `fixtures` on the run request, engine hook points,
+- [x] Phase 3: `fixtures` on the run request, engine hook points,
       report_service section, MCP registry field + `gen_catalog.py`, flag
       `PAYPROBE_RUN_FIXTURES` default `0`.
 - [ ] Phase 4: portal editor and catalog flip (host build + click-through),

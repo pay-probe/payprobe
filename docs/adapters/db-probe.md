@@ -122,6 +122,28 @@ Mocked probes (`mode: mock`, or `mock: true` on the adapter) are exempt.
 connection: reachable, whether the session refused a write, whether writes are
 enabled, and which named queries fail to parse.
 
+## 6. Seed once, verify once: run-level fixtures
+
+Some state belongs to the whole run, not to one scenario: seed the accounts
+every scenario will use, then verify the ledger and purge afterwards. A run
+request may name saved scenarios as fixtures (behind `PAYPROBE_RUN_FIXTURES=1`):
+
+```jsonc
+POST /runs
+{"scenario_ids": ["auth-then-settle", "refund-then-settle"],
+ "fixtures": {"before": ["seed-accounts"], "after": ["verify-ledger", "purge-accounts"]}}
+```
+
+`before` fixtures run once after the component health phase; if one fails,
+every scenario is BLOCKED and the run fails (the same semantics as a dead
+component). `after` fixtures run once after the last phase, whatever happened,
+and can only annotate: they never rescue or worsen the verdict. Both appear
+under `summary.fixtures`, in the sign-off report's Fixtures section and in the
+provenance stamp, and never in gate percentages. Fixtures are ordinary
+scenarios (any node kinds, any targets); a probe connection with
+`writes: "permanent"` lets a seed fixture write without a cleanup and the purge
+fixture undo it at the end.
+
 ## Engines
 
 | `engine` | Driver | Status |

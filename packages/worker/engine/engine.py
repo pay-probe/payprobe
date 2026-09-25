@@ -136,12 +136,21 @@ class WorkerEngine:
         scenarios: list[dict],
         run_id: str,
         debug_hook=None,
+        fixtures: dict | None = None,
     ) -> dict:
         """Execute a batch of scenarios through the three-phase pipeline.
 
         ``debug_hook`` (if given) is an async ``(node_id, context)`` callback the
         runner awaits before each node — the orchestrator uses it for
         breakpoints / step-through.
+
+        ``fixtures`` (ADR-0012) is ``{"before": [scenario, …], "after": [scenario, …]}``:
+        ordinary scenarios run once around the whole run. ``before`` fixtures run
+        sequentially after phase 1 and a failure BLOCKs every scenario (phase 1
+        semantics, the run is FAILED); ``after`` fixtures run sequentially after
+        phase 3 in a ``finally`` — also on cancel or error — and can only
+        annotate, never flip a verdict. Their results land under
+        ``summary["fixtures"]`` and take no part in scenario counts or gates.
 
         Returns a run summary dict suitable for persistence / reporting.
         """
@@ -186,8 +195,72 @@ class WorkerEngine:
             # surfaced in the report so a flaky component is visible even
             # when the retry saved the run
             summary["phases"]["phase_1"]["recovered"] = recovered
+        # ---- Fixtures (before): once, after phase 1, before any scenario ----
+        fixtures = fixtures or {}
+        before = list(fixtures.get("before") or [])
+        after = list(fixtures.get("after") or [])
+        if before or after:
+            summary["fixtures"] = {}
+        if before:
+            if phase1_status == PASSED:
+                b_results = await self._run_fixtures(runner, before, phase=1, kind="before")
+                summary["fixtures"]["before"] = [self._scenario_dict(r) for r in b_results]
+                if any(r.status != PASSED for r in b_results):
+                    # a failed before-fixture blocks the run exactly like a failed
+                    # component: every scenario is BLOCKED and the run is FAILED
+                    phase1_status = FAILED
+                    summary["phases"]["phase_1"]["status"] = FAILED
+                    summary["phases"]["phase_1"]["fixture_failed"] = [
+                        r.scenario_id for r in b_results if r.status != PASSED
+                    ]
+                    failed_targets = failed_targets | {
+                        t for sc in scenarios for t in scenario_targets(sc)
+                    }
+            else:
+                summary["fixtures"]["before"] = []  # not run: phase 1 already failed
         await self._emit_phase(run_id, 1, phase1_status, summary["phases"]["phase_1"])
 
+        try:
+            p2_results, p3_results = await self._run_phases_2_and_3(
+                runner, phase2, phase3, run_id, failed_targets, summary
+            )
+        finally:
+            # ---- Fixtures (after): once, whatever happened (pass, fail, cancel) ----
+            if after:
+                a_results = await self._run_fixtures(runner, after, phase=3, kind="after")
+                summary["fixtures"]["after"] = [self._scenario_dict(r) for r in a_results]
+
+        for r in (*p2_results, *p3_results):
+            summary["scenarios"].append(self._scenario_dict(r))
+
+        statuses = {s["status"] for s in summary["scenarios"]}
+        summary["status"] = (
+            FAILED
+            if FAILED in statuses or phase1_status == FAILED
+            else (PASSED if statuses <= {PASSED, BLOCKED} else FAILED)
+        )
+        await self.sink.publish(
+            RunEvent(
+                RUN_COMPLETED,
+                run_id,
+                {
+                    "status": summary["status"],
+                    "phases": summary["phases"],
+                },
+            )
+        )
+        await self.teardown()
+        return summary
+
+    async def _run_phases_2_and_3(
+        self,
+        runner: ScenarioRunner,
+        phase2: list[dict],
+        phase3: list[dict],
+        run_id: str,
+        failed_targets: set[str],
+        summary: dict,
+    ) -> tuple[list[ScenarioResult], list[ScenarioResult]]:
         # ---- Phase 2: integration / component scenarios ----
         p2_results, p2_failed_targets = await self._run_phase(
             runner,
@@ -212,36 +285,7 @@ class WorkerEngine:
         await self._emit_phase(
             run_id, 3, summary["phases"]["phase_3"]["status"], summary["phases"]["phase_3"]
         )
-
-        for r in (*p2_results, *p3_results):
-            summary["scenarios"].append(
-                {
-                    "scenario_id": r.scenario_id,
-                    "name": r.name,
-                    "status": r.status,
-                    "steps": [o.__dict__ for o in r.steps],
-                    "notes": list(getattr(r, "notes", []) or []),
-                }
-            )
-
-        statuses = {s["status"] for s in summary["scenarios"]}
-        summary["status"] = (
-            FAILED
-            if FAILED in statuses or phase1_status == FAILED
-            else (PASSED if statuses <= {PASSED, BLOCKED} else FAILED)
-        )
-        await self.sink.publish(
-            RunEvent(
-                RUN_COMPLETED,
-                run_id,
-                {
-                    "status": summary["status"],
-                    "phases": summary["phases"],
-                },
-            )
-        )
-        await self.teardown()
-        return summary
+        return p2_results, p3_results
 
     # -- helpers -------------------------------------------------------------
 
@@ -298,6 +342,51 @@ class WorkerEngine:
                 )
             )
         return results, newly_failed_targets
+
+    @staticmethod
+    def _scenario_dict(r: ScenarioResult) -> dict:
+        return {
+            "scenario_id": r.scenario_id,
+            "name": r.name,
+            "status": r.status,
+            "steps": [o.__dict__ for o in r.steps],
+            "notes": list(getattr(r, "notes", []) or []),
+        }
+
+    async def _run_fixtures(
+        self, runner: ScenarioRunner, scenarios: list[dict], *, phase: int, kind: str
+    ) -> list[ScenarioResult]:
+        """Run fixture scenarios one after another (they seed or verify shared
+        state, so never concurrently). A fixture that raises is recorded as
+        FAILED with the error, never propagated: a broken after-fixture must not
+        hide the run's own verdict."""
+        results: list[ScenarioResult] = []
+        for sc in scenarios:
+            try:
+                r = await runner.run(sc, self._execute_step, phase)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — recorded, never raised
+                r = ScenarioResult(
+                    scenario_id=sc.get("id", sc.get("name", "?")),
+                    name=sc.get("name", "?"),
+                    status=FAILED,
+                    notes=[f"fixture_error:{type(exc).__name__}: {exc}"],
+                )
+            results.append(r)
+            await self.sink.publish(
+                RunEvent(
+                    SCENARIO_RESULT,
+                    runner.run_id,
+                    {
+                        "scenario": r.scenario_id,
+                        "phase": phase,
+                        "status": r.status,
+                        "fixture": kind,
+                    },
+                )
+            )
+        return results
 
     @staticmethod
     def _phase_summary(results: list[ScenarioResult]) -> dict:

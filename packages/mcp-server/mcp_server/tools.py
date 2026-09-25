@@ -231,10 +231,14 @@ def iso8583_tlv_build(nodes: list[dict]) -> dict:
 def run_scenario(environment_name: str = "mock",
                  scenario_ids: list[str] | None = None,
                  scenarios: list[dict] | None = None,
-                 label: str | None = None, debug: bool = False) -> dict:
+                 label: str | None = None, debug: bool = False,
+                 fixtures: dict[str, list[str]] | None = None) -> dict:
     """Start a run against an environment (default: mock). Provide saved
     ``scenario_ids`` or inline ``scenarios``. Pass ``debug=True`` to start a
-    step-through run you then drive with the ``debug_*`` tools. Returns
+    step-through run you then drive with the ``debug_*`` tools. ``fixtures``
+    (``{"before": [scenario ids], "after": [scenario ids]}``, ADR-0012) names
+    saved scenarios to run once around the whole run (seed / verify / purge);
+    the orchestrator refuses them unless PAYPROBE_RUN_FIXTURES is on. Returns
     ``{run_id, status}``."""
     body: dict = {"environment_name": environment_name}
     if scenario_ids:
@@ -245,6 +249,8 @@ def run_scenario(environment_name: str = "mock",
         body["label"] = label
     if debug:
         body["debug"] = True
+    if fixtures:
+        body["fixtures"] = fixtures
     return _request("POST", f"{RUN_API}/runs", body)
 
 

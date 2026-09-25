@@ -371,10 +371,12 @@ class DebugSession:
 
 
 class RunRecord:
-    def __init__(self, run_id: str, env: dict, scenarios: list[dict]):
+    def __init__(self, run_id: str, env: dict, scenarios: list[dict], fixtures: dict | None = None):
         self.id = run_id
         self.env = env
         self.scenarios = scenarios
+        #: ADR-0012: {"before": [scenario docs], "after": [scenario docs]} or None
+        self.fixtures = fixtures
         self.status = "pending"
         self.summary: dict | None = None
         self.task: asyncio.Task | None = None
@@ -424,6 +426,9 @@ class CreateRunRequest(BaseModel):
     data_table: str | None = None                   # data-driven: a global table name
     dataset: list[dict[str, Any]] | None = None     # data-driven: inline rows
     requires_topology: str | None = None            # gate: this topology must be up
+    #: ADR-0012 run-level fixtures: {"before": [scenario ids], "after": [scenario ids]}.
+    #: Ordinary scenarios run once around the whole run; gated by PAYPROBE_RUN_FIXTURES.
+    fixtures: dict[str, list[str]] | None = None
 
 
 class CreateRunResponse(BaseModel):
@@ -1331,6 +1336,48 @@ async def _resolve_run(req: CreateRunRequest) -> tuple[dict, list[dict], str]:
     return env, scs, label
 
 
+#: ADR-0012 phase 3 — run-level before/after fixtures on POST /runs. Default OFF
+#: until a real-environment run (phase 4 flips it); with the flag off a request
+#: that names fixtures is refused (400), never silently run without them.
+_RUN_FIXTURES = os.environ.get("PAYPROBE_RUN_FIXTURES", "0").lower() in ("1", "true", "yes")
+
+
+async def _resolve_run_fixtures(req: CreateRunRequest, env: dict) -> dict | None:
+    """Fetch and prepare the fixture scenarios of a run request (ADR-0012).
+
+    Fixtures are saved scenarios named by id under ``before`` / ``after``; they
+    get the same test-data / subflow / table / connection attachment as the
+    run's own scenarios so their targets resolve against the same environment.
+    """
+    if not req.fixtures:
+        return None
+    if not _RUN_FIXTURES:
+        raise HTTPException(
+            400,
+            "run fixtures are disabled on this orchestrator (PAYPROBE_RUN_FIXTURES=0); "
+            "set PAYPROBE_RUN_FIXTURES=1 to run before/after fixtures (ADR-0012)",
+        )
+    unknown = set(req.fixtures) - {"before", "after"}
+    if unknown:
+        raise HTTPException(400, f"fixtures accepts 'before' and 'after' only, got {sorted(unknown)}")
+    out: dict[str, list[dict]] = {}
+    for kind in ("before", "after"):
+        ids = list(req.fixtures.get(kind) or [])
+        if not ids:
+            continue
+        scs = await _fetch_scenarios_by_ids(ids)
+        if len(scs) != len(ids):
+            found = {sc.get("id") for sc in scs}
+            raise HTTPException(404, f"fixture scenario(s) not found: {sorted(set(ids) - found)}")
+        await _attach_subflows(scs)
+        await _attach_tables(scs)
+        await _attach_test_data(scs)
+        await _attach_connections(env, scs, req.environment_name)
+        await _attach_groups(env, scs)
+        out[kind] = scs
+    return out or None
+
+
 def _make_debug_hook(rec: RunRecord, sink: StreamSink):
     async def hook(node_id: str, context: dict) -> None:
         sess = rec.debug
@@ -1364,7 +1411,7 @@ async def _run_engine(rec: RunRecord) -> None:
     run_store.mark_running(rec.id)
     try:
         rec.summary = await engine.run_scenario_batch(
-            rec.scenarios, rec.id, debug_hook=debug_hook,
+            rec.scenarios, rec.id, debug_hook=debug_hook, fixtures=rec.fixtures,
         )
         # Stamp the runtime-resolved target endpoints onto the summary so a later
         # sign-off's provenance records what was actually tested against (ADR-0003).
@@ -1411,9 +1458,10 @@ async def create_run(req: CreateRunRequest) -> CreateRunResponse:
     env, scenarios, label = await _resolve_run(req)
     if not scenarios:
         raise HTTPException(400, "no scenarios to run")
+    fixtures = await _resolve_run_fixtures(req, env)
 
     run_id = str(uuid.uuid4())
-    rec = RunRecord(run_id, env, scenarios)
+    rec = RunRecord(run_id, env, scenarios, fixtures)
     if req.debug:
         # no breakpoints ⇒ step every node; with breakpoints ⇒ run to them
         rec.debug = DebugSession(req.breakpoints, step_mode=not req.breakpoints)
