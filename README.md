@@ -160,7 +160,7 @@ Outbound protocol support for scenario steps and load drivers:
 | `grpc` | gRPC (descriptor / compile / reflection) | ✅ Stable |
 | `nats` | NATS publish / request / JetStream | ✅ Stable |
 | `hsm` | payShield host commands | ✅ Stable |
-| `db_probe` | PostgreSQL / Oracle / MSSQL | ✅ Stable |
+| `db_probe` | PostgreSQL, SQLite (read-only by session; Oracle / MSSQL / MySQL as extras) | 🚧 Planned (ADR-0012, worker class not yet built) |
 | `mock_*` | In-memory | ✅ All systems |
 
 The adapter interface is protocol-agnostic — anything you can speak over a
