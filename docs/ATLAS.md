@@ -530,7 +530,13 @@ simulator keys by `${key.NAME}` reference (Accepted 2026-09-25, phases 0 to 4
 built the same day, opt-in by config; the first follow-on 0011 named;
 closes standards-gap recommendation #1 — the worker, analyzer and catalog
 codecs collapse into `payprobe_common/iso8583`, the bound format's
-`encoding` reaches the socket, precedence flip flag-gated). The finished build specs of the major
+`encoding` reaches the socket, precedence flip flag-gated), 0012 database probe
+adapter + run fixtures (proposed 2026-09-24, not built; the `db_probe_core` /
+`db_probe_switch` keys that nine portal files, the catalog, the assistant, a
+certification pack and the README already reference get a real worker class:
+PostgreSQL + SQLite engines, read-only enforced by the database session,
+named queries as connection data, opt-in writes with runner-executed
+cleanup, run-level `before` / `after` fixtures flag-gated). The finished build specs of the major
 subsystems live in `docs/history/`, in the order they landed;
 `docs/history/PROGRESS.md` and `docs/history/project-review.md` capture the
 mid-project hardening pass. The
