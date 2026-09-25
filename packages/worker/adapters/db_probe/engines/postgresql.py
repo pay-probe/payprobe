@@ -71,6 +71,42 @@ class PostgresEngine(Engine):
         rows = [{c: jsonable(r[c]) for c in columns} for r in fetched[:max_rows]]
         return FetchResult(rows=rows, columns=columns, truncated=truncated)
 
+    async def execute_write(self, sql: str, params: list[Any], *, timeout_ms: int) -> FetchResult:
+        if self._pool is None:
+            raise RuntimeError("postgresql engine is not connected")
+        import asyncpg
+
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute(f"SET LOCAL statement_timeout = {int(timeout_ms)}")
+            try:
+                if " returning " in f" {sql.lower()} ":
+                    stmt = await conn.prepare(sql)
+                    columns = [a.name for a in stmt.get_attributes()]
+                    fetched = await stmt.fetch(*params)
+                    rows = [{c: jsonable(r[c]) for c in columns} for r in fetched]
+                    return FetchResult(rows=rows, columns=columns, rows_affected=len(rows))
+                status = await conn.execute(sql, *params)
+            except asyncpg.exceptions.QueryCanceledError:
+                raise TimeoutError(f"statement exceeded {timeout_ms} ms") from None
+        tail = status.split()[-1] if status else ""
+        affected = int(tail) if tail.isdigit() else 0
+        return FetchResult(rows=[], columns=[], rows_affected=affected)
+
+    async def validate(self, sql: str, nparams: int) -> str | None:
+        if self._pool is None:
+            return "not connected"
+        import asyncpg
+
+        try:
+            async with self._pool.acquire() as conn, conn.transaction(readonly=True):
+                stmt = await conn.prepare(sql)
+                got = len(stmt.get_parameters())
+                if got != nparams:
+                    return f"statement binds {got} parameter(s), 'params' lists {nparams}"
+        except asyncpg.PostgresError as exc:
+            return str(exc)
+        return None
+
     async def close(self) -> None:
         if self._pool is not None:
             pool, self._pool = self._pool, None

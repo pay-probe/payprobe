@@ -146,7 +146,7 @@ async def test_unknown_action_missing_param_and_execute_are_clear_failures_not_c
         missing = await a.execute("query_transaction", {})
         assert not missing.success and "needs payload key(s) ['rrn']" in missing.error
         write = await a.execute("execute", {"sql": "DELETE FROM txn"})
-        assert not write.success and "phase 2" in write.error
+        assert not write.success and "writes: false" in write.error  # read-only connection
         nosql = await a.execute("query", {})
         assert not nosql.success and "needs a 'sql'" in nosql.error
     finally:

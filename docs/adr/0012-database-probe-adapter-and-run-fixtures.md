@@ -1,8 +1,9 @@
 # ADR-0012: A real database probe adapter, and data fixtures before and after execution
 
-**Status:** Proposed — phases 0 and 1 built 2026-09-25 on
-`feature/adr-0012-db-probe` (reads only; the worker class exists, the README
-row is Beta, `PLANNED_ADAPTERS` is empty). Phases 2 to 4 owed.
+**Status:** Proposed — phases 0 to 2 built 2026-09-25 on
+`feature/adr-0012-db-probe` (reads, opt-in writes with runner-executed cleanup,
+load-run refusal, diagnostics databases layer). Phases 3 (run fixtures) and 4
+(portal, flip, Accepted) owed.
 **Date:** 2026-09-24
 **Deciders:** PayProbe maintainers (David + reviewers)
 **Extends:** the "DB probe" adapter promised in `README.md` since the initial
@@ -283,8 +284,10 @@ percentages.
 
 A load request whose scenario touches a `db_probe_*` target is refused with
 400 and a reason unless the probe connection carries `load_ok: true`.
-Mirrors the `external: true` rule of ADR-0009 and lives in the same place in
-`load_coordinator`.
+Mirrors the `external: true` rule of ADR-0009 and lives beside it in the
+orchestrator's `POST /load-runs` guard. Mocked probes (`mode: mock` or a
+`mock: true` adapter) are exempt: they query nothing, and the default load mix
+runs every bundled example, two of which carry a probe step, under mock.
 
 ### Diagnostics
 
@@ -511,7 +514,7 @@ style artifact; attractive, not designed here).
       (gated); `examples/scenarios/db_probe_settlement.json` +
       `examples/connections/bundled.json` SQLite example connection;
       `PLANNED_ADAPTERS` emptied.
-- [ ] Phase 2: `writes`, `execute`, cleanup list in `ScenarioRunner`,
+- [x] Phase 2: `writes`, `execute`, cleanup list in `ScenarioRunner`,
       `load_coordinator` refusal + `load_ok`, diagnostics databases layer,
       tests listed above.
 - [ ] Phase 3: `fixtures` on the run request, engine hook points,

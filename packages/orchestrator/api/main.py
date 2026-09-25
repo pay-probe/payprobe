@@ -1751,6 +1751,33 @@ def _external_load_targets(
     return sorted(refused)
 
 
+def _probe_load_targets(env: dict, scenarios: list[dict], conn_index: dict[str, dict]) -> list[str]:
+    """Names of database-probe connections a load mix would query at the target
+    TPS (ADR-0012). A load run executes the whole scenario per transaction, so a
+    probe step inside it hammers the customer's database; refused unless the
+    connection carries ``load_ok: true`` (a per-environment value)."""
+    refused: set[str] = set()
+    adapters = env.get("adapters") or {}
+    if env.get("mode") == "mock":
+        return []  # a mocked probe queries nothing; the default mix runs every example this way
+
+    def _check(name: str | None) -> None:
+        if not name:
+            return
+        cfg = adapters.get(name) or conn_index.get(name) or {}
+        impl = str(cfg.get("adapter") or cfg.get("type") or name).lower()
+        if impl.startswith("db_probe") and not cfg.get("load_ok") and not cfg.get("mock"):
+            refused.add(name)
+
+    for sc in scenarios:
+        for step in sc.get("steps", []):
+            if step.get("kind", "action") != "action":
+                continue
+            _check(step.get("target"))
+            _check((step.get("config") or {}).get("connection"))
+    return sorted(refused)
+
+
 async def _refuse_external_load_targets(env: dict, scenarios: list[dict]) -> None:
     """400 if the load mix targets an external (real provider) connection.
 
@@ -1777,6 +1804,17 @@ async def _refuse_external_load_targets(env: dict, scenarios: list[dict]) -> Non
             "provider's sandbox or live API violates its terms of service — "
             "point the load at the matching provider simulator instead "
             "(Simulators → provider presets, e.g. the Stripe simulator).",
+        )
+    probes = _probe_load_targets(env, scenarios, conn_index)
+    if probes:
+        raise HTTPException(
+            400,
+            "load run refused: connection(s) "
+            + ", ".join(f"'{n}'" for n in probes)
+            + " are database probes. A load run executes the whole scenario per "
+            "transaction, so the probe would query that database at the target TPS. "
+            "Move the probe step out of the load scenario, or set load_ok: true on the "
+            "connection (per environment) to accept that deliberately (ADR-0012).",
         )
 
 
@@ -6603,6 +6641,45 @@ async def diagnostics(
         except Exception as exc:  # noqa: BLE001 — the failure IS the result
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
+    async def _probe_database(cfg: dict) -> dict:
+        # ADR-0012 databases layer: reachable? does the session refuse a write?
+        # do the named queries parse? Key references resolve like a simulator's.
+        from worker.adapters.db_probe.adapter import DBProbeAdapter
+        from worker.adapters.db_probe.engines import ReadOnlyViolation
+
+        cfg = await _resolve_simulator_key_tokens(dict(cfg))
+        queries = cfg.get("queries") or {}
+        out: dict[str, Any] = {
+            "reachable": False, "read_only_enforced": None,
+            "writes_enabled": bool(cfg.get("writes")),
+            "named_queries": {"count": len(queries), "invalid": []}, "error": None,
+        }
+        adapter = DBProbeAdapter(cfg)
+        try:
+            await asyncio.wait_for(adapter.connect(), 10)
+            out["reachable"] = await adapter.health_check()
+            if out["reachable"] and adapter.engine is not None:
+                try:
+                    await adapter.engine.fetch(
+                        "CREATE TEMP TABLE payprobe_diag_probe (n int)", [], max_rows=1, timeout_ms=2000
+                    )
+                    out["read_only_enforced"] = False
+                except ReadOnlyViolation:
+                    out["read_only_enforced"] = True
+                except Exception:  # noqa: BLE001 — refused for another reason: unknown, not false
+                    out["read_only_enforced"] = None
+                for name, spec in queries.items():
+                    err = await adapter.engine.validate(
+                        str((spec or {}).get("sql") or ""), len((spec or {}).get("params") or [])
+                    )
+                    if err:
+                        out["named_queries"]["invalid"].append(f"{name}: {err}")
+        except Exception as exc:  # noqa: BLE001 — the failure IS the result
+            out["error"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            await adapter.disconnect()
+        return out
+
     ctx = DiagContext(
         http_get_json=_http_get_json,
         scenario_api_url=SCENARIO_API_URL,
@@ -6616,6 +6693,7 @@ async def diagnostics(
         connection_effective=_connection_effective,
         nats_health=_nats_health,
         obtain_oauth_token=_obtain_oauth_token,
+        probe_database=_probe_database,
         capture_state=lambda: {
             "capturing": _CAPTURE_ENABLED,
             "buffered": sum(

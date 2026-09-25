@@ -19,8 +19,13 @@ Response shape (reads)::
     {"status": "APPROVED", "amount": 10000,          # first row, flattened
      "rows": [...], "row_count": 1, "columns": [...], "truncated": false}
 
-Reserved keys win over a same-named column. Writes (``execute`` with a declared
-``cleanup``) are ADR-0012 phase 2 and refused until then.
+Reserved keys win over a same-named column.
+
+Writes (phase 2): ``execute`` runs on a connection that opted in with
+``writes: true`` and must declare a ``cleanup`` statement, which the runner
+executes when the scenario ends whatever the outcome. ``cleanup: null`` marks an
+intentional permanent write and needs ``writes: "permanent"``. A cleanup
+statement itself arrives with ``_cleanup: true`` and needs no cleanup.
 """
 
 from __future__ import annotations
@@ -44,6 +49,19 @@ _LEADING_COMMENTS = re.compile(r"^(\s*(--[^\n]*\n|/\*.*?\*/))*\s*", re.DOTALL)
 MAX_POOL = 16
 
 
+def _writes_mode(value: Any) -> str | None:
+    """``None`` (read-only) | ``"cleanup"`` (writes with declared cleanup) |
+    ``"permanent"`` (also allows ``cleanup: null``)."""
+    if value in (None, False, "", 0):
+        return None
+    text = str(value).lower()
+    if text in ("permanent",):
+        return "permanent"
+    if text in ("true", "1", "yes", "cleanup"):
+        return "cleanup"
+    raise ValueError(f"db_probe 'writes' must be false, true or 'permanent', got {value!r}")
+
+
 def looks_read_only(sql: str) -> bool:
     """Friendly pre-check only; the database session is the real guard."""
     head = _LEADING_COMMENTS.sub("", sql or "").lstrip("(").split(None, 1)
@@ -58,7 +76,7 @@ class DBProbeAdapter(BaseAdapter):
         self.max_rows = max(1, int(config.get("max_rows", 100)))
         self.timeout_ms = max(1, int(config.get("statement_timeout_ms", 5000)))
         self.queries: dict[str, dict] = dict(config.get("queries") or {})
-        self.writes = bool(config.get("writes", False))
+        self.writes = _writes_mode(config.get("writes", False))
         self._pool = max(1, min(int(config.get("pool_size", 2)), pool_size, MAX_POOL))
 
     # -- lifecycle -------------------------------------------------------------
@@ -91,17 +109,23 @@ class DBProbeAdapter(BaseAdapter):
         start = time.monotonic()
         payload = payload or {}
         try:
-            sql, params, shown = self._resolve(action, payload)
-            if not looks_read_only(sql):
-                raise ReadOnlyViolation(
-                    "only read statements run on a probe (SELECT / WITH / EXPLAIN …); "
-                    "writes need ADR-0012 phase 2 and a connection with writes: true"
-                )
             assert self.engine is not None, "db_probe adapter is not connected"
-            result = await self.engine.fetch(
-                sql, params, max_rows=self.max_rows, timeout_ms=self.timeout_ms
-            )
-            response = self._shape(result)
+            if action == "execute":
+                sql, params, shown, cleanup_registered = self._resolve_write(payload)
+                result = await self.engine.execute_write(sql, params, timeout_ms=self.timeout_ms)
+                response = self._shape(result)
+                response["cleanup_registered"] = cleanup_registered
+            else:
+                sql, params, shown = self._resolve(action, payload)
+                if not looks_read_only(sql):
+                    raise ReadOnlyViolation(
+                        "only read statements run through a query (SELECT / WITH / EXPLAIN …); "
+                        "a write is action 'execute' on a connection with writes: true"
+                    )
+                result = await self.engine.fetch(
+                    sql, params, max_rows=self.max_rows, timeout_ms=self.timeout_ms
+                )
+                response = self._shape(result)
             duration = int((time.monotonic() - start) * 1000)
             return StepResult(
                 success=True,
@@ -134,10 +158,6 @@ class DBProbeAdapter(BaseAdapter):
                 raise ValueError("action 'query' needs a 'sql' string in the payload")
             params = list(payload.get("params") or [])
             return sql, params, params
-        if action == "execute":
-            raise ReadOnlyViolation(
-                "action 'execute' (writes) is ADR-0012 phase 2; this probe is read-only"
-            )
         spec = self.queries.get(action)
         if spec is None:
             known = sorted(self.queries)
@@ -152,6 +172,37 @@ class DBProbeAdapter(BaseAdapter):
         params = [payload[k] for k in keys]
         shown = ["***" if is_secret_key(str(k)) else payload[k] for k in keys]
         return str(spec["sql"]), params, shown
+
+    def _resolve_write(self, payload: dict) -> tuple[str, list[Any], list[Any], bool]:
+        """(sql, params, shown params, cleanup_registered) for ``execute``."""
+        if self.writes is None:
+            raise ReadOnlyViolation(
+                "this connection is read-only (writes: false); set writes: true on the "
+                "connection (per environment) to allow 'execute'"
+            )
+        sql = str(payload.get("sql") or "")
+        if not sql:
+            raise ValueError("action 'execute' needs a 'sql' string in the payload")
+        params = list(payload.get("params") or [])
+        is_cleanup = bool(payload.get("_cleanup"))
+        if is_cleanup:
+            return sql, params, params, False
+        if "cleanup" not in payload:
+            raise ValueError(
+                "action 'execute' needs a declared cleanup ({'sql': ..., 'params': [...]}) so the "
+                "runner can undo it when the scenario ends; cleanup: null marks a permanent write "
+                "and needs writes: 'permanent' on the connection"
+            )
+        cleanup = payload.get("cleanup")
+        if cleanup is None:
+            if self.writes != "permanent":
+                raise ReadOnlyViolation(
+                    "a permanent write (cleanup: null) needs writes: 'permanent' on the connection"
+                )
+            return sql, params, params, False
+        if not (isinstance(cleanup, dict) and cleanup.get("sql")):
+            raise ValueError("cleanup must be {'sql': ..., 'params': [...]} or null")
+        return sql, params, params, True
 
     def _shape(self, result: FetchResult) -> dict[str, Any]:
         rows = [self._redact(r) for r in result.rows]

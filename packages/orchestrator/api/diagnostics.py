@@ -45,7 +45,7 @@ from urllib.parse import urlparse
 
 from report_service.diagnose import _CATEGORY_HELP, classify_error
 
-LAYERS = ("services", "connections", "providers", "nats", "listeners", "runs")
+LAYERS = ("services", "connections", "providers", "databases", "nats", "listeners", "runs")
 
 #: cap concurrent live probes so a doctor pass can't stampede the platform
 _MAX_CONCURRENCY = 8
@@ -181,6 +181,10 @@ class DiagContext:
     #: obtainable?" for oauth2 provider connections (PayPal). Optional — when
     #: absent, oauth2 provider connections report config-completeness only.
     obtain_oauth_token: Callable[[dict], Awaitable[dict]] | None = None
+    #: Database probe (ADR-0012): effective probe config -> {reachable,
+    #: read_only_enforced, writes_enabled, named_queries{count, invalid}, error}.
+    #: Optional — absent, the databases layer reports skip.
+    probe_database: Callable[[dict], Awaitable[dict]] | None = None
 
 
 # -- small probes ----------------------------------------------------------------
@@ -691,6 +695,87 @@ async def _provider_checks(
     return [c for group in grouped for c in group]
 
 
+# -- databases layer (ADR-0012) ---------------------------------------------------
+
+
+def _is_probe_conn(doc: dict) -> bool:
+    return str(doc.get("adapter") or doc.get("type") or "").lower().startswith("db_probe")
+
+
+async def _one_database(ctx: DiagContext, doc: dict, env_name: str | None) -> list[dict]:
+    name = str(doc.get("name") or doc.get("id") or "?")
+    if doc.get("disabled"):
+        return [_check(f"db.{name}", "databases", name, "skip", detail="connection is disabled")]
+    cfg = ctx.connection_effective(doc, env_name)
+    engine = str(cfg.get("engine") or "postgresql")
+    target = f"{engine}:{cfg.get('host', cfg.get('dsn', 'local'))}"
+    if ctx.probe_database is None:
+        return [_check(f"db.{name}", "databases", name, "skip", target=target,
+                       detail="no database probe available in this process")]
+    try:
+        res, ms = await _timed(asyncio.wait_for(ctx.probe_database(cfg), 20))
+    except Exception as exc:  # noqa: BLE001
+        return [_check(f"db.{name}", "databases", name, "fail", target=target,
+                       error=f"{type(exc).__name__}: {exc}",
+                       hint="The probe itself failed; check the connection's engine / host / "
+                            "credentials (a ${key.NAME} that does not resolve shows here).")]
+    if res.get("error") or not res.get("reachable"):
+        return [_check(f"db.{name}", "databases", name, "fail", target=target, latency_ms=ms,
+                       error=res.get("error") or "not reachable",
+                       hint="Every scenario touching this probe will be BLOCKED in phase 1. "
+                            "Check host/port/credentials, and that the database accepts "
+                            "connections from the worker; a ${key.NAME} password must exist "
+                            "in the test-data registry.")]
+    nq = res.get("named_queries") or {}
+    invalid = list(nq.get("invalid") or [])
+    ro = res.get("read_only_enforced")
+    writes = bool(res.get("writes_enabled"))
+    detail = (
+        f"reachable; read-only "
+        f"{'enforced by the session' if ro else ('NOT enforced' if ro is False else 'unverified')}; "
+        f"writes {'enabled (opt-in)' if writes else 'disabled'}; "
+        f"{nq.get('count', 0)} named quer{'y' if nq.get('count') == 1 else 'ies'}"
+    )
+    if invalid:
+        return [_check(f"db.{name}", "databases", name, "warn", target=target, latency_ms=ms,
+                       detail=detail + f"; {len(invalid)} do not parse: " + "; ".join(invalid),
+                       hint="Fix the named query SQL on the connection (per environment "
+                            "override if the schema differs); a step using it fails until then.")]
+    if ro is False and not writes:
+        return [_check(f"db.{name}", "databases", name, "warn", target=target, latency_ms=ms,
+                       detail=detail,
+                       hint="The database session accepted a write although the connection is "
+                            "read-only; the engine's read-only mode is not in effect. Use a "
+                            "read-only database role as well.")]
+    return [_check(f"db.{name}", "databases", name, "ok", target=target, latency_ms=ms, detail=detail)]
+
+
+async def _database_checks(
+    ctx: DiagContext, env_name: str | None, only: str | None,
+) -> list[dict]:
+    try:
+        docs = await ctx.http_get_json(ctx.scenario_api_url.rstrip("/") + "/connections")
+    except Exception as exc:  # noqa: BLE001
+        return [_check("db.registry", "databases", "database probes", "fail",
+                       error=f"{type(exc).__name__}: {exc}",
+                       hint="Can't list connections while scenario-service is down.")]
+    docs = [d for d in docs or [] if isinstance(d, dict) and _is_probe_conn(d)]
+    if only:
+        docs = [d for d in docs if str(d.get("name")) == only]
+    if not docs:
+        return [_check("db.none", "databases", "database probes", "skip",
+                       detail="no db_probe connections (add one to prove persisted state, "
+                              "see docs/adapters/db-probe.md)")]
+    sem = asyncio.Semaphore(_MAX_CONCURRENCY)
+
+    async def _guarded(doc: dict) -> list[dict]:
+        async with sem:
+            return await _one_database(ctx, doc, env_name)
+
+    grouped = await asyncio.gather(*(_guarded(d) for d in docs))
+    return [c for group in grouped for c in group]
+
+
 # -- listeners layer ---------------------------------------------------------------
 
 async def _listener_checks(ctx: DiagContext) -> list[dict]:
@@ -965,6 +1050,8 @@ async def run_diagnostics(
         checks += conn_checks
     if "providers" in want:
         checks += await _provider_checks(ctx, environment, connection)
+    if "databases" in want:
+        checks += await _database_checks(ctx, environment, connection)
     if "nats" in want:
         checks += await _nats_checks(ctx)
     if "listeners" in want:

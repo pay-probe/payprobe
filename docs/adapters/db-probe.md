@@ -8,7 +8,8 @@ The probe is a connection of adapter type `db_probe_core` or `db_probe_switch`
 (two default-connection types, one worker class). It is **read-only by the
 database session**: every statement runs in a `READ ONLY` transaction on
 PostgreSQL or under `PRAGMA query_only` on SQLite, so a write is refused by the
-database itself. Writes with declared cleanup are ADR-0012 phase 2.
+database itself. Writes exist only where a connection opts in, and every
+write declares its cleanup (section 5).
 
 ## 1. Create the connection
 
@@ -88,6 +89,38 @@ test suite and under `mode: mock` in CI. Copy both as a starting point.
 - **Unknown action**: the error names the connection's named queries.
 - **More rows than `max_rows`**: `truncated: true`; assert on it if a probe
   must be exact.
+
+## 5. Seed, verify, clean up (writes)
+
+A connection opts into writes per environment (`writes: true`, typically in a
+staging override, never in production). Every `execute` declares a `cleanup`
+statement; the runner executes the declared cleanups when the scenario ends,
+in reverse order, **whatever the outcome** (pass, fail, `stop_on_failure`,
+error), and records each as a `cleanup` step. A failed cleanup adds a
+`cleanup_failed:<step>` note to the scenario and never changes its verdict.
+
+```jsonc
+{ "id": "seed", "kind": "action", "target": "db_probe_core", "action": "execute",
+  "payload": {
+    "sql": "INSERT INTO account (id, balance) VALUES ($1, $2)", "params": ["${vars.acct}", 50000],
+    "cleanup": { "sql": "DELETE FROM account WHERE id = $1", "params": ["${vars.acct}"] } } }
+```
+
+The response carries `rows_affected` (and any `RETURNING` columns) plus
+`cleanup_registered: true`. A **permanent** write (`cleanup: null`) is a
+second opt-in: it needs `writes: "permanent"` on the connection. The read
+session stays read-only on a writes-enabled connection; only `execute` uses
+the write session.
+
+**Load runs refuse probes.** A load run executes the whole scenario per
+transaction, so a probe step would query the database at the target TPS; the
+request is refused with a 400 unless the connection carries `load_ok: true`
+(per environment), mirroring the `external: true` rule for provider sandboxes.
+Mocked probes (`mode: mock`, or `mock: true` on the adapter) are exempt.
+
+**Diagnostics.** `GET /diagnostics?layers=databases` reports, per probe
+connection: reachable, whether the session refused a write, whether writes are
+enabled, and which named queries fail to parse.
 
 ## Engines
 

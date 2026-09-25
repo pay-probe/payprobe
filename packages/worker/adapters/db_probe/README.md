@@ -10,8 +10,10 @@ Design and rationale: [ADR-0012](../../../../docs/adr/0012-database-probe-adapte
 Every read runs inside a read-only session: a `READ ONLY` transaction on
 PostgreSQL, `PRAGMA query_only` on SQLite. A write is refused by the database
 itself, not by a regex (a statement prefilter runs first only to give a readable
-error). Writes (`execute` with a declared `cleanup`) arrive in ADR-0012 phase 2
-and need a connection that opts in with `writes: true`.
+error). Writes need a connection that opts in with `writes: true` and every
+`execute` declares a `cleanup` the runner executes when the scenario ends
+(reverse order, any outcome). `cleanup: null` is a permanent write and needs
+`writes: "permanent"`. The read session stays read-only either way.
 
 ## Engines
 
@@ -52,7 +54,7 @@ best written as `${key.NAME}` references to the test-data registry.
 |---|---|---|
 | `query` | `sql`, `params` (positional list) | rows, read-only |
 | any other name | the keys the named query's `params` list | the named query's rows |
-| `execute` | (phase 2) | refused until then |
+| `execute` | `sql`, `params`, `cleanup: {sql, params}` (or `null` on `writes: "permanent"`) | `rows_affected`, `RETURNING` columns, `cleanup_registered`; connection must carry `writes` |
 
 ## Response shape
 

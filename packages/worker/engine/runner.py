@@ -181,6 +181,8 @@ class ScenarioResult:
     name: str
     status: str
     steps: list[StepOutcome] = field(default_factory=list)
+    #: Advisory notes that never change the verdict (e.g. ``cleanup_failed:<step>``).
+    notes: list[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -1065,6 +1067,13 @@ class GraphExecutor:
             return outcome
 
         all_passed = sr.success and all(a.passed for a in sr.assertions)
+        # A step that declared a cleanup and *did* its write registers the undo
+        # (ADR-0012): executed when the scenario ends, whatever the outcome.
+        cleanups = getattr(self, "_cleanups", None)
+        if sr.success and cleanups is not None and isinstance(payload, dict):
+            undo = payload.get("cleanup")
+            if isinstance(undo, dict) and undo.get("sql"):
+                cleanups.append((target, {**undo, "cleanup": None, "_cleanup": True}, step_id))
         # expose response for later steps' variable references
         context[step_id] = {
             "request": sr.request_payload,
@@ -1129,7 +1138,69 @@ class ScenarioRunner(GraphExecutor):
     scenarios), and accumulates a pass/fail verdict into a :class:`ScenarioResult`.
     """
 
+    #: (target, execute payload, originating step id) registered by steps that
+    #: declared a ``cleanup`` (ADR-0012); run in reverse when the scenario ends.
+    _cleanups: list[tuple[str, dict, str]] | None = None
+
     async def run(
+        self,
+        scenario: dict,
+        execute_step: StepExecutor,
+        phase: int,
+    ) -> ScenarioResult:
+        top_level = self._depth == 0
+        if top_level:
+            self._cleanups = []
+        try:
+            return await self._run_scenario(scenario, execute_step, phase)
+        finally:
+            if top_level and self._cleanups:
+                # runs on pass, fail, stop_on_failure, error and cancel alike
+                await self._run_cleanups(execute_step, scenario, phase)
+
+    async def _run_cleanups(self, execute_step: StepExecutor, scenario: dict, phase: int) -> None:
+        scenario_id = scenario.get("id", scenario.get("name", "?"))
+        result = self._last_result
+        pending, self._cleanups = list(self._cleanups or []), []
+        for target, payload, origin in reversed(pending):
+            started_at_ms = int(time.time() * 1000)
+            shown = {k: v for k, v in payload.items() if k != "_cleanup"}
+            try:
+                sr: StepResult = await execute_step(target, "execute", payload, [])
+                status = PASSED if sr.success else FAILED
+                outcome = StepOutcome(
+                    step_id=f"{origin}.cleanup",
+                    target=target,
+                    action="cleanup",
+                    status=status,
+                    duration_ms=sr.duration_ms,
+                    request=shown,
+                    response=sr.response_payload,
+                    error=sr.error,
+                    started_at_ms=started_at_ms,
+                    raw_log=sr.raw_log or "",
+                    trace=[{"level": "info", "msg": f"cleanup for {origin} · {target}"}]
+                    + ([{"level": "error", "msg": str(sr.error)}] if sr.error else []),
+                )
+            except Exception as exc:  # noqa: BLE001 — a cleanup failure is recorded, never raised
+                outcome = StepOutcome(
+                    step_id=f"{origin}.cleanup",
+                    target=target,
+                    action="cleanup",
+                    status=ERROR,
+                    duration_ms=0,
+                    request=shown,
+                    error=f"{type(exc).__name__}: {exc}",
+                    started_at_ms=started_at_ms,
+                    trace=[{"level": "error", "msg": f"cleanup for {origin}: {exc}"}],
+                )
+            if result is not None:
+                result.steps.append(outcome)
+                if outcome.status != PASSED:
+                    result.notes.append(f"cleanup_failed:{origin}")
+            await self._emit(outcome, scenario_id, phase)
+
+    async def _run_scenario(
         self,
         scenario: dict,
         execute_step: StepExecutor,
@@ -1141,6 +1212,7 @@ class ScenarioRunner(GraphExecutor):
             name=scenario.get("name", scenario_id),
             status=PASSED,
         )
+        self._last_result = result  # cleanups append to it after the walk
         stop_on_failure = scenario.get("stop_on_failure", True)
         self._subflows = scenario.get("subflows") or {}
         # context for variable resolution: step_id -> {request, response}.

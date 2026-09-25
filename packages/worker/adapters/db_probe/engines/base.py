@@ -76,6 +76,18 @@ class Engine(ABC):
         """Run one read statement in a read-only session, positional parameters
         only, at most ``max_rows`` rows (``truncated`` set when more existed)."""
 
+    async def execute_write(self, sql: str, params: list[Any], *, timeout_ms: int) -> FetchResult:
+        """Run one write statement in an ordinary transaction (ADR-0012 phase 2).
+        Only called when the connection opted in with ``writes``; engines that
+        cannot write raise ``NotImplementedError``."""
+        raise NotImplementedError(f"{self.name} engine does not support writes")
+
+    async def validate(self, sql: str, nparams: int) -> str | None:
+        """Check that ``sql`` parses and binds ``nparams`` parameters without
+        running it (the diagnostics databases layer). ``None`` when fine, else
+        the database's error text."""
+        return None
+
     @abstractmethod
     async def close(self) -> None:
         """Release everything."""

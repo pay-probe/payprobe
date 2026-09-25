@@ -220,6 +220,7 @@ class WorkerEngine:
                     "name": r.name,
                     "status": r.status,
                     "steps": [o.__dict__ for o in r.steps],
+                    "notes": list(getattr(r, "notes", []) or []),
                 }
             )
 
