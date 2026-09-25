@@ -194,9 +194,10 @@ in `docs/adr/`.
   opt-in by config, 0012 (real `db_probe`
   adapter: PostgreSQL + SQLite, session-enforced read-only, named queries
   as connection data, opt-in writes with cleanup, run-level fixtures)
-  proposed 2026-09-24, phases 0 to 3 built 2026-09-25 (adapter, writes with
-  cleanup, load refusal, diagnostics layer, flag-gated run fixtures), phase 4
-  in progress; statuses in the files are kept truthful.
+  **Accepted** 2026-09-25, phases 0 to 4 built the same day (adapter, writes
+  with cleanup, load refusal, diagnostics layer, run fixtures default on,
+  portal editor built; click-through owed); statuses in the files are kept
+  truthful.
 - `.claude/skills/payprobe-run-and-operate`, `payprobe-config-and-flags` and
   `payprobe-agents` — operator-grade API/env-flag/agent reference, kept current.
 - `docs/history/` — finished build specs, plans and working notes (accurate at

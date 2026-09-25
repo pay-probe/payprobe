@@ -1336,10 +1336,12 @@ async def _resolve_run(req: CreateRunRequest) -> tuple[dict, list[dict], str]:
     return env, scs, label
 
 
-#: ADR-0012 phase 3 — run-level before/after fixtures on POST /runs. Default OFF
-#: until a real-environment run (phase 4 flips it); with the flag off a request
-#: that names fixtures is refused (400), never silently run without them.
-_RUN_FIXTURES = os.environ.get("PAYPROBE_RUN_FIXTURES", "0").lower() in ("1", "true", "yes")
+#: ADR-0012 — run-level before/after fixtures on POST /runs. Default ON since
+#: 2026-09-25 (phase 4, after a real-environment run against the live registry
+#: and the compose PostgreSQL). Escape hatch: PAYPROBE_RUN_FIXTURES=0, under
+#: which a request that names fixtures is refused (400), never silently run
+#: without them.
+_RUN_FIXTURES = os.environ.get("PAYPROBE_RUN_FIXTURES", "1").lower() not in ("0", "false", "no")
 
 
 async def _resolve_run_fixtures(req: CreateRunRequest, env: dict) -> dict | None:
@@ -1355,7 +1357,7 @@ async def _resolve_run_fixtures(req: CreateRunRequest, env: dict) -> dict | None
         raise HTTPException(
             400,
             "run fixtures are disabled on this orchestrator (PAYPROBE_RUN_FIXTURES=0); "
-            "set PAYPROBE_RUN_FIXTURES=1 to run before/after fixtures (ADR-0012)",
+            "unset it (default on) to run before/after fixtures (ADR-0012)",
         )
     unknown = set(req.fixtures) - {"before", "after"}
     if unknown:

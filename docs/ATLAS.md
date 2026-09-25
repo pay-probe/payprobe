@@ -531,9 +531,9 @@ built the same day, opt-in by config; the first follow-on 0011 named;
 closes standards-gap recommendation #1 — the worker, analyzer and catalog
 codecs collapse into `payprobe_common/iso8583`, the bound format's
 `encoding` reaches the socket, precedence flip flag-gated), 0012 database probe
-adapter + run fixtures (proposed 2026-09-24; phases 0 to 3 built 2026-09-25 on
-`feature/adr-0012-db-probe`, portal editor written, `PAYPROBE_RUN_FIXTURES` default
-off until the phase 4 real-environment run; the `db_probe_core` /
+adapter + run fixtures (Accepted 2026-09-25; phases 0 to 4 built the same day on
+`feature/adr-0012-db-probe`, real-environment run done, `PAYPROBE_RUN_FIXTURES`
+default on, portal click-through owed; the `db_probe_core` /
 `db_probe_switch` keys that nine portal files, the catalog, the assistant, a
 certification pack and the README already reference get a real worker class:
 PostgreSQL + SQLite engines, read-only enforced by the database session,

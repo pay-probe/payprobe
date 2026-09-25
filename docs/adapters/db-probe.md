@@ -126,7 +126,8 @@ enabled, and which named queries fail to parse.
 
 Some state belongs to the whole run, not to one scenario: seed the accounts
 every scenario will use, then verify the ledger and purge afterwards. A run
-request may name saved scenarios as fixtures (behind `PAYPROBE_RUN_FIXTURES=1`):
+request may name saved scenarios as fixtures (on by default;
+`PAYPROBE_RUN_FIXTURES=0` disables and refuses such requests):
 
 ```jsonc
 POST /runs

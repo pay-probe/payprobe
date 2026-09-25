@@ -481,10 +481,10 @@ Notes (verified in `orchestrator/api/main.py` + `api/playground.py`):
   the verdict). `writes: "permanent"` allows `cleanup: null`.
 - Load runs refuse a probe target with 400 unless the connection has
   `load_ok: true` (mocked probes exempt).
-- Run fixtures (`PAYPROBE_RUN_FIXTURES=1`): `POST /runs {"fixtures": {"before": [...], "after": [...]}}`
+- Run fixtures (on by default; `PAYPROBE_RUN_FIXTURES=0` disables): `POST /runs {"fixtures": {"before": [...], "after": [...]}}`
   runs saved scenarios once around the run; results under `summary.fixtures`,
   in the sign-off report's Fixtures section and the provenance stamp. With the
-  flag off the request is refused (400), never silently run without fixtures.
+  flag set to 0 the request is refused (400), never silently run without fixtures.
 
 ## Provenance and maintenance
 

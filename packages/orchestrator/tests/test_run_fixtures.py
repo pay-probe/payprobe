@@ -67,6 +67,16 @@ async def test_fixtures_are_fetched_prepared_and_grouped(monkeypatch):
     assert exc.value.status_code == 400 and "before" in exc.value.detail
 
 
+def test_run_fixtures_flag_defaults_on():
+    """Phase 4 (2026-09-25): on by default; only an explicit 0/false/no opts out."""
+    import os
+
+    if os.environ.get("PAYPROBE_RUN_FIXTURES") is None:
+        assert m._RUN_FIXTURES is True
+    else:
+        pytest.skip("PAYPROBE_RUN_FIXTURES is set in this environment")
+
+
 def test_run_record_carries_fixtures_for_the_engine():
     rec = m.RunRecord("r1", {"adapters": {}}, [], {"before": [{"id": "seed"}]})
     assert rec.fixtures == {"before": [{"id": "seed"}]}

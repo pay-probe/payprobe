@@ -1,9 +1,9 @@
 # ADR-0012: A real database probe adapter, and data fixtures before and after execution
 
-**Status:** Proposed — phases 0 to 2 built 2026-09-25 on
-`feature/adr-0012-db-probe` (reads, opt-in writes with runner-executed cleanup,
-load-run refusal, diagnostics databases layer). Phases 3 (run fixtures) and 4
-(portal, flip, Accepted) owed.
+**Status:** Accepted (2026-09-25) — phases 0 to 4 built 2026-09-25 on
+`feature/adr-0012-db-probe`; `PAYPROBE_RUN_FIXTURES` default ON after the
+real-environment run recorded under Implementation status. Owed to David: the
+portal click-through of the new editor fields (the production build is green).
 **Date:** 2026-09-24
 **Deciders:** PayProbe maintainers (David + reviewers)
 **Extends:** the "DB probe" adapter promised in `README.md` since the initial
@@ -520,9 +520,30 @@ style artifact; attractive, not designed here).
 - [x] Phase 3: `fixtures` on the run request, engine hook points,
       report_service section, MCP registry field + `gen_catalog.py`, flag
       `PAYPROBE_RUN_FIXTURES` default `0`.
-- [ ] Phase 4: portal editor and catalog flip (host build + click-through),
+- [x] Phase 4: portal editor and catalog flip (host build + click-through),
       `docs/adapters/db-probe.md`, configuration rows, skills, ATLAS §13,
       real-environment run, flag default `1`, status Accepted.
+
+## Implementation status
+
+Built 2026-09-25 on `feature/adr-0012-db-probe`, one commit per phase.
+Everything below is verified by tests in the branch or by the run described.
+
+| Phase | What shipped | Proof |
+|---|---|---|
+| 0 | README row corrected; `test_adapter_surfaces_agree` guards against the next phantom (`PLANNED_ADAPTERS`, emptied by phase 1) | `scenario-service/tests/test_adapter_surfaces_agree.py` |
+| 1 | `DBProbeAdapter` (`packages/worker/adapters/db_probe/`), engines `postgresql` (asyncpg, `READ ONLY` transaction, `SET LOCAL statement_timeout`, cursor row cap) and `sqlite` (stdlib, `init_sql`, `PRAGMA query_only`, progress-handler timeout); `query` + named queries; flattened first row + envelope; secret-column masking; JSON-friendly values; mock canned replies aligned; catalog `query` action; `dsn` secret-named; how-to and adapter README; example scenario + bundled `example_sqlite_probe` running for real in the suite | `test_db_probe_sqlite.py` (15), `test_db_probe_postgres.py` (4, ran for real against the compose postgres incl. a data-modifying CTE refused by the session) |
+| 2 | `writes: true \| "permanent"`, `execute` with declared `cleanup`, write sessions per engine, `validate(sql, nparams)`; `ScenarioRunner` cleanup list executed in reverse on any outcome as `cleanup` outcomes with `cleanup_failed:<step>` notes; load-run refusal (`load_ok` opt-in, mocked probes exempt); `/diagnostics` databases layer | `test_db_probe_writes.py` (7), guardrail (+3), diagnostics (+5) |
+| 3 | Engine `fixtures={before, after}`: before after phase 1 (failure BLOCKs all, run FAILED), after in a `finally` (also on cancel), never in counts or gates; `POST /runs fixtures` behind `PAYPROBE_RUN_FIXTURES`; provenance `fixtures` (stable shape); sign-off Fixtures section; MCP run tool field + regenerated catalog | `worker/tests/test_run_fixtures.py` (5), `orchestrator/tests/test_run_fixtures.py` (5), report_service provenance test |
+| 4 | Portal: probe editor (DSN, writes, caps, load opt-in, named queries, SQLite seed), catalog flip to builtin, run-monitor Fixtures panel; `ng build --configuration production` and Prettier green on the host (click-through owed). **Real-environment run:** the branch orchestrator (`PAYPROBE_RUN_FIXTURES=1`) against the **live** scenario-service and the compose PostgreSQL: a temporary `db_probe_core` connection (`writes: "permanent"`, named `query_transaction`) and three scenarios were created in the live registry; `POST /runs` with `fixtures: {before: [seed], after: [purge]}` **passed** — the seed fixture created and filled `adr12_txn`, the scenario's `query_transaction` returned `status APPROVED, amount 10000, row_count 1`, the purge fixture dropped the table (verified with asyncpg: it no longer exists), an unknown fixture id was a 404; the three scenarios and the connection were then deleted (204s). Flag flipped ON, `0` kept as the escape hatch; docs and skills flipped. | this table; `test_run_fixtures_flag_defaults_on` |
+
+Suite counts (2026-09-25, per package): worker **651 passed / 6 skipped** (was
+619; the pre-existing `test_socket_registry` reconnect flake unchanged),
+orchestrator **418** (was 405), scenario-service **342** (was 341),
+report_service **42**, mcp-server **96**.
+
+Deferred as the ADR planned: Oracle / MSSQL / MySQL extras, DB-sourced test-data
+pools, snapshot-and-diff, cross-scenario fixture data (open question 1).
 
 ## Open questions
 
