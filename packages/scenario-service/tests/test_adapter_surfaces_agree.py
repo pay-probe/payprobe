@@ -12,11 +12,12 @@ from __future__ import annotations
 
 from api.connection_store import _ALLOWED_ADAPTERS
 from models.catalog import STEP_CATALOG
+
 from worker.adapters.registry import ADAPTER_MAP
 
 #: Adapters the product surface may offer before the worker implements them.
 #: Emptied by ADR-0012 phase 1; adding a name here is a conscious, reviewed act.
-PLANNED_ADAPTERS: set[str] = {"db_probe_core", "db_probe_switch"}  # ADR-0012 phase 1 empties this
+PLANNED_ADAPTERS: set[str] = set()  # ADR-0012 phase 1 built the probe; nothing is planned
 
 #: Catalog targets whose actions run on an adapter (not a code / crypto step) and
 #: how they name the worker implementation. Same mapping the worker registry

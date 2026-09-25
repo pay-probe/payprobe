@@ -1,0 +1,44 @@
+{
+  "id": "example-db-probe-settlement",
+  "name": "db_probe_settlement",
+  "description": "How-to (ADR-0012): prove that a payment landed in the core database. A named query on the db_probe_core connection looks the transaction up by RRN and asserts on the persisted row; an ad hoc read lists the day's approved amounts. Runs for real against the bundled SQLite example connection (examples/connections/bundled.json, `example_sqlite_probe`) and under mock.",
+  "tags": ["example", "db_probe", "how-to"],
+  "stop_on_failure": true,
+  "timeout_ms": 10000,
+  "test_class": "integration",
+  "steps": [
+    {
+      "id": "settle",
+      "kind": "action",
+      "target": "db_probe_core",
+      "action": "query_transaction",
+      "payload": { "rrn": "000000000001" },
+      "assertions": [
+        { "field": "status", "operator": "eq", "expected": "APPROVED" },
+        { "field": "amount", "operator": "eq", "expected": 10000 },
+        { "field": "row_count", "operator": "eq", "expected": 1 }
+      ]
+    },
+    {
+      "id": "approved_today",
+      "kind": "action",
+      "target": "db_probe_core",
+      "action": "query",
+      "payload": {
+        "sql": "SELECT rrn, amount FROM txn WHERE status = ? ORDER BY rrn",
+        "params": ["APPROVED"]
+      },
+      "assertions": [
+        { "field": "row_count", "operator": "gte", "expected": 1 },
+        { "field": "truncated", "operator": "eq", "expected": false }
+      ]
+    }
+  ],
+  "edges": [
+    { "source": "settle", "source_port": "out", "target": "approved_today" }
+  ],
+  "layout": {
+    "settle": { "x": 80, "y": 240 },
+    "approved_today": { "x": 420, "y": 240 }
+  }
+}

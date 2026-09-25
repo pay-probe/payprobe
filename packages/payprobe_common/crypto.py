@@ -44,6 +44,8 @@ _SECRET_EXACT = {
     # Payment cryptography keys a simulator or connection may carry (ADR-0013):
     # MAC keys, card-verification / PIN-verification keys, EMV master keys, DUKPT BDK.
     "mak", "mac_key", "cvk", "pvk", "mdk", "imk", "bdk", "zpk", "session_key",
+    # Database probe connections (ADR-0012): a DSN commonly embeds a password.
+    "dsn",
 }
 _SECRET_SUFFIXES = ("_password", "_secret", "_token", "_api_key", "_apikey",
                     "_passphrase", "_private_key", "_credential")

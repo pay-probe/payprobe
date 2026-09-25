@@ -270,19 +270,26 @@ STEP_CATALOG: list[TargetSpec] = [
         color="#79c0ff",
         icon="database",
         description="Query the core banking database to assert on persisted "
-                    "transactions and account balances.",
+                    "transactions and account balances. Read-only by the database "
+                    "session; named queries carry the SQL on the connection (ADR-0012).",
         actions=[
             ActionSpec(
                 name="query_transaction",
                 label="Query transaction",
                 payload_hint={"rrn": "string"},
-                response_fields=["status", "amount", "rrn"],
+                response_fields=["status", "amount", "rrn", "row_count"],
             ),
             ActionSpec(
                 name="query_balance",
                 label="Query balance",
                 payload_hint={"account_id": "string"},
-                response_fields=["status", "balance"],
+                response_fields=["status", "balance", "row_count"],
+            ),
+            ActionSpec(
+                name="query",
+                label="Ad hoc SQL (read-only)",
+                payload_hint={"sql": "string", "params": "list"},
+                response_fields=["rows", "row_count", "columns", "truncated"],
             ),
         ],
     ),
@@ -444,10 +451,10 @@ STEP_CATALOG: list[TargetSpec] = [
 
 # Pre-built EMV / payment helper steps (code-backed: parsers, converters,
 # combinators). Appended here so they ship in the default palette.
-from .emv_catalog import EMV_TOOLS_TARGET  # noqa: E402
-from .emv_crypto_catalog import EMV_CRYPTO_TARGET  # noqa: E402
-from .iso_catalog import ISO_MESSAGING_TARGET  # noqa: E402
-from .table_catalog import DATA_TABLES_TARGET  # noqa: E402
+from .emv_catalog import EMV_TOOLS_TARGET
+from .emv_crypto_catalog import EMV_CRYPTO_TARGET
+from .iso_catalog import ISO_MESSAGING_TARGET
+from .table_catalog import DATA_TABLES_TARGET
 
 STEP_CATALOG.append(EMV_TOOLS_TARGET)
 STEP_CATALOG.append(EMV_CRYPTO_TARGET)

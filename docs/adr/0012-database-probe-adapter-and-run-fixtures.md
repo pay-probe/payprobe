@@ -1,6 +1,8 @@
 # ADR-0012: A real database probe adapter, and data fixtures before and after execution
 
-**Status:** Proposed
+**Status:** Proposed — phases 0 and 1 built 2026-09-25 on
+`feature/adr-0012-db-probe` (reads only; the worker class exists, the README
+row is Beta, `PLANNED_ADAPTERS` is empty). Phases 2 to 4 owed.
 **Date:** 2026-09-24
 **Deciders:** PayProbe maintainers (David + reviewers)
 **Extends:** the "DB probe" adapter promised in `README.md` since the initial
@@ -499,10 +501,10 @@ style artifact; attractive, not designed here).
 
 ## Action Items
 
-- [ ] Record baselines: `make test` count; tests referencing `db_probe`.
-- [ ] Phase 0: README row; `test_adapter_surfaces_agree` with
+- [x] Record baselines: `make test` count; tests referencing `db_probe`.
+- [x] Phase 0: README row; `test_adapter_surfaces_agree` with
       `PLANNED_ADAPTERS = {"db_probe_core", "db_probe_switch"}`.
-- [ ] Phase 1: `adapters/db_probe/{adapter,engines/postgresql,engines/sqlite}.py`;
+- [x] Phase 1: `adapters/db_probe/{adapter,engines/postgresql,engines/sqlite}.py`;
       registry unchanged (import now succeeds); mock canned replies aligned;
       `catalog.py` `ActionSpec`s; `adapters/db_probe/README.md`; `dsn` in
       `_SECRET_EXACT`; `test_db_probe_sqlite.py`, `test_db_probe_postgres.py`
