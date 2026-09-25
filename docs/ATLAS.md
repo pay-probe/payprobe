@@ -525,7 +525,9 @@ Accepted on David's Go/No-Go; handoff in
 `docs/history/2026-09-23-agent-hub-handoff.md`), 0011 one ISO 8583 codec +
 one field dictionary + binary wire encodings (Accepted 2026-09-24; phases 0 to 5
 built the same day on `feature/adr-0011-iso8583-codec`, flag default on after a
-real-environment run;
+real-environment run), 0013 ISO 8583 MAC on DE 64/128 + EMV DE 55 awareness +
+simulator keys by `${key.NAME}` reference (proposed 2026-09-25, not built; the
+first follow-on 0011 named;
 closes standards-gap recommendation #1 — the worker, analyzer and catalog
 codecs collapse into `payprobe_common/iso8583`, the bound format's
 `encoding` reaches the socket, precedence flip flag-gated). The finished build specs of the major

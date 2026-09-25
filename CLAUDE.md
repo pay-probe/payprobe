@@ -188,7 +188,9 @@ in `docs/adr/`.
   codec in `payprobe_common` + one field dictionary + binary/BCD/EBCDIC on
   the live wire) **Accepted** 2026-09-24, phases 0 to 5 built the same day on
   `feature/adr-0011-iso8583-codec`; `PAYPROBE_ISO8583_FORMAT_ENCODING`
-  default on after a real-environment run, `0` is the escape hatch; statuses in the files
+  default on after a real-environment run, `0` is the escape hatch, 0013
+  (MAC on DE 64/128 + EMV DE 55 awareness on the wire, simulator keys by
+  reference) proposed 2026-09-25, not built; statuses in the files
   are kept truthful.
 - `.claude/skills/payprobe-run-and-operate`, `payprobe-config-and-flags` and
   `payprobe-agents` — operator-grade API/env-flag/agent reference, kept current.
