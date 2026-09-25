@@ -41,6 +41,9 @@ _SECRET_EXACT = {
     "client_secret", "auth_token", "pin", "pin_key", "kek", "zmk", "tmk",
     # NATS auth (ADR-0006): the nkey seed and JWT creds are bearer secrets.
     "nkey_seed", "creds", "user_jwt",
+    # Payment cryptography keys a simulator or connection may carry (ADR-0013):
+    # MAC keys, card-verification / PIN-verification keys, EMV master keys, DUKPT BDK.
+    "mak", "mac_key", "cvk", "pvk", "mdk", "imk", "bdk", "zpk", "session_key",
 }
 _SECRET_SUFFIXES = ("_password", "_secret", "_token", "_api_key", "_apikey",
                     "_passphrase", "_private_key", "_credential")
@@ -60,8 +63,15 @@ def fingerprint(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:8]
 
 
-def is_secret_key(name: str) -> bool:
+#: Names that are secret only under a given parent key: ``mac.key`` is the MAC
+#: key material (ADR-0013) although a bare ``key`` is too generic to treat as one.
+_SECRET_IN_CONTEXT: dict[str, set[str]] = {"mac": {"key"}}
+
+
+def is_secret_key(name: str, parent: str | None = None) -> bool:
     n = name.lower()
+    if parent and n in _SECRET_IN_CONTEXT.get(parent.lower(), set()):
+        return True
     if n in _SECRET_DENY:
         return False
     if n in _SECRET_EXACT:
@@ -125,19 +135,72 @@ class SecretBox:
         """Deep-copy ``doc`` decrypting any ``enc:v1:`` values (key-agnostic)."""
         return self._walk(doc, encrypt=False)
 
-    def _walk(self, node: Any, *, encrypt: bool, secret_ctx: bool = False) -> Any:
+    def _walk(
+        self, node: Any, *, encrypt: bool, secret_ctx: bool = False, parent: str | None = None
+    ) -> Any:
         if isinstance(node, dict):
             out: dict[str, Any] = {}
             for k, v in node.items():
-                out[k] = self._walk(v, encrypt=encrypt, secret_ctx=is_secret_key(str(k)))
+                out[k] = self._walk(
+                    v, encrypt=encrypt, secret_ctx=is_secret_key(str(k), parent), parent=str(k)
+                )
             return out
         if isinstance(node, list):
-            return [self._walk(v, encrypt=encrypt, secret_ctx=secret_ctx) for v in node]
+            return [
+                self._walk(v, encrypt=encrypt, secret_ctx=secret_ctx, parent=parent) for v in node
+            ]
         if isinstance(node, str):
             if encrypt:
                 return self.encrypt(node) if secret_ctx else node
             return self.decrypt(node)  # decrypt is key-agnostic (tagged values)
         return node
+
+
+#: Prefix of a masked secret as the APIs return it: the mask plus a fingerprint,
+#: so a reader can see that a secret exists (and whether it changed) without
+#: ever seeing it, and a writer can send the mask back unchanged to mean
+#: "keep what is stored".
+MASK_PREFIX = "••••"
+
+
+def mask_value(value: str) -> str:
+    """The API-visible form of a secret value (never reversible)."""
+    return f"{MASK_PREFIX}{fingerprint(value)}" if value else ""
+
+
+def is_masked(value: Any) -> bool:
+    return isinstance(value, str) and value.startswith(MASK_PREFIX)
+
+
+def mask_doc(doc: Any, *, secret_ctx: bool = False, parent: str | None = None) -> Any:
+    """Deep-copy ``doc`` replacing every string under a secret-named key (or
+    inside a list under one) with :func:`mask_value`. Non-secret values and
+    structure are untouched, so a masked document still describes its shape."""
+    if isinstance(doc, dict):
+        return {
+            k: mask_doc(v, secret_ctx=is_secret_key(str(k), parent), parent=str(k))
+            for k, v in doc.items()
+        }
+    if isinstance(doc, list):
+        return [mask_doc(v, secret_ctx=secret_ctx, parent=parent) for v in doc]
+    if isinstance(doc, str) and secret_ctx and doc:
+        return doc if is_masked(doc) else mask_value(doc)
+    return doc
+
+
+def merge_masked(incoming: Any, stored: Any) -> Any:
+    """Apply an update that may carry masks: wherever ``incoming`` holds a masked
+    value, the corresponding ``stored`` value is kept; everything else in
+    ``incoming`` wins. Lets a client round-trip a masked document unchanged."""
+    if isinstance(incoming, dict) and isinstance(stored, dict):
+        return {k: merge_masked(v, stored.get(k)) for k, v in incoming.items()}
+    if isinstance(incoming, list) and isinstance(stored, list):
+        return [
+            merge_masked(v, stored[i] if i < len(stored) else None) for i, v in enumerate(incoming)
+        ]
+    if is_masked(incoming) and isinstance(stored, str):
+        return stored
+    return incoming
 
 
 # Process-wide default box from the environment.

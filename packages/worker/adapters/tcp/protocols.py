@@ -71,6 +71,11 @@ class TcpProtocol(ABC):
         """Did a health-probe reply indicate a live, healthy peer?"""
         return bool(parsed)
 
+    def reject_reason(self, parsed: dict) -> str | None:
+        """Why a decoded reply must fail the step although it arrived (e.g. a MAC
+        that did not verify under ``on_failure: reject``); ``None`` to accept."""
+        return None
+
 
 # --------------------------------------------------------------------------- #
 # ISO 8583
@@ -124,6 +129,8 @@ class Iso8583Protocol(TcpProtocol):
         self.auto_fields = bool(config.get("auto_fields", True))
         #: Wire encoding profile (ADR-0011): ``"ascii"`` | ``"binary"`` | axis dict.
         self.wire_encoding = iso8583.wire_encoding_from_config(config)
+        #: Message authentication (ADR-0013): a resolved ``mac`` block, or None.
+        self.mac_spec = iso8583.mac_spec_from_config(config)
         self._stan = 0
 
     def encode(self, action: str, payload: dict) -> EncodedMessage:
@@ -143,7 +150,17 @@ class Iso8583Protocol(TcpProtocol):
         if self.auto_fields:
             self._stamp_time_fields(values, fields)
         expected = self.resp_mti_map.get(mti, mti) if self.match_mti else None
-        body = iso8583.pack(mti, values, fields, self.wire_encoding)
+        if self.mac_spec:
+            body = iso8583.mac.pack_with_mac(
+                mti,
+                values,
+                fields,
+                self.wire_encoding,
+                self.mac_spec,
+                iso8583.mac_algorithm(self.mac_spec),
+            )
+        else:
+            body = iso8583.pack(mti, values, fields, self.wire_encoding)
         return EncodedMessage(self._key(corr, expected), body, {"mti": mti, "values": values})
 
     def _resolve_fields(self, payload: dict) -> dict:
@@ -159,7 +176,23 @@ class Iso8583Protocol(TcpProtocol):
         return f if isinstance(f, dict) and f else self.fields
 
     def decode(self, body: bytes) -> dict:
+        if self.mac_spec:
+            return iso8583.mac.unpack_and_verify(
+                body,
+                self.fields,
+                self.wire_encoding,
+                self.mac_spec,
+                iso8583.mac_algorithm(self.mac_spec),
+            )
         return iso8583.unpack(body, self.fields, self.wire_encoding)
+
+    def reject_reason(self, parsed: dict) -> str | None:
+        if not self.mac_spec or self.mac_spec["on_failure"] != "reject":
+            return None
+        verdict = parsed.get("mac") or {}
+        if verdict.get("ok") is True:
+            return None
+        return verdict.get("error") or f"DE {self.mac_spec['field']}: no MAC present"
 
     def correlation_key(self, parsed: dict) -> str | None:
         corr = (parsed.get("fields", {}).get(self.corr_field) or {}).get("value")
@@ -169,7 +202,7 @@ class Iso8583Protocol(TcpProtocol):
 
     def shape_response(self, parsed: dict) -> dict:
         de = {k: v.get("value") for k, v in parsed.get("fields", {}).items()}
-        return {
+        out = {
             "mti": parsed.get("mti"),
             "de_list": parsed.get("de_list", []),
             "fields": de,
@@ -178,6 +211,12 @@ class Iso8583Protocol(TcpProtocol):
             "rrn": de.get("37"),
             "auth_code": de.get("38"),
         }
+        if self.mac_spec:
+            verdict = parsed.get("mac") or {}
+            out["mac_verified"] = verdict.get("ok")
+            if verdict.get("error"):
+                out["mac_error"] = verdict["error"]
+        return out
 
     def health_probe(self) -> tuple[str, dict]:
         return ("send_0800", {"mti": "0800", "values": {"70": "301"}})

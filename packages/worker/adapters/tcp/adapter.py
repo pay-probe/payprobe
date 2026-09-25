@@ -239,6 +239,16 @@ class TcpAdapter(BaseAdapter):
             msg = self.protocol.encode(action, payload)
             parsed = await self._exchange(msg)
             shaped = self.protocol.shape_response(parsed)
+            reason = self.protocol.reject_reason(parsed)
+            if reason:
+                return StepResult(
+                    success=False,
+                    request_payload=msg.request or payload,
+                    response_payload=shaped,
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                    raw_log=self._wire_log(msg, parsed, shaped),
+                    error=reason,
+                )
             return StepResult(
                 success=True,
                 request_payload=msg.request or payload,

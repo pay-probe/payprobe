@@ -29,6 +29,7 @@ from payprobe_common.iso8583 import (
     ISO8583_1993,
     VISA_BASE_I,
     Iso8583DecodeError,
+    mac,
     mti_encoding,
     pack,
     resolve_encoding,
@@ -38,6 +39,47 @@ from payprobe_common.iso8583 import (
 )
 
 iso_validate = validate_message
+
+
+# -- message authentication (ADR-0013) ------------------------------------------
+#
+# The shared package owns the MAC *contract* (field, coverage, splice, compare);
+# the algorithms need pycryptodome and therefore live here, bound by name.
+
+
+def _retail_mac(key_hex: str, data: bytes) -> bytes:
+    from worker.engine import crypto_tools as ct
+
+    return bytes.fromhex(ct.retail_mac(key_hex, data.hex())["mac"])
+
+
+def _aes_cmac(key_hex: str, data: bytes) -> bytes:
+    from worker.engine import crypto_tools as ct
+
+    return bytes.fromhex(ct.aes_cmac(key_hex, data.hex())["mac"])
+
+
+MAC_ALGORITHMS: dict[str, mac.MacAlgorithm] = {"retail_mac": _retail_mac, "aes_cmac": _aes_cmac}
+
+
+def mac_spec_from_config(config: dict | None) -> dict | None:
+    """The resolved ``mac`` block of a connection / simulator config, or ``None``.
+
+    Refuses an unresolved ``${key.NAME}`` (the orchestrator resolves those before
+    a simulator starts; a worker must never guess) and any malformed block, at
+    construction time, so a typo can never mean "no MAC".
+    """
+    spec = mac.resolve_mac_spec((config or {}).get("mac"))
+    if spec and mac.key_is_unresolved(spec):
+        raise ValueError(
+            f"mac.key {spec['key']!r} is an unresolved key reference; bind the simulator or "
+            "connection through the orchestrator (which resolves ${key.NAME}) or supply material"
+        )
+    return spec
+
+
+def mac_algorithm(spec: dict) -> mac.MacAlgorithm:
+    return MAC_ALGORITHMS[spec["algorithm"]]
 
 
 def iso_unpack(msg: str, fields: dict[str, dict]) -> dict[str, Any]:
@@ -61,11 +103,15 @@ __all__ = [
     "DEFAULT_FIELDS",
     "ISO8583_1987",
     "ISO8583_1993",
+    "MAC_ALGORITHMS",
     "VISA_BASE_I",
     "Iso8583DecodeError",
     "iso_pack",
     "iso_unpack",
     "iso_validate",
+    "mac",
+    "mac_algorithm",
+    "mac_spec_from_config",
     "mti_encoding",
     "pack",
     "resolve_encoding",

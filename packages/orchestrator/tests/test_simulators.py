@@ -710,3 +710,98 @@ async def test_responder_config_refused_by_the_worker_is_a_400(monkeypatch):
             "encoding": "binary", "framing": {"encoding": "ascii"},
         })
     assert exc.value.status_code == 400 and "disagree" in exc.value.detail
+
+
+# -- ADR-0013: MAC block from the format, keys by reference, secrets never echoed --
+
+_MAK = "0123456789ABCDEFFEDCBA9876543210"
+
+
+def _registry(monkeypatch, *, fmt=None, keys=None):
+    """Fake scenario-service: formats by id, key material by name."""
+    async def _fake_get(url):
+        if "/test-data/keys/" in url:
+            name = url.rsplit("/keys/", 1)[1].split("/material")[0]
+            if name in (keys or {}):
+                return {"name": name, "value": keys[name]}
+            raise RuntimeError("404")
+        return fmt or {}
+
+    monkeypatch.setattr(m, "_http_get_json", _fake_get)
+
+
+async def test_format_mac_block_binds_and_its_key_reference_resolves(monkeypatch):
+    _registry(monkeypatch,
+              fmt={"id": "switch-dialect", "definition": {
+                  "encoding": "ascii",
+                  "fields": {"11": {"name": "STAN", "len_type": "fixed", "length": 6, "type": "n"},
+                             "64": {"name": "MAC", "len_type": "fixed", "length": 16, "type": "b"}},
+                  "mac": {"field": 64, "algorithm": "retail_mac", "key": "${key.SWITCH_MAK}",
+                          "on_failure": "reject"}}},
+              keys={"SWITCH_MAK": _MAK})
+    cfg = await m._resolve_simulator_config(
+        {"protocol": "iso8583", "port": 7013, "message_format_id": "switch-dialect"})
+    assert cfg["mac"] == {"field": 64, "algorithm": "retail_mac", "key": _MAK, "on_failure": "reject"}
+    # a responder built from it verifies MACs (the worker refuses unresolved keys)
+    r = m._responder_for(cfg)
+    assert r.mac_spec["key"] == _MAK and r.mac_spec["on_failure"] == "reject"
+
+
+async def test_inline_mac_block_wins_over_the_format_and_visa_keys_resolve_too(monkeypatch):
+    _registry(monkeypatch,
+              fmt={"id": "visa-base1", "definition": {"fields": {}, "mac": {"field": 128, "key": "${key.OTHER}"}}},
+              keys={"MAK2": _MAK, "CVK": "11111111111111112222222222222222"})
+    cfg = await m._resolve_simulator_config({
+        "protocol": "visa", "port": 7014,
+        "mac": {"field": 64, "key": "${key.MAK2}"},
+        "visa": {"verify_cvv2": {"field": "48", "cvk": "${key.CVK}"}},
+    })
+    assert cfg["mac"]["field"] == 64 and cfg["mac"]["key"] == _MAK
+    assert cfg["visa"]["verify_cvv2"]["cvk"] == "11111111111111112222222222222222"
+
+
+async def test_unresolvable_key_reference_is_a_400_not_a_silent_no_mac(monkeypatch):
+    _registry(monkeypatch, keys={})
+    with pytest.raises(HTTPException) as exc:
+        await m._start_responder("sid-adr13", "x", {
+            "protocol": "iso8583", "port": 0, "mac": {"field": 64, "key": "${key.MISSING}"}})
+    assert exc.value.status_code == 400 and "unresolved key reference" in exc.value.detail
+
+
+def test_saved_simulator_masks_secrets_on_read_and_keeps_them_on_masked_update():
+    store = SimulatorStore(":memory:")
+    saved = store.create({"label": "switch", "config": {
+        "protocol": "visa", "mac": {"field": 64, "key": _MAK},
+        "visa": {"verify_pvv": {"pvk": "AAAA"}}, "framing": {"key": "not-a-secret"}}})
+    sid = saved["id"]
+    view = store.get(sid)["config"]
+    assert view["mac"]["key"].startswith("••••") and _MAK not in str(view)
+    assert view["visa"]["verify_pvv"]["pvk"].startswith("••••")
+    assert view["framing"]["key"] == "not-a-secret"  # a bare 'key' is not a secret
+    assert all(_MAK not in str(s) for s in store.list())
+    # the runtime path still gets plaintext
+    assert store.raw_config(sid)["mac"]["key"] == _MAK
+    # a client sends the masked view back with one unrelated edit: secrets survive
+    view["mac"]["field"] = 128
+    store.update(sid, {"config": view})
+    raw = store.raw_config(sid)
+    assert raw["mac"] == {"field": 128, "key": _MAK} and raw["visa"]["verify_pvv"]["pvk"] == "AAAA"
+    # sending a new plaintext value replaces it
+    view["mac"]["key"] = "FEDCBA98765432100123456789ABCDEF"
+    store.update(sid, {"config": view})
+    assert store.raw_config(sid)["mac"]["key"] == "FEDCBA98765432100123456789ABCDEF"
+
+
+def test_saved_simulator_secrets_are_encrypted_at_rest(tmp_path, monkeypatch):
+    from payprobe_common import crypto as pc
+
+    box = pc.SecretBox(pc.SecretBox.generate_key())
+    monkeypatch.setattr("orchestrator.api.simulator_store.default_box", box)
+    path = tmp_path / "simulators.json"
+    store = SimulatorStore(str(path))
+    store.create({"label": "switch", "config": {"mac": {"field": 64, "key": _MAK}, "port": 7000}})
+    on_disk = path.read_text()
+    assert _MAK not in on_disk and "enc:v1:" in on_disk
+    assert '"port": 7000' in on_disk  # only secret-named values are encrypted
+    reloaded = SimulatorStore(str(path))
+    assert reloaded.raw_config(store.list()[0]["id"])["mac"]["key"] == _MAK

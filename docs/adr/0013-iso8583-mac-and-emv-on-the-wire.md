@@ -70,8 +70,10 @@ ignored it.
   read back or persisted.
 - **MAC coverage and encoding must be exact.** Retail MAC over the message
   bytes as they are on the wire (so the same message MACs differently under
-  ASCII and binary, which is correct), 4-byte or 8-byte truncation, and the
-  MAC field's own encoding (`b`: hex text under ASCII, raw under binary).
+  ASCII and binary, which is correct), 8-byte or 4-byte truncation (DE 64 /
+  128 are 64-bit fields, so a full 16-byte AES-CMAC never fits; the first
+  smoke test proved that by mis-slicing the coverage), and the MAC field's own
+  encoding (`b`: hex text under ASCII, raw under binary).
 - **The MAC is dialect data.** Which field, which algorithm, how long, is a
   property of the host dialect, like `encoding`. It belongs on the Message
   Format with a per-connection / per-simulator override, not on every step.
@@ -95,7 +97,7 @@ ignored it.
   "field": 64,                      // 64 | 128 (must be the last field present)
   "algorithm": "retail_mac",        // retail_mac (ISO 9797-1 alg 3) | aes_cmac
   "key": "${key.SWITCH_MAK}",       // resolved server-side; inline hex still accepted, always masked
-  "length": 8,                      // MAC bytes on the wire: 4 or 8 (retail), 8 or 16 (CMAC)
+  "length": 8,                      // MAC bytes on the wire: 8 or 4 (the field is 64 bits; CMAC is truncated)
   "on_failure": "warn"              // warn | reject  (responder: DE 39 = 30; adapter: step fails)
 }
 ```
