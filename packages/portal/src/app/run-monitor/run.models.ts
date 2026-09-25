@@ -94,6 +94,10 @@ export interface CreateRunRequest {
   dataset?: Record<string, unknown>[];
   /** Gate: this network (historical field name) must be live first, else 424. */
   requires_topology?: string;
+  /** ADR-0012 run-level fixtures: saved scenarios run once around the whole run
+   * (before: seed, after: verify / purge). Needs PAYPROBE_RUN_FIXTURES on the
+   * orchestrator; refused with 400 otherwise. */
+  fixtures?: { before?: string[]; after?: string[] };
 }
 
 /** A bundled environment the editor's Execute picker can run against. */
