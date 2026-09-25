@@ -53,7 +53,8 @@ Config (JSON-friendly)::
                          "service_code": "000", "decline": "N7"},
         "verify_pvv":  {"pin_field": "52", "pvv_field": "44", "pvk": "<32H PVK>",
                          "pvki": "1", "decline": "55"},
-        "verify_arqc": {"field": "55", "session_key": "<32H SK>", "decline": "05"}
+        "verify_arqc": {"session_key": "<32H SK>" | "mdk": "<32H MDK>", "decline": "05",
+                        "data_tags": [...], "arpc": true}   // see _arqc_check
       },
 
       # standard responder extras still apply and take precedence:
@@ -71,6 +72,8 @@ from __future__ import annotations
 import logging
 import random
 import string
+
+from payprobe_common.iso8583 import build_tlv
 
 from ...engine import crypto_tools as ct
 from ..tcp import iso8583
@@ -181,7 +184,12 @@ class VisaSimulator(TcpResponder):
             return {"echo": echo, "set": {"39": RC_ISSUER_UNAVAILABLE}}
 
         approve = str(self.visa.get("approve_code", RC_APPROVED))
-        return {"echo": echo, "set": {"39": approve}, "generate": {"38": _gen_auth_id()}}
+        action = {"echo": echo, "set": {"39": approve}, "generate": {"38": _gen_auth_id()}}
+        if (cfg := self.visa.get("verify_arqc")) and cfg.get("arpc"):
+            arpc = self._arpc_for(de, cfg, approve)
+            if arpc:
+                action["set"]["55"] = arpc
+        return action
 
     def _decline_reason(self, de: dict) -> str | None:
         """Return a DE 39 decline code if the auth should be declined, else None.
@@ -210,7 +218,7 @@ class VisaSimulator(TcpResponder):
         if (cfg := v.get("verify_pvv")) and not self._pvv_ok(de, cfg):
             return str(cfg.get("decline", RC_PIN_INVALID))
 
-        if (cfg := v.get("verify_arqc")) and not self._arqc_ok(de, cfg):
+        if (cfg := v.get("verify_arqc")) and not self._arqc_check(de, cfg)[0]:
             return str(cfg.get("decline", RC_DO_NOT_HONOR))
 
         return None
@@ -259,16 +267,86 @@ class VisaSimulator(TcpResponder):
             return True
         return presented == expected
 
-    def _arqc_ok(self, de: dict, cfg: dict) -> bool:
-        arqc = str(de.get(str(cfg.get("field", "55")), "") or "").strip()
-        if not (arqc and cfg.get("session_key") and cfg.get("data")):
-            return True
+    #: Cryptogram input data, CVN 10 / 18 order: amount, other amount, terminal
+    #: country, TVR, currency, date, type, unpredictable number, AIP, ATC, IAD.
+    ARQC_DATA_TAGS = (
+        "9F02",
+        "9F03",
+        "9F1A",
+        "95",
+        "5F2A",
+        "9A",
+        "9C",
+        "9F37",
+        "82",
+        "9F36",
+        "9F10",
+    )
+
+    def _arqc_session_key(self, de: dict, emv: dict, cfg: dict) -> str | None:
+        """The AC session key: given (``session_key``) or derived issuer-style from
+        ``mdk`` + PAN (DE 2) + PSN (tag 5F34 or ``psn``) + ATC (tag 9F36)."""
+        if cfg.get("session_key"):
+            return str(cfg["session_key"])
+        mdk, pan, atc = cfg.get("mdk"), str(de.get("2", "") or ""), emv.get("9F36")
+        if not (mdk and pan and atc):
+            return None
+        psn = emv.get("5F34") or str(cfg.get("psn", "00"))
+        udk = ct.emv_icc_mk(str(mdk), pan, psn[-2:].zfill(2))["udk"]
+        return ct.emv_session_key(udk, atc)["session_key"]
+
+    def _arqc_check(self, de: dict, cfg: dict) -> tuple[bool, str | None]:
+        """Verify the request's cryptogram. Returns ``(ok, session_key)``.
+
+        Two shapes (ADR-0013). **Message-driven** (the issuer behaviour): the
+        ARQC is tag 9F26 of DE 55, the data is the message's own tags in
+        ``data_tags`` order (default CVN 10/18), the key is given or derived from
+        an MDK. **Legacy vector**: ``data`` supplied verbatim in the config and the
+        whole configured ``field`` holding the cryptogram. Nothing to check
+        against (no DE 55, no key) does not fail the auth, as for CVV2 / PVV.
+        """
+        if cfg.get("data"):
+            arqc = str(de.get(str(cfg.get("field", "55")), "") or "").strip()
+            sk = cfg.get("session_key")
+            if not (arqc and sk):
+                return True, None
+            try:
+                res = ct.arqc(str(sk), str(cfg["data"]), expected=arqc)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("visa: ARQC check skipped (%s)", exc)
+                return True, None
+            return bool(res.get("match")), str(sk)
+        emv = iso8583.emv_tags(de) or {}
+        arqc = emv.get("9F26", "")
+        if not arqc:
+            return True, None
         try:
-            res = ct.arqc(cfg["session_key"], str(cfg["data"]), expected=arqc)
+            sk = self._arqc_session_key(de, emv, cfg)
+            if not sk:
+                return True, None
+            tags = cfg.get("data_tags") or self.ARQC_DATA_TAGS
+            data = "".join(emv.get(str(t).upper(), "") for t in tags)
+            res = ct.arqc(sk, data, expected=arqc)
         except Exception as exc:  # noqa: BLE001
             log.warning("visa: ARQC check skipped (%s)", exc)
-            return True
-        return bool(res.get("match", res.get("arqc", "").upper() == arqc.upper()))
+            return True, None
+        return bool(res.get("match")), sk
+
+    def _arpc_for(self, de: dict, cfg: dict, response_code: str) -> str | None:
+        """Issuer Authentication Data for the reply: tag 91 = ARPC (method 1, ARC
+        = the DE 39 we answer with) || ARC, as a DE 55 hex string."""
+        ok, sk = self._arqc_check(de, cfg)
+        emv = iso8583.emv_tags(de) or {}
+        arqc = emv.get("9F26")
+        if not (ok and sk and arqc):
+            return None
+        try:
+            arc_hex = response_code.encode("ascii").hex().upper()
+            arpc = ct.arpc(sk, arqc, arc_hex=arc_hex, method="1")["arpc"]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("visa: ARPC skipped (%s)", exc)
+            return None
+        return build_tlv([{"tag": "91", "value": arpc + arc_hex}])
 
     @property
     def flows_supported(self) -> list[str]:

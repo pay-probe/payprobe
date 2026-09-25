@@ -39,7 +39,7 @@ from .codec import (
     unpack,
 )
 from .fields import BUILTIN_TABLES, ISO8583_1987, ISO8583_1993, VISA_BASE_I
-from .tlv import EMV_TAGS, build_tlv, parse_tlv
+from .tlv import EMV_TAGS, build_tlv, parse_tlv, tag_map
 from .validate import charset_error, length_error, validate_field, validate_message
 
 #: The table used when nothing binds a dialect (worker codec, Inspector).
@@ -126,6 +126,7 @@ __all__ = [
     "pack",
     "parse_tlv",
     "resolve_encoding",
+    "tag_map",
     "unpack",
     "validate_field",
     "validate_message",

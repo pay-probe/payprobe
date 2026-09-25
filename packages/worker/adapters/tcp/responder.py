@@ -122,6 +122,13 @@ class TcpResponder:
         #: is refused here, at construction, never silently picked.
         self.wire_encoding = iso8583.wire_encoding_from_config(config, protocol=self.protocol)
         self.mti_encoding = iso8583.mti_encoding(self.wire_encoding)
+        #: Message authentication (ADR-0013): a resolved ``mac`` block, or None.
+        #: Inbound MACs are verified in ``_decode``; a failure is a dialect
+        #: violation (``_validate``) and, under ``on_failure: reject``, answered
+        #: with the format-error reply whatever ``validate.mode`` says.
+        self.mac_spec = (
+            iso8583.mac_spec_from_config(config) if self.protocol != "header_echo" else None
+        )
 
         # header_echo specifics
         he = config.get("header_echo", {})
@@ -302,7 +309,7 @@ class TcpResponder:
                 if violations:
                     self.invalid += 1
                     parsed["validation"] = violations
-                if violations and self.validate_mode == "reject":
+                if violations and (self.validate_mode == "reject" or parsed.get("mac_reject")):
                     action = self._format_error_action(parsed)
                 else:
                     action = await self._resolve_async(parsed)
@@ -400,7 +407,16 @@ class TcpResponder:
                 "data": text[hb + rcb :],
                 "raw": text,
             }
-        parsed = iso8583.unpack(body, self.fields, self.wire_encoding)
+        if self.mac_spec:
+            parsed = iso8583.mac.unpack_and_verify(
+                body,
+                self.fields,
+                self.wire_encoding,
+                self.mac_spec,
+                iso8583.mac_algorithm(self.mac_spec),
+            )
+        else:
+            parsed = iso8583.unpack(body, self.fields, self.wire_encoding)
         out = {
             "mti": parsed["mti"],
             "de": {k: v.get("value") for k, v in parsed["fields"].items()},
@@ -411,6 +427,10 @@ class TcpResponder:
         }
         if parsed.get("truncated"):
             out["decode_error"] = parsed.get("error")
+        if "mac" in parsed:
+            out["mac"] = parsed["mac"]
+        if (emv := iso8583.emv_tags(out["de"])) is not None:
+            out["emv"] = emv  # {tag: hex} view of DE 55 for rules / traces (ADR-0013)
         return out
 
     def _encode(self, parsed: dict, action: dict) -> bytes:
@@ -463,6 +483,15 @@ class TcpResponder:
                     values[str(de)] = gen_spec
         values.setdefault("39", "00")
         mti = action.get("mti") or _next_mti(parsed.get("mti", "0200"))
+        if self.mac_spec:
+            return iso8583.mac.pack_with_mac(
+                mti,
+                values,
+                self.fields,
+                self.wire_encoding,
+                self.mac_spec,
+                iso8583.mac_algorithm(self.mac_spec),
+            )
         return iso8583.pack(mti, values, self.fields, self.wire_encoding)
 
     # -- rule resolution -----------------------------------------------------
@@ -478,15 +507,25 @@ class TcpResponder:
     def _validate(self, parsed: dict) -> list[str]:
         """Check an inbound iso8583 message against the bound dialect. Returns
         the list of violations (empty when off, non-iso, or conformant)."""
-        if self.validate_mode == "off" or "de" not in parsed:
+        if "de" not in parsed:
             return []
-        return iso8583.iso_validate(
-            parsed.get("mti", ""),
-            self.fields,
-            parsed.get("de", {}),
-            parsed.get("de_list"),
-            self.validate_presence,
-        )
+        issues: list[str] = []
+        if self.validate_mode != "off":
+            issues = iso8583.iso_validate(
+                parsed.get("mti", ""),
+                self.fields,
+                parsed.get("de", {}),
+                parsed.get("de_list"),
+                self.validate_presence,
+            )
+        if self.mac_spec:
+            verdict = parsed.get("mac") or {}
+            if verdict.get("ok") is not True:
+                issues.append(
+                    verdict.get("error") or f"DE {self.mac_spec['field']}: no MAC present"
+                )
+                parsed["mac_reject"] = self.mac_spec["on_failure"] == "reject"
+        return issues
 
     def _format_error_action(self, parsed: dict) -> dict:
         """Reply used when a request fails validation in ``reject`` mode — a
@@ -511,4 +550,9 @@ class TcpResponder:
         for de, cond in (when.get("de") or {}).items():
             if not _match_condition(str(req_de.get(str(de), "")), cond):
                 return False
+        if when.get("emv"):
+            emv = parsed.get("emv") or {}
+            for tag, cond in when["emv"].items():
+                if not _match_condition(str(emv.get(str(tag).upper(), "")), cond):
+                    return False
         return True

@@ -2457,6 +2457,34 @@ _DEFAULT_SIM_FORMAT: dict[str, str] = {"visa": "visa-base1"}
 
 
 async def _resolve_simulator_config(config: dict) -> dict:
+    """Prepare a simulator config for the worker: bind its Message Format (DE
+    table, presence matrix, wire encoding, MAC block) and resolve every
+    ``${key.NAME}`` reference through the test-data registry's service-gated
+    material endpoint (ADR-0013), so key material never has to be inline."""
+    cfg = await _bind_simulator_format(config)
+    return await _resolve_simulator_key_tokens(cfg)
+
+
+async def _resolve_simulator_key_tokens(cfg: dict) -> dict:
+    """Replace ``${key.NAME}`` tokens anywhere in a simulator config with the
+    registry's material (same path as scenarios, see ``_attach_test_data``).
+    Best-effort per key: an unresolved token stays literal and the worker
+    refuses it loudly at construction (a 400 from ``_start_responder``)."""
+    names = set(_KEY_TOKEN_RE.findall(json.dumps(cfg, default=str)))
+    if not names:
+        return cfg
+    materials: dict[str, str] = {}
+    for n in names:
+        try:
+            doc = await _http_get_json(f"{SCENARIO_API_URL}/test-data/keys/{n}/material")
+            if doc.get("value"):
+                materials[n] = doc["value"]
+        except Exception:  # noqa: BLE001 — token stays literal, refused downstream
+            log.warning("simulator: could not resolve ${key.%s}", n, exc_info=True)
+    return _sub_key_tokens(cfg, materials) if materials else cfg
+
+
+async def _bind_simulator_format(config: dict) -> dict:
     """Resolve a simulator's bound dialect.
 
     When a config carries ``message_format_id``, fetch that Message Format from
@@ -2492,6 +2520,10 @@ async def _resolve_simulator_config(config: dict) -> dict:
         validate.setdefault("mode", "warn")
         cfg["validate"] = validate
     _apply_format_encoding(cfg, fid, definition.get("encoding"))
+    if definition.get("mac") and cfg.get("mac") is None:
+        # the format's MAC block is dialect data like its encoding (ADR-0013);
+        # an inline block on the config wins, like inline ``fields``.
+        cfg["mac"] = dict(definition["mac"])
     return cfg
 
 
@@ -4008,7 +4040,7 @@ async def start_network_flow(nid: str) -> dict:
                      "not found")
         if sid not in SIMULATORS:
             try:
-                await _start_responder(sid, saved["label"], saved["config"])
+                await _start_responder(sid, saved["label"], simulator_store.raw_config(sid) or {})
                 sims_started.append(sid)
             except Exception as exc:  # noqa: BLE001 — fail closed, nothing lingers
                 for done in sims_started:
@@ -4769,7 +4801,7 @@ async def start_saved_simulator(cid: str) -> dict:
     if saved is None:
         raise HTTPException(404, f"no saved simulator '{cid}'")
     if cid not in SIMULATORS:
-        await _start_responder(cid, saved["label"], saved["config"])
+        await _start_responder(cid, saved["label"], simulator_store.raw_config(cid) or {})
     return _saved_info(simulator_store.get(cid))
 
 
@@ -4852,7 +4884,9 @@ async def _autostart_simulators() -> None:
         if saved["id"] in SIMULATORS:
             continue
         try:
-            await _start_responder(saved["id"], saved["label"], saved["config"])
+            await _start_responder(
+                saved["id"], saved["label"], simulator_store.raw_config(saved["id"]) or {}
+            )
             log.info("auto-started simulator '%s'", saved["id"])
         except Exception:  # noqa: BLE001 — never block boot on one bad config
             log.warning("failed to auto-start simulator '%s'", saved["id"], exc_info=True)

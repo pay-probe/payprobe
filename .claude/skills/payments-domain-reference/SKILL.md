@@ -207,7 +207,26 @@ The **retail MAC** is ISO 9797-1 MAC algorithm 3 with method-2 padding
 (`retail_mac()` in the same file). The portal palette group "EMV Crypto (HSM)"
 (`packages/scenario-service/models/emv_crypto_catalog.py`) chains these as drag-in
 steps: Derive ICC MK → Derive Session Key → Generate/Verify ARQC → Generate/Verify
-ARPC. The VISA simulator can verify inbound ARQCs (§6.1).
+ARPC. The VISA simulator verifies inbound ARQCs issuer-style and answers with
+an ARPC (§6.1).
+
+**On the wire (ADR-0013).** Two things ride on the bytes codec of ADR-0011:
+
+- *Message authentication*: a `mac` block (Message Format `definition.mac`, or
+  the same keys on a connection / simulator config, which wins) puts a retail
+  MAC or truncated AES-CMAC (8 or 4 bytes; DE 64 / 128 are 64-bit fields) over
+  **every wire byte before the MAC field**, so the same message MACs differently
+  under ASCII and binary. Contract in `payprobe_common/iso8583/mac.py`
+  (`pack_with_mac`, `verify_mac`), algorithms bound in
+  `worker/adapters/tcp/iso8583.py` (`MAC_ALGORITHMS`). The adapter reports
+  `mac_verified` / `mac_error`; the responder treats a bad or missing MAC as a
+  dialect violation (`on_failure`: `warn` records, `reject` answers DE 39 `30`).
+- *EMV awareness*: `tag_map(de55)` (`payprobe_common/iso8583/tlv.py`) gives the
+  `{tag: hex}` view that decoded messages expose as `emv`, that responder rules
+  match with `when.emv`, and that the VISA simulator uses to verify tag `9F26`
+  over the message's own tags (CVN 10/18 order by default) with a given session
+  key or one derived from an MDK (`emv_icc_mk` → `emv_session_key`), returning
+  tag `91` (ARPC method 1 || ARC) when configured.
 
 ### 2.4 AIP / TVR / TSI
 
@@ -453,6 +472,8 @@ Tests: `packages/worker/tests/test_cybersource_sim.py`.
 | ARQC / ARPC | card→issuer / issuer→card application cryptograms | `crypto_tools.py` `arqc`/`arpc` |
 | AIP / TVR / TSI | card capabilities / terminal verification results / status info (tags 82/95/9B) | `emv_catalog.py` |
 | Retail MAC | ISO 9797-1 alg 3, method-2 padding | `crypto_tools.py` `retail_mac` |
+| MAC on DE 64 / 128 | coverage = all wire bytes before the MAC field; 8 or 4 bytes | `payprobe_common/iso8583/mac.py`; bound in `worker/adapters/tcp/iso8583.py` |
+| EMV tag map | DE 55 as `{tag: hex}` for rules / responses / ARQC over message tags | `payprobe_common/iso8583/tlv.py` `tag_map`; `VisaSimulator._arqc_check` |
 | PIN block (ISO-0) | PIN field XOR PAN field, encrypted under a PIN key | `crypto_tools.py` `pin_block_encode` |
 | PVV / PVKI | Visa PIN verification value + key index | `crypto_tools.py` `pvv`; HSM `EC` |
 | CVV/CVC/CVV2 | card verification value from PAN+expiry+service code under CVK | `crypto_tools.py` `cvv`; HSM `CW/CY` |

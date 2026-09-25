@@ -9,6 +9,13 @@ flag — enabled simulators are auto-started on orchestrator boot.
 Mirrors :class:`~.schedule_store.ScheduleStore`: a tiny, dependency-free,
 thread-safe JSON file (or ``:memory:`` for dev/test). Running ids are the saved
 ids, so a config and its live responder share one identity throughout the portal.
+
+Secrets (ADR-0013): a config may carry key material (a ``mac.key``, the VISA
+simulator's ``cvk`` / ``pvk`` / ``session_key``, …). Secret-named values are
+encrypted at rest with the shared SecretBox, **masked** in everything the store
+returns for API readers (``list`` / ``get``), and a masked value sent back in an
+update keeps the stored one. Only :meth:`raw_config` yields plaintext, for the
+orchestrator to start the responder with.
 """
 from __future__ import annotations
 
@@ -18,6 +25,8 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+from payprobe_common.crypto import default_box, mask_doc, merge_masked
 
 
 def _now_iso() -> str:
@@ -50,9 +59,9 @@ class SimulatorStore:
     def _load(self) -> None:
         if self._path and self._path.is_file():
             try:
-                self._items = dict(
-                    json.loads(self._path.read_text()).get("simulators") or {}
-                )
+                raw = dict(json.loads(self._path.read_text()).get("simulators") or {})
+                # decrypt secret fields into plaintext for in-memory/runtime use
+                self._items = {k: default_box.decrypt_doc(v) for k, v in raw.items()}
             except (json.JSONDecodeError, OSError):
                 self._items = {}
 
@@ -61,7 +70,9 @@ class SimulatorStore:
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp.write_text(json.dumps({"simulators": self._items}, indent=2))
+        # encrypt secret-named fields just before they hit disk
+        on_disk = {k: default_box.encrypt_doc(v) for k, v in self._items.items()}
+        tmp.write_text(json.dumps({"simulators": on_disk}, indent=2))
         tmp.replace(self._path)
 
     # -- shaping -------------------------------------------------------------
@@ -71,7 +82,7 @@ class SimulatorStore:
         return {
             "id": sid,
             "label": v.get("label", sid),
-            "config": cfg,
+            "config": mask_doc(cfg),
             "enabled": bool(v.get("enabled", False)),
             "protocol": cfg.get("protocol", "iso8583"),
             "rules": len(cfg.get("rules", [])),
@@ -92,6 +103,12 @@ class SimulatorStore:
 
     def has(self, sid: str) -> bool:
         return sid in self._items
+
+    def raw_config(self, sid: str) -> dict | None:
+        """The stored config with secrets in plaintext: for starting the
+        responder, never for an API response."""
+        v = self._items.get(sid)
+        return dict(v.get("config") or {}) if v is not None else None
 
     def enabled(self) -> list[dict]:
         return [self._info(k, v) for k, v in self._items.items() if v.get("enabled")]
@@ -123,7 +140,8 @@ class SimulatorStore:
             if patch.get("label") is not None:
                 v["label"] = patch["label"]
             if patch.get("config") is not None:
-                v["config"] = patch["config"]
+                # a client round-tripping a masked read keeps the stored secrets
+                v["config"] = merge_masked(patch["config"], v.get("config") or {})
             if patch.get("enabled") is not None:
                 v["enabled"] = bool(patch["enabled"])
             v["updated_at"] = _now_iso()

@@ -173,7 +173,7 @@ in `docs/adr/`.
 
 - `docs/ATLAS.md` — architecture with reasoning + roadmap (the companion to
   this file).
-- `docs/adr/` — eleven ADRs; 0001 (fleet), 0004 (networks) and 0006 (NATS)
+- `docs/adr/` — twelve ADRs; 0001 (fleet), 0004 (networks) and 0006 (NATS)
   are fully implemented, 0002 (proxy tap/intercept/stub) through stage 2 with
   only TLS deferred (now specced as 0008, proposed), 0005 (insight service)
   built as advise-only, 0007 (playground) backend built, portal page written
@@ -188,7 +188,10 @@ in `docs/adr/`.
   codec in `payprobe_common` + one field dictionary + binary/BCD/EBCDIC on
   the live wire) **Accepted** 2026-09-24, phases 0 to 5 built the same day on
   `feature/adr-0011-iso8583-codec`; `PAYPROBE_ISO8583_FORMAT_ENCODING`
-  default on after a real-environment run, `0` is the escape hatch; statuses in the files
+  default on after a real-environment run, `0` is the escape hatch, 0013
+  (MAC on DE 64/128 + EMV DE 55 awareness on the wire, simulator keys by
+  reference) **Accepted** 2026-09-25, phases 0 to 4 built the same day, all
+  opt-in by config; statuses in the files
   are kept truthful.
 - `.claude/skills/payprobe-run-and-operate`, `payprobe-config-and-flags` and
   `payprobe-agents` — operator-grade API/env-flag/agent reference, kept current.
