@@ -793,6 +793,7 @@ def test_saved_simulator_masks_secrets_on_read_and_keeps_them_on_masked_update()
 
 
 def test_saved_simulator_secrets_are_encrypted_at_rest(tmp_path, monkeypatch):
+    pytest.importorskip("cryptography")  # SecretBox is a passthrough without it (optional dep)
     from payprobe_common import crypto as pc
 
     box = pc.SecretBox(pc.SecretBox.generate_key())
