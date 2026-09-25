@@ -216,6 +216,8 @@ class Iso8583Protocol(TcpProtocol):
             out["mac_verified"] = verdict.get("ok")
             if verdict.get("error"):
                 out["mac_error"] = verdict["error"]
+        if (emv := iso8583.emv_tags(de)) is not None:
+            out["emv"] = emv
         return out
 
     def health_probe(self) -> tuple[str, dict]:

@@ -65,6 +65,15 @@ adapter instead.)
                                  // start). Still the real body text codec for header_echo.
   },
 
+  "mac": {                       // ADR-0013, optional: authenticate iso8583 messages
+    "field": 64,                 // 64 | 128 (must be the last field on the wire)
+    "algorithm": "retail_mac",   // retail_mac (ISO 9797-1 alg 3) | aes_cmac (truncated)
+    "key": "${key.SWITCH_MAK}",  // resolved server-side from the test-data registry;
+                                 // inline hex accepted but masked wherever a config is read
+    "length": 8,                 // MAC bytes on the wire: 8 | 4 (the field is 64 bits)
+    "on_failure": "warn"         // warn: report mac_verified=false | reject: fail the step
+  },                             // a bound Message Format's definition.mac is injected here
+
   "sign_on":   { "enabled": true, "action": "...", "payload": { } },
   "keepalive": { "enabled": true, "interval_sec": 30, "action": "...", "payload": { } },
   "response_timeout_sec": 30,
@@ -129,6 +138,25 @@ Actions: `send_command` (`command` + `data`, optional `header`) and
 > reply arrived in time. A declined ISO response code (DE 39 = `05`) or a
 > non-zero HSM error code is **not** a transport failure — assert on
 > `response_code` to gate pass/fail.
+
+## Message authentication and EMV data (ADR-0013)
+
+With a `mac` block the adapter stamps a MAC over every wire byte before DE 64
+(or DE 128) on send and verifies the host's MAC on receive; the shaped response
+carries `mac_verified` (`true` / `false` / `null` when the host sent none) and
+`mac_error`. Under `on_failure: reject` an unverifiable reply fails the step
+while the decoded reply stays visible. The same block on a `TcpResponder` makes
+a simulator verify inbound MACs (a violation like any dialect check: `warn`
+records it, `reject` answers DE 39 `30`) and MAC its replies.
+
+When DE 55 is present and parses, the shaped response also carries `emv`, a
+`{tag: hex}` map of the ICC data (first occurrence, constructed tags descended),
+and responder rules can match on it with the usual condition vocabulary:
+
+```jsonc
+{"when": {"mti": "0200", "emv": {"9F27": {"eq": "80"}, "9F1A": {"prefix": "08"}}},
+ "respond": {"echo": ["11"], "set": {"39": "00"}}}
+```
 
 ## Several instances / different connections
 

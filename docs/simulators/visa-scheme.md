@@ -65,7 +65,15 @@ otherwise approves under stand-in:
 3. **Expired card** — `expiry_check` on and DE 14 (YYMM) in the past → `54`
 4. **CVV2** — `verify_cvv2` present and the presented value mismatches → its `decline` (default `N7`)
 5. **PVV** — `verify_pvv` present and the PIN/PVV mismatches → its `decline` (default `55`)
-6. **ARQC** — `verify_arqc` present and the cryptogram mismatches → its `decline` (default `05`)
+6. **ARQC** — `verify_arqc` present and the chip cryptogram mismatches → its `decline` (default `05`).
+   Issuer-style (ADR-0013): the cryptogram is tag `9F26` of DE 55, verified over
+   the message's own tags (`data_tags`, default CVN 10/18 order: 9F02 9F03 9F1A
+   95 5F2A 9A 9C 9F37 82 9F36 9F10) with `session_key`, or with a key derived
+   from `mdk` + PAN (DE 2) + PSN (tag 5F34 / `psn`) + ATC (tag 9F36). With
+   `arpc: true` an approved chip transaction gets tag `91` (ARPC method 1 || ARC)
+   in the response DE 55. A magstripe request (no DE 55) is not failed by this
+   check. The legacy shape (`data` supplied verbatim, the whole `field` holding
+   the cryptogram) still works.
 
 If `stand_in` is `false` and no explicit rule pins a reply, the simulator answers
 `91` (issuer or switch inoperative) instead of approving.
@@ -92,12 +100,20 @@ response codes and let everything else follow scheme behaviour.
 
     "verify_cvv2": { "field": "48", "cvk": "<32H CVK>", "service_code": "000", "decline": "N7" },
     "verify_pvv":  { "pin_field": "52", "pvv_field": "44", "pvk": "<32H PVK>", "pvki": "1", "decline": "55" },
-    "verify_arqc": { "field": "55", "session_key": "<32H SK>", "data": "<txn hex>", "decline": "05" }
+    "verify_arqc": { "mdk": "${key.ISSUER_MDK}", "arpc": true, "decline": "05" }
   },
+  "mac": { "field": 64, "algorithm": "retail_mac", "key": "${key.SWITCH_MAK}", "on_failure": "reject" },
   "rules": [],
   "chaos": {}
 }
 ```
+
+Key material (`cvk`, `pvk`, `mdk`, `session_key`, `mac.key`) is written as a
+`${key.NAME}` reference to the test-data registry and resolved by the
+orchestrator when the simulator starts; inline hex still works but is masked
+(`••••` + fingerprint) wherever the config is read back and encrypted at rest.
+A `mac` block makes the simulator verify inbound MACs on DE 64 / 128 and MAC
+its replies (ADR-0013).
 
 The crypto blocks are **opt-in**: a check only runs when its block and keys are
 present (and the relevant DEs are populated on the request). Missing data skips

@@ -80,3 +80,10 @@ environment. For production, inject them from a secret manager (Vault, AWS/GCP
 secret manager, k8s Secrets) rather than committing them to a `.env` file. The
 compose defaults (`dev-insecure-change-me`, `admin`/`admin`) are for local use
 only — the **Settings → System** panel flags when you're still running them.
+
+Key material inside **simulator and connection configs** (`mac.key`, `cvk`, `pvk`,
+`mdk`, `bdk`, `session_key`, …) should be written as `${key.NAME}` references to
+the test-data registry: the orchestrator resolves them through the service-gated
+material endpoint when a simulator starts (ADR-0013), so the value never sits in
+a config. Inline values still work but are treated as secrets: encrypted at rest
+by `PAYPROBE_SECRET_KEY` and masked (`••••` + fingerprint) in every API read.

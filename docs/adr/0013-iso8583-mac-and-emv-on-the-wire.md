@@ -1,6 +1,8 @@
 # ADR-0013: ISO 8583 message authentication (DE 64 / 128) and EMV DE 55 awareness on the wire
 
-**Status:** Proposed
+**Status:** Accepted (2026-09-25) — phases 0 to 4 built the same day on
+`feature/adr-0013-iso8583-mac-emv` (see Implementation status). Every behaviour
+is opt-in by configuration; no flag.
 **Date:** 2026-09-25
 **Deciders:** PayProbe maintainers (David + reviewers)
 **Depends on:** [ADR-0011](0011-one-iso8583-codec-binary-wire.md) (the bytes
@@ -241,14 +243,36 @@ new secret names; ADR to Accepted.
 
 ## Action Items
 
-- [ ] Phase 0 vectors: `packages/worker/tests/test_iso8583_mac.py`.
-- [ ] Phase 1: `payprobe_common/iso8583/mac.py`; `worker/adapters/tcp/iso8583.py`
+- [x] Phase 0 vectors: `packages/worker/tests/test_iso8583_mac.py`.
+- [x] Phase 1: `payprobe_common/iso8583/mac.py`; `worker/adapters/tcp/iso8583.py`
       algorithm binding; `Iso8583Protocol.encode/decode`; `TcpResponder._encode/_decode/_validate`.
-- [ ] Phase 2: `_resolve_simulator_config` key tokens; `payprobe_common/crypto.py`
+- [x] Phase 2: `_resolve_simulator_config` key tokens; `payprobe_common/crypto.py`
       `_SECRET_EXACT` additions; `simulator_store.py` masking/encryption + test.
-- [ ] Phase 3: `emv` map + `when.emv`; `VisaSimulator._arqc_ok` on tags, MDK
+- [x] Phase 3: `emv` map + `when.emv`; `VisaSimulator._arqc_ok` on tags, MDK
       derivation, ARPC tag 91.
-- [ ] Phase 4: loopback suite, docs, ADR status.
+- [x] Phase 4: loopback suite, docs, ADR status.
+
+## Implementation status
+
+Built 2026-09-25 on `feature/adr-0013-iso8583-mac-emv` (commits: the ADR,
+phases 0–2, phases 3–4). Verified by tests in the branch.
+
+| Phase | What shipped | Proof |
+|---|---|---|
+| 0 | Frozen retail-MAC vector over the ADR-0011 golden ASCII 0200 (`4C2F521C5A330CC2`); ARQC derivation chain reused from `test_payshield_sim.py` | `test_iso8583_mac.py`, `test_iso8583_emv.py` |
+| 1 | `payprobe_common/iso8583/mac.py` (spec, coverage, splice, compare; algorithm as a callable); `MAC_ALGORITHMS` bound in the worker; `Iso8583Protocol` applies/verifies with `mac_verified` / `mac_error` and `reject_reason`; `TcpResponder` verifies as a dialect violation and MACs replies. The first smoke test showed a 16-byte CMAC cannot live in a 64-bit field; lengths are 8 or 4 | `test_iso8583_mac.py` (17 tests: vectors, contract, adapter ↔ simulator under ASCII and binary, tamper, wrong key, absent MAC, warn vs reject, DE 128 CMAC on a reversal) |
+| 2 | `_resolve_simulator_config` binds the format's `mac` block (inline wins) and resolves `${key.NAME}` through the material endpoint; unresolvable → 400. `is_secret_key` parent-aware (`mac.key`) + payment-crypto names; simulator store encrypts at rest, masks on read, keeps stored secrets on a masked update, `raw_config` for starts | `orchestrator/tests/test_simulators.py` (5 new) |
+| 3 | `tag_map` in the shared TLV module; `emv` on decoded messages and shaped responses; `when.emv` rule conditions; `VisaSimulator._arqc_check` verifies tag 9F26 over the message's tags (CVN 10/18 order, configurable) with a given or MDK-derived session key; `arpc: true` returns tag 91 (ARPC method 1 ‖ ARC); legacy `data` shape kept | `test_iso8583_emv.py` (7 tests, incl. tamper of a tag after the cryptogram and ARPC verified with `crypto_tools.arpc`) |
+| 4 | Docs: TCP adapter README, VISA simulator doc, payments-domain-reference, configuration reference (secrets by reference) | this table |
+
+Suite counts (2026-09-25, per package): worker **619 passed / 6 skipped**
+(was 601; the pre-existing `test_socket_registry` reconnect flake hit once in
+the full run, passes alone), orchestrator **405** (was 400), scenario-service
+**341**.
+
+Not done, on purpose: no real-environment run was required (nothing here is
+gated by a flag; a simulator without a `mac` block and a message without DE 55
+behave exactly as before), and the compose images have not been rebuilt.
 
 ## Open questions
 

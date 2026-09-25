@@ -429,6 +429,8 @@ class TcpResponder:
             out["decode_error"] = parsed.get("error")
         if "mac" in parsed:
             out["mac"] = parsed["mac"]
+        if (emv := iso8583.emv_tags(out["de"])) is not None:
+            out["emv"] = emv  # {tag: hex} view of DE 55 for rules / traces (ADR-0013)
         return out
 
     def _encode(self, parsed: dict, action: dict) -> bytes:
@@ -548,4 +550,9 @@ class TcpResponder:
         for de, cond in (when.get("de") or {}).items():
             if not _match_condition(str(req_de.get(str(de), "")), cond):
                 return False
+        if when.get("emv"):
+            emv = parsed.get("emv") or {}
+            for tag, cond in when["emv"].items():
+                if not _match_condition(str(emv.get(str(tag).upper(), "")), cond):
+                    return False
         return True

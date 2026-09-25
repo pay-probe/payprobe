@@ -33,6 +33,7 @@ from payprobe_common.iso8583 import (
     mti_encoding,
     pack,
     resolve_encoding,
+    tag_map,
     unpack,
     validate_message,
     wire_encoding_from_config,
@@ -82,6 +83,19 @@ def mac_algorithm(spec: dict) -> mac.MacAlgorithm:
     return MAC_ALGORITHMS[spec["algorithm"]]
 
 
+def emv_tags(de: dict) -> dict[str, str] | None:
+    """The ``{tag: value}`` view of DE 55 when present and well-formed, else None
+    (a malformed DE 55 is a value like any other; rules on ``emv`` simply do
+    not match it)."""
+    raw = de.get("55")
+    if not raw:
+        return None
+    try:
+        return tag_map(str(raw))
+    except (ValueError, IndexError):
+        return None
+
+
 def iso_unpack(msg: str, fields: dict[str, dict]) -> dict[str, Any]:
     """Parse an ASCII ISO 8583 message (``str``) into ``{mti, de_list, fields, …}``.
 
@@ -115,6 +129,7 @@ __all__ = [
     "mti_encoding",
     "pack",
     "resolve_encoding",
+    "tag_map",
     "unpack",
     "validate_message",
     "wire_encoding_from_config",

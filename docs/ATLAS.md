@@ -526,8 +526,8 @@ Accepted on David's Go/No-Go; handoff in
 one field dictionary + binary wire encodings (Accepted 2026-09-24; phases 0 to 5
 built the same day on `feature/adr-0011-iso8583-codec`, flag default on after a
 real-environment run), 0013 ISO 8583 MAC on DE 64/128 + EMV DE 55 awareness +
-simulator keys by `${key.NAME}` reference (proposed 2026-09-25, not built; the
-first follow-on 0011 named;
+simulator keys by `${key.NAME}` reference (Accepted 2026-09-25, phases 0 to 4
+built the same day, opt-in by config; the first follow-on 0011 named;
 closes standards-gap recommendation #1 — the worker, analyzer and catalog
 codecs collapse into `payprobe_common/iso8583`, the bound format's
 `encoding` reaches the socket, precedence flip flag-gated). The finished build specs of the major

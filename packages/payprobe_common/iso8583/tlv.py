@@ -44,6 +44,23 @@ def parse_tlv(hexstr: str) -> list[dict]:
     return _tlv(data, 0, len(data))
 
 
+def tag_map(hexstr: str) -> dict[str, str]:
+    """Flatten a BER-TLV hex string into ``{TAG: value_hex}`` (first occurrence
+    wins, constructed tags are descended into). What rule conditions and
+    shaped responses expose as ``emv`` (ADR-0013)."""
+    out: dict[str, str] = {}
+
+    def walk(nodes: list[dict]) -> None:
+        for node in nodes:
+            if "children" in node:
+                walk(node["children"])
+            elif node["tag"] not in out:
+                out[node["tag"]] = node.get("value") or ""
+
+    walk(parse_tlv("".join((hexstr or "").split())))
+    return out
+
+
 def _encode_len(n: int) -> bytes:
     if n < 0x80:
         return bytes([n])
@@ -105,4 +122,4 @@ def _tlv(data: bytes, i: int, end: int) -> list[dict]:
     return out
 
 
-__all__ = ["EMV_TAGS", "build_tlv", "parse_tlv"]
+__all__ = ["EMV_TAGS", "build_tlv", "parse_tlv", "tag_map"]
