@@ -1,0 +1,145 @@
+"""SQLite engine: stdlib, runs in a thread, read-only by ``PRAGMA query_only``.
+
+What examples and CI use: ``{"engine": "sqlite", "dsn": ":memory:", "init_sql":
+[...]}`` gives a self-contained database seeded once at ``connect()``. ``dsn``
+may also be a file path. With ``writes`` enabled a second connection without
+``query_only`` serves ``execute``; an in-memory database is then opened as a
+named shared-cache URI so both connections see the same data. ``init_sql`` runs before the read connection is
+switched to ``query_only``, so it is the one place a probe may write without
+opting in (it is the fixture that makes an example runnable, not a write path
+into a customer database; the pragma is on before the first step runs).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sqlite3
+import time
+from typing import Any
+
+from .base import Engine, FetchResult, ReadOnlyViolation, jsonable
+
+
+class SqliteEngine(Engine):
+    name = "sqlite"
+
+    def __init__(self, config: dict, *, pool_size: int) -> None:
+        super().__init__(config, pool_size=pool_size)
+        self.dsn = str(config.get("dsn") or config.get("dbname") or ":memory:")
+        self.writes = bool(config.get("writes"))
+        self._read: sqlite3.Connection | None = None
+        self._write: sqlite3.Connection | None = None
+        self._lock = asyncio.Lock()  # one statement at a time on the shared connections
+
+    def _uri(self) -> tuple[str, bool]:
+        """The connect target; an in-memory database that must be shared between
+        the read and write connections becomes a named shared-cache URI."""
+        if self.dsn == ":memory:" and self.writes:
+            return f"file:dbprobe-{id(self):x}?mode=memory&cache=shared", True
+        return self.dsn, self.dsn.startswith("file:")
+
+    async def connect(self) -> None:
+        target, uri = self._uri()
+
+        def _open() -> tuple[sqlite3.Connection, sqlite3.Connection | None]:
+            write = None
+            if self.writes:
+                # opened first so a shared-cache memory database outlives the seed
+                write = sqlite3.connect(
+                    target, uri=uri, check_same_thread=False, isolation_level=None
+                )
+                write.row_factory = sqlite3.Row
+            conn = sqlite3.connect(target, uri=uri, check_same_thread=False, isolation_level=None)
+            conn.row_factory = sqlite3.Row
+            for stmt in self.config.get("init_sql") or []:
+                conn.execute(str(stmt))
+            conn.execute("PRAGMA query_only = ON")
+            return conn, write
+
+        self._read, self._write = await asyncio.to_thread(_open)
+
+    async def ping(self) -> None:
+        await self.fetch("SELECT 1 AS ok", [], max_rows=1, timeout_ms=2000)
+
+    async def fetch(
+        self, sql: str, params: list[Any], *, max_rows: int, timeout_ms: int
+    ) -> FetchResult:
+        if self._read is None:
+            raise RuntimeError("sqlite engine is not connected")
+        conn = self._read
+
+        def _run() -> FetchResult:
+            deadline = time.monotonic() + timeout_ms / 1000
+
+            def _abort_when_late() -> int:
+                return 1 if time.monotonic() > deadline else 0
+
+            conn.set_progress_handler(_abort_when_late, 1000)
+            try:
+                cur = conn.execute(sql, [jsonable(p) if isinstance(p, dict) else p for p in params])
+                columns = [d[0] for d in cur.description] if cur.description else []
+                fetched = cur.fetchmany(max_rows + 1)
+            except sqlite3.OperationalError as exc:
+                msg = str(exc)
+                if "readonly" in msg or "query_only" in msg or "attempt to write" in msg:
+                    raise ReadOnlyViolation(f"sqlite refused a write in a read-only session: {msg}")
+                if "interrupted" in msg:
+                    raise TimeoutError(f"statement exceeded {timeout_ms} ms") from None
+                raise
+            finally:
+                conn.set_progress_handler(None, 0)
+            truncated = len(fetched) > max_rows
+            rows = [{c: jsonable(r[c]) for c in columns} for r in fetched[:max_rows]]
+            return FetchResult(rows=rows, columns=columns, truncated=truncated)
+
+        async with self._lock:
+            return await asyncio.to_thread(_run)
+
+    async def execute_write(self, sql: str, params: list[Any], *, timeout_ms: int) -> FetchResult:
+        if self._write is None:
+            raise NotImplementedError("this sqlite probe was opened read-only (writes: false)")
+        conn = self._write
+
+        def _run() -> FetchResult:
+            deadline = time.monotonic() + timeout_ms / 1000
+            conn.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 1000)
+            try:
+                cur = conn.execute(sql, params)
+                columns = [d[0] for d in cur.description] if cur.description else []
+                fetched = cur.fetchall() if columns else []
+            except sqlite3.OperationalError as exc:
+                if "interrupted" in str(exc):
+                    raise TimeoutError(f"statement exceeded {timeout_ms} ms") from None
+                raise
+            finally:
+                conn.set_progress_handler(None, 0)
+            rows = [{c: jsonable(r[c]) for c in columns} for r in fetched]
+            affected = cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else len(rows)
+            return FetchResult(rows=rows, columns=columns, rows_affected=affected)
+
+        async with self._lock:
+            return await asyncio.to_thread(_run)
+
+    async def validate(self, sql: str, nparams: int) -> str | None:
+        if self._read is None:
+            return "not connected"
+
+        def _run() -> str | None:
+            try:
+                self._read.execute(f"EXPLAIN {sql}", [None] * nparams)
+                return None
+            except sqlite3.Error as exc:
+                return str(exc)
+
+        async with self._lock:
+            return await asyncio.to_thread(_run)
+
+    async def close(self) -> None:
+        for attr in ("_read", "_write"):
+            conn = getattr(self, attr)
+            if conn is not None:
+                setattr(self, attr, None)
+                await asyncio.to_thread(conn.close)
+
+    def describe(self) -> str:
+        return f"sqlite:{self.dsn}"

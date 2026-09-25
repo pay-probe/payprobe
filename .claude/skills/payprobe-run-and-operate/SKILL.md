@@ -463,6 +463,29 @@ Notes (verified in `orchestrator/api/main.py` + `api/playground.py`):
 - `save-as-scenario` accepts `{"seqs": [...]}` to promote selected entries and
   `project_id` to file the result; default promotes the whole history.
 
+## Database probes and run fixtures (ADR-0012, 2026-09-25)
+
+- A `db_probe_core` / `db_probe_switch` connection is a real worker adapter now
+  (PostgreSQL via asyncpg, SQLite via stdlib). Reads run in a read-only database
+  session; the SQL for `query_transaction` / `query_balance` lives on the
+  connection as `queries` (per-environment overrides for schema differences).
+  How-to: `docs/adapters/db-probe.md`; example: `examples/scenarios/db_probe_settlement.json`
+  against the bundled `example_sqlite_probe` connection.
+- `GET /diagnostics?layers=databases` answers "why does my probe not work": per
+  probe connection reachable / read-only enforced / writes enabled / named
+  queries that do not parse. A dead probe BLOCKs (never fails) every scenario
+  that touches it in phase 1.
+- Writes: `writes: true` on the connection (per environment), every `execute`
+  step declares a `cleanup` the runner executes at scenario end (any outcome,
+  `cleanup` step outcomes in the run, `cleanup_failed:<step>` note never changes
+  the verdict). `writes: "permanent"` allows `cleanup: null`.
+- Load runs refuse a probe target with 400 unless the connection has
+  `load_ok: true` (mocked probes exempt).
+- Run fixtures (on by default; `PAYPROBE_RUN_FIXTURES=0` disables): `POST /runs {"fixtures": {"before": [...], "after": [...]}}`
+  runs saved scenarios once around the run; results under `summary.fixtures`,
+  in the sign-off report's Fixtures section and the provenance stamp. With the
+  flag set to 0 the request is refused (400), never silently run without fixtures.
+
 ## Provenance and maintenance
 
 Verified 2026-07-03 against the working tree (compose file, nginx conf,

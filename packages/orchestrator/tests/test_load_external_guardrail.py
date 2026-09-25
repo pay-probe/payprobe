@@ -146,3 +146,36 @@ def test_external_load_targets_helper_dedupes_and_sorts():
         }
     ]
     assert m._external_load_targets(env, scs, {}) == ["a_ext", "b_ext"]
+
+
+# -- database probes (ADR-0012) ------------------------------------------------------
+
+
+async def test_probe_in_a_load_scenario_is_refused_unless_load_ok(store, monkeypatch):
+    env = {"adapters": {"core_db": {"adapter": "db_probe_core", "engine": "sqlite"}}}
+    _patch_resolution(monkeypatch, env, [_scenario(target="core_db")])
+    req = m.LoadRunRequest(type="steady", duration_s=5, workers=1, target_tps=20)
+    with pytest.raises(HTTPException) as exc:
+        await m.create_load_run(req)
+    assert exc.value.status_code == 400
+    assert "core_db" in exc.value.detail and "database probe" in exc.value.detail
+    assert "load_ok" in exc.value.detail  # the message names the opt-in
+    assert store.list() == []
+
+
+def test_probe_load_ok_opt_in_and_registry_doc_path():
+    env = {"adapters": {"core_db": {"adapter": "db_probe_core", "engine": "sqlite", "load_ok": True}}}
+    assert m._probe_load_targets(env, [_scenario(target="core_db")], {}) == []
+    # mix path: the registry doc is the source of truth, keyed by the step's connection
+    conns = {"switch_db": {"name": "switch_db", "adapter": "db_probe_switch"}}
+    assert m._probe_load_targets({"adapters": {}}, [_scenario(target="db_probe_switch", connection="switch_db")], conns) == ["db_probe_switch", "switch_db"]
+    # the target name itself resolving to a probe impl (default-connection type)
+    assert m._probe_load_targets({"adapters": {}}, [_scenario(target="db_probe_core")], {}) == ["db_probe_core"]
+
+
+def test_probe_guardrail_exempts_mocked_probes():
+    """The default load mix runs every example (two carry a probe step) under the
+    mock environment; a mocked probe touches no database, so it is not refused."""
+    assert m._probe_load_targets({"mode": "mock", "adapters": {}}, [_scenario(target="db_probe_core")], {}) == []
+    env = {"adapters": {"core_db": {"adapter": "db_probe_core", "mock": True}}}
+    assert m._probe_load_targets(env, [_scenario(target="core_db")], {}) == []

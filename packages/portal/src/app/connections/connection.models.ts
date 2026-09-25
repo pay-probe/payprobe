@@ -138,13 +138,29 @@ export interface PayShieldConfig {
   responseTimeoutSec: number;
 }
 
-/** Read-only DB-probe settings (used when adapter = "db_probe_core" /
- * "db_probe_switch"). Uses the shared host/port plus engine + database. */
+/** Database-probe settings (used when adapter = "db_probe_core" /
+ * "db_probe_switch"; ADR-0012). Uses the shared host/port plus engine +
+ * database. Read-only by the database session; writes are a per-environment
+ * opt-in with declared cleanup. Named queries carry the SQL (schema knowledge
+ * is connection data, overridable per environment). */
 export interface DbConfig {
   engine: string;
   dbname: string;
   user: string;
   password: string;
+  /** Full connection string (secret); alternative to host/port/dbname/user. */
+  dsn: string;
+  /** "" (read-only) | "true" (writes with declared cleanup) | "permanent". */
+  writes: string;
+  /** Row cap per statement (default 100) and statement timeout (default 5000 ms). */
+  maxRows: number;
+  statementTimeoutMs: number;
+  /** Let a load run query this probe at the target TPS (refused otherwise). */
+  loadOk: boolean;
+  /** Named queries as JSON: {"query_transaction": {"sql": "...", "params": ["rrn"]}}. */
+  queriesJson: string;
+  /** SQLite only: statements run once at connect (one per line) to seed an example. */
+  initSql: string;
 }
 
 /** NATS adapter settings (ADR-0006; used when adapter = "nats"). The shared
@@ -245,7 +261,28 @@ export const DEFAULT_DB: DbConfig = {
   dbname: "",
   user: "",
   password: "",
+  dsn: "",
+  writes: "",
+  maxRows: 100,
+  statementTimeoutMs: 5000,
+  loadOk: false,
+  queriesJson: "",
+  initSql: "",
 };
+
+/** Parse the named-queries JSON; null when empty or not an object. */
+export function parseDbQueries(text: string): Record<string, unknown> | null {
+  const t = (text ?? "").trim();
+  if (!t) return null;
+  try {
+    const v = JSON.parse(t);
+    return v && typeof v === "object" && !Array.isArray(v)
+      ? (v as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 export const DEFAULT_NATS: NatsConfig = {
   servers: "",
@@ -484,6 +521,24 @@ function dbToAdapterConfig(i: Connection): Record<string, unknown> {
   if (db.dbname.trim()) cfg["dbname"] = db.dbname.trim();
   if (db.user.trim()) cfg["user"] = db.user.trim();
   if (db.password) cfg["password"] = db.password;
+  if (db.dsn?.trim()) cfg["dsn"] = db.dsn.trim();
+  if (db.writes === "permanent") cfg["writes"] = "permanent";
+  else if (db.writes === "true") cfg["writes"] = true;
+  if (db.maxRows && db.maxRows !== DEFAULT_DB.maxRows)
+    cfg["max_rows"] = db.maxRows;
+  if (
+    db.statementTimeoutMs &&
+    db.statementTimeoutMs !== DEFAULT_DB.statementTimeoutMs
+  )
+    cfg["statement_timeout_ms"] = db.statementTimeoutMs;
+  if (db.loadOk) cfg["load_ok"] = true;
+  const queries = parseDbQueries(db.queriesJson);
+  if (queries && Object.keys(queries).length) cfg["queries"] = queries;
+  const init = (db.initSql ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (db.engine === "sqlite" && init.length) cfg["init_sql"] = init;
   return cfg;
 }
 
@@ -680,6 +735,24 @@ export function fromAdapterConfig(
         dbname: cfg["dbname"] ?? "",
         user: cfg["user"] ?? "",
         password: cfg["password"] ?? "",
+        dsn: cfg["dsn"] ?? "",
+        writes:
+          cfg["writes"] === "permanent"
+            ? "permanent"
+            : cfg["writes"] === true || cfg["writes"] === "true"
+              ? "true"
+              : "",
+        maxRows: Number(cfg["max_rows"] ?? DEFAULT_DB.maxRows),
+        statementTimeoutMs: Number(
+          cfg["statement_timeout_ms"] ?? DEFAULT_DB.statementTimeoutMs,
+        ),
+        loadOk: cfg["load_ok"] === true,
+        queriesJson: cfg["queries"]
+          ? JSON.stringify(cfg["queries"], null, 2)
+          : "",
+        initSql: Array.isArray(cfg["init_sql"])
+          ? (cfg["init_sql"] as unknown[]).map(String).join("\n")
+          : "",
       },
     };
   }

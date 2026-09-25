@@ -45,6 +45,7 @@ def make_ctx(
     capture_state: dict | None = None,
     nats_health=None,
     obtain_oauth_token=None,
+    probe_database=None,
 ) -> DiagContext:
     probes = probe_results or {}
 
@@ -72,6 +73,7 @@ def make_ctx(
         capture_state=(lambda: capture_state) if capture_state is not None else None,
         nats_health=nats_health,
         obtain_oauth_token=obtain_oauth_token,
+        probe_database=probe_database,
     )
 
 
@@ -456,7 +458,7 @@ async def test_layer_scoping_and_summary_counts():
 async def test_unknown_layer_falls_back_to_all():
     report = await run_diagnostics(make_ctx(), layers=["bogus"])
     assert report["layers"] == [
-        "services", "connections", "providers", "nats", "listeners", "runs"]
+        "services", "connections", "providers", "databases", "nats", "listeners", "runs"]
 
 
 # -- nats layer (ADR-0006) ------------------------------------------------------
@@ -649,3 +651,70 @@ async def test_provider_layer_no_providers_skips():
              "port": 8085, "base_url": "http://127.0.0.1:8085"}])),
         layers=["providers"])
     assert by_id(report)["prov.none"]["status"] == "skip"
+
+
+# -- databases layer (ADR-0012) ---------------------------------------------------
+
+
+def _db_routes(conns):
+    return {"/health": {"status": "ok"}, "/connections": conns, "/participant-groups": []}
+
+
+def _core_db(**over):
+    return {"name": "core_db", "adapter": "db_probe_core", "engine": "sqlite", "dsn": ":memory:",
+            "queries": {"query_transaction": {"sql": "SELECT 1", "params": []}}, **over}
+
+
+def _probe_result(**over):
+    return {"reachable": True, "read_only_enforced": True, "writes_enabled": False,
+            "named_queries": {"count": 1, "invalid": []}, "error": None, **over}
+
+
+async def test_databases_layer_skips_when_no_probe_connections():
+    report = await run_diagnostics(make_ctx(routes=_db_routes([])), layers=["databases"])
+    assert by_id(report)["db.none"]["status"] == "skip"
+
+
+async def test_databases_layer_ok_when_reachable_read_only_and_queries_parse():
+    async def probe(cfg):
+        assert cfg["engine"] == "sqlite"
+        return _probe_result()
+
+    report = await run_diagnostics(
+        make_ctx(routes=_db_routes([_core_db()]), probe_database=probe), layers=["databases"])
+    c = by_id(report)["db.core_db"]
+    assert c["status"] == "ok"
+    assert "enforced by the session" in c["detail"] and "1 named query" in c["detail"]
+
+
+async def test_databases_layer_fails_when_unreachable_and_names_the_blocked_consequence():
+    async def probe(cfg):
+        return _probe_result(reachable=False, error="OSError: connection refused")
+
+    report = await run_diagnostics(
+        make_ctx(routes=_db_routes([_core_db()]), probe_database=probe), layers=["databases"])
+    c = by_id(report)["db.core_db"]
+    assert c["status"] == "fail" and "connection refused" in c["error"] and "BLOCKED" in c["hint"]
+
+
+async def test_databases_layer_warns_on_invalid_named_queries_and_unenforced_read_only():
+    async def bad_sql(cfg):
+        return _probe_result(named_queries={"count": 1, "invalid": ["query_transaction: no such table: txn"]})
+
+    report = await run_diagnostics(
+        make_ctx(routes=_db_routes([_core_db()]), probe_database=bad_sql), layers=["databases"])
+    c = by_id(report)["db.core_db"]
+    assert c["status"] == "warn" and "no such table" in c["detail"]
+
+    async def writable(cfg):
+        return _probe_result(read_only_enforced=False)
+
+    report = await run_diagnostics(
+        make_ctx(routes=_db_routes([_core_db()]), probe_database=writable), layers=["databases"])
+    c = by_id(report)["db.core_db"]
+    assert c["status"] == "warn" and "NOT enforced" in c["detail"]
+
+
+async def test_databases_layer_skips_without_a_probe_callback():
+    report = await run_diagnostics(make_ctx(routes=_db_routes([_core_db()])), layers=["databases"])
+    assert by_id(report)["db.core_db"]["status"] == "skip"

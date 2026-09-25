@@ -14,7 +14,34 @@ DEFAULT_RESPONSES = {
     "enter_pin": {"status": "accepted"},
     "remove_card": {"status": "removed"},
     "tap_nfc": {"status": "tapped"},
-    "query_transaction": {"status": "APPROVED", "amount": 10000},
+    # db_probe named queries (ADR-0012): the flattened first row plus the row
+    # envelope the real adapter returns, so packs assert the same shape either way.
+    "query_transaction": {
+        "status": "APPROVED",
+        "amount": 10000,
+        "rrn": "000000000001",
+        "rows": [{"status": "APPROVED", "amount": 10000, "rrn": "000000000001"}],
+        "row_count": 1,
+        "columns": ["status", "amount", "rrn"],
+        "truncated": False,
+    },
+    "query_balance": {
+        "status": "ACTIVE",
+        "balance": 500000,
+        "rows": [{"status": "ACTIVE", "balance": 500000}],
+        "row_count": 1,
+        "columns": ["status", "balance"],
+        "truncated": False,
+    },
+    # ad hoc read (db_probe `query`): one plausible row so row_count / rows[0] assert
+    "query": {
+        "rrn": "000000000001",
+        "amount": 10000,
+        "rows": [{"rrn": "000000000001", "amount": 10000}],
+        "row_count": 1,
+        "columns": ["rrn", "amount"],
+        "truncated": False,
+    },
     "verify_pin_block": {"verified": True},
     "query_account": {"status": "ACTIVE", "balance": 500000},
     # RestPay (http) keepalive + payment lifecycle actions. echo_test carries

@@ -1,39 +1,78 @@
 # DB Probe Adapter
 
-Read-only database adapter for cross-system assertions.
-Used to verify that a transaction processed by the payment server
-appears correctly in downstream system databases.
+Prove what a payment did to the database: the transaction row in the core
+system, the balance that moved, the audit entry the switch wrote. Registered as
+`db_probe_core` and `db_probe_switch` (two default-connection types, one class).
+Design and rationale: [ADR-0012](../../../../docs/adr/0012-database-probe-adapter-and-run-fixtures.md).
 
-## IMPORTANT: Read-Only
+## Read-only, by the database
 
-This adapter **never writes** to any database. All queries must be SELECT statements.
-Any attempt to execute a non-SELECT query will raise an error.
+Every read runs inside a read-only session: a `READ ONLY` transaction on
+PostgreSQL, `PRAGMA query_only` on SQLite. A write is refused by the database
+itself, not by a regex (a statement prefilter runs first only to give a readable
+error). Writes need a connection that opts in with `writes: true` and every
+`execute` declares a `cleanup` the runner executes when the scenario ends
+(reverse order, any outcome). `cleanup: null` is a permanent write and needs
+`writes: "permanent"`. The read session stays read-only either way.
+
+## Engines
+
+| `engine` | Driver | Status |
+|---|---|---|
+| `postgresql` | asyncpg (already a worker dependency) | built |
+| `sqlite` | stdlib `sqlite3` in a thread | built — what examples and CI use |
+| `oracle`, `mssql`, `mysql` | `oracledb` / `aioodbc` / `aiomysql` | extras, not built (a clear error names the driver) |
 
 ## Config
 
-```json
+```jsonc
 {
   "engine": "postgresql",
-  "host": "db-core.internal",
-  "port": 5432,
-  "dbname": "corebank",
-  "user": "payprobe_readonly",
-  "password": "your-password",
-  "pool_size": 10
+  "host": "db-core.internal", "port": 5432,
+  "dbname": "corebank", "user": "payprobe_ro", "password": "${key.CORE_DB_PASSWORD}",
+  "pool_size": 2,                  // capped at 16
+  "statement_timeout_ms": 5000,
+  "max_rows": 100,
+  "queries": {                     // named queries: schema knowledge is connection data
+    "query_transaction": {"sql": "SELECT status, amount, rrn FROM txn WHERE rrn = $1", "params": ["rrn"]},
+    "query_balance":     {"sql": "SELECT balance, status FROM account WHERE id = $1", "params": ["account_id"]}
+  }
 }
 ```
 
-## Supported Engines
+SQLite for examples and tests: `{"engine": "sqlite", "dsn": ":memory:",
+"init_sql": ["CREATE TABLE txn (...)", "INSERT INTO txn VALUES (...)"]}`.
+`init_sql` runs once at connect, before the session turns read-only. SQLite
+binds positional parameters as `?`, PostgreSQL as `$1`.
 
-- `postgresql` (via asyncpg)
-- `oracle` (via python-oracledb async)
-- `mssql` (via aioodbc)
+`password` and `dsn` are secret-named: encrypted at rest, masked on read, and
+best written as `${key.NAME}` references to the test-data registry.
 
-## Supported Actions
+## Actions
 
-| Action | Payload | Description |
+| Action | Payload | Returns |
 |---|---|---|
-| `query_transaction` | `rrn` or `auth_code` | Look up a transaction by reference |
-| `query_audit_log` | `entity_id`, `since` | Fetch audit trail entries |
-| `assert_record_exists` | `table`, `where` | Assert a record exists matching criteria |
-| `query_raw` | `sql`, `params` | Execute arbitrary read-only SQL |
+| `query` | `sql`, `params` (positional list) | rows, read-only |
+| any other name | the keys the named query's `params` list | the named query's rows |
+| `execute` | `sql`, `params`, `cleanup: {sql, params}` (or `null` on `writes: "permanent"`) | `rows_affected`, `RETURNING` columns, `cleanup_registered`; connection must carry `writes` |
+
+## Response shape
+
+```jsonc
+{"status": "APPROVED", "amount": 10000, "rrn": "…",     // first row, flattened
+ "rows": [{"status": "APPROVED", "amount": 10000, "rrn": "…"}],
+ "row_count": 1, "columns": ["status", "amount", "rrn"], "truncated": false}
+```
+
+So `{"field": "status", "operator": "eq", "expected": "APPROVED"}` on
+`query_transaction` means what every pack and example already says, and
+`row_count` asserts on existence. Reserved keys (`rows`, `row_count`, `columns`,
+`truncated`, `rows_affected`, `duration_ms`) win over a same-named column;
+secret-like column names (`password`, `pin`, …) are masked to `***`.
+Downstream steps read `${probe.response.rows[0].pan}` or loop over
+`${probe.response.rows}`.
+
+## Health
+
+Phase 1 runs `SELECT 1` under the statement timeout; a dead database blocks
+every scenario that touches the probe (BLOCKED, not FAILED).

@@ -292,6 +292,40 @@ const PHASE_LABELS: Record<number, string> = {
             </button>
           </div>
 
+          <details class="launch__fixtures">
+            <summary class="muted">
+              Fixtures (run once around the whole run, ADR-0012)
+              @if (fixturesBefore().trim() || fixturesAfter().trim()) {
+                <span class="chip">on</span>
+              }
+            </summary>
+            <div class="launch__fixtures-grid">
+              <label class="muted">
+                Before · scenario ids, comma-separated (seed)
+                <input
+                  type="text"
+                  [value]="fixturesBefore()"
+                  (input)="fixturesBefore.set($any($event.target).value)"
+                  placeholder="seed-accounts"
+                />
+              </label>
+              <label class="muted">
+                After · scenario ids, comma-separated (verify, purge)
+                <input
+                  type="text"
+                  [value]="fixturesAfter()"
+                  (input)="fixturesAfter.set($any($event.target).value)"
+                  placeholder="verify-ledger, purge-accounts"
+                />
+              </label>
+              <p class="muted">
+                A failed before-fixture blocks every scenario; after-fixtures
+                run whatever happened and never change the verdict. Needs
+                PAYPROBE_RUN_FIXTURES on the orchestrator.
+              </p>
+            </div>
+          </details>
+
           <div class="launch__list">
             @for (s of projectScenarios(); track s.id) {
               <div class="case">
@@ -976,6 +1010,9 @@ export class RunMonitorComponent implements OnInit, OnDestroy {
   // launcher state (shown when no run is selected)
   readonly projects = signal<Project[]>([]);
   readonly selectedProjectId = signal<string>("");
+  /** ADR-0012 run-level fixtures (saved scenario ids), applied to every launch. */
+  readonly fixturesBefore = signal<string>("");
+  readonly fixturesAfter = signal<string>("");
   readonly projectScenarios = signal<ScenarioSummary[]>([]);
   readonly loadingList = signal(false);
 
@@ -1209,6 +1246,22 @@ export class RunMonitorComponent implements OnInit, OnDestroy {
   }
 
   private launch(req: CreateRunRequest): void {
+    const ids = (text: string) =>
+      text
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+    const before = ids(this.fixturesBefore());
+    const after = ids(this.fixturesAfter());
+    if (before.length || after.length) {
+      req = {
+        ...req,
+        fixtures: {
+          ...(before.length ? { before } : {}),
+          ...(after.length ? { after } : {}),
+        },
+      };
+    }
     this.starting.set(true);
     this.api.start(req).subscribe({
       next: (res) => {

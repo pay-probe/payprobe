@@ -437,6 +437,35 @@ def signoff_html(snapshot: dict) -> str:
             f"<tbody>{''.join(rows)}</tbody></table>"
         )
 
+    # Fixtures (ADR-0012): what ran once around the scenarios. Not evidence for
+    # the gates, but a reader must see that the seed and the purge happened.
+    fixtures_html = ""
+    fx = (snapshot.get("summary") or {}).get("fixtures") or {}
+    if fx:
+        frows = []
+        for kind in ("before", "after"):
+            for sc in fx.get(kind) or []:
+                st = sc.get("status", "?")
+                steps = sc.get("steps") or []
+                first_err = next(
+                    (s.get("error") for s in steps
+                     if s.get("status") in ("failed", "error") and s.get("error")), "")
+                frows.append(
+                    f"<tr><td>{kind}</td>"
+                    f"<td class='{'ok' if st == 'passed' else 'bad'}'>{escape(str(st))}</td>"
+                    f"<td>{escape(str(sc.get('name') or sc.get('scenario_id') or '—'))}</td>"
+                    f"<td>{len(steps)}</td><td>{escape(str(first_err or '')[:160])}</td></tr>"
+                )
+        fixtures_html = (
+            "<h2>Fixtures — run-level before / after</h2>"
+            "<p style='color:#888'>Ran once around the scenarios; not part of the gate "
+            "percentages.</p>"
+            "<table><thead><tr><th>When</th><th>Result</th><th>Fixture</th><th>Steps</th>"
+            "<th>First error</th></tr></thead>"
+            f"<tbody>{''.join(frows)}</tbody></table>"
+        )
+    evidence += fixtures_html
+
     # Agent verdicts (ADR-0010): an annotation frozen with the snapshot. Shown
     # so the signer knows what the agents concluded; never a gate input and
     # outside the content hash, which the heading says in as many words.

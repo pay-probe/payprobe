@@ -72,6 +72,23 @@
       "adapter": "db_probe_core", "engine": "postgresql", "host": "YOUR_DB_HOST",
       "dbname": "YOUR_DB_NAME", "user": "payprobe_readonly", "password": "YOUR_DB_PASSWORD",
       "description": "Production core DB read-only probe (template). Was production-template/db_probe_core."
+    },
+    "example_sqlite_probe": {
+      "adapter": "db_probe_core", "engine": "sqlite", "dsn": ":memory:",
+      "max_rows": 100, "statement_timeout_ms": 2000,
+      "init_sql": [
+        "CREATE TABLE txn (rrn TEXT PRIMARY KEY, status TEXT NOT NULL, amount INTEGER NOT NULL, currency TEXT NOT NULL, card_pan TEXT)",
+        "INSERT INTO txn VALUES ('000000000001', 'APPROVED', 10000, '981', '4111111111111111')",
+        "INSERT INTO txn VALUES ('000000000002', 'DECLINED', 2500, '981', '5555550000001111')",
+        "INSERT INTO txn VALUES ('000000000003', 'APPROVED', 700, '840', '4000001234567899')",
+        "CREATE TABLE account (id TEXT PRIMARY KEY, status TEXT NOT NULL, balance INTEGER NOT NULL)",
+        "INSERT INTO account VALUES ('ACC-1', 'ACTIVE', 500000)"
+      ],
+      "queries": {
+        "query_transaction": { "sql": "SELECT status, amount, currency, rrn FROM txn WHERE rrn = ?", "params": ["rrn"] },
+        "query_balance": { "sql": "SELECT status, balance FROM account WHERE id = ?", "params": ["account_id"] }
+      },
+      "description": "Self-contained SQLite probe for examples and CI (ADR-0012): seeded by init_sql at connect, then read-only by PRAGMA query_only. The shape a real core-database probe takes; swap engine/host/queries for your schema."
     }
   }
 }

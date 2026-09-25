@@ -1409,33 +1409,63 @@ export const ADAPTERS: AdapterSpec[] = [
     label: "DB Probe",
     category: "Verification",
     description:
-      "Read-only database adapter for cross-system assertions (verify a transaction landed downstream). Planned — not yet implemented.",
-    availability: "planned",
+      "Prove what a payment did to a database: the transaction row, the balance, the audit entry. Read-only by the database session; named queries carry the SQL; opt-in writes with declared cleanup (ADR-0012).",
+    availability: "builtin",
     direction: "outbound",
     protocols: ["SQL"],
     source: "packages/worker/adapters/db_probe/",
     overview: [
-      "A read-only database adapter for cross-system assertions — verify that a transaction processed by the payment server appears correctly in a downstream database. By design it never writes: every query must be a SELECT.",
-      "Registered behind a try-import, but the implementation module is not present yet, so the adapter is unavailable on current workers.",
+      "One adapter (DBProbeAdapter) under db_probe_core and db_probe_switch, with pluggable engines: postgresql (asyncpg) and sqlite (stdlib) are built; oracle / mssql / mysql are extras with a clear not-built error.",
+      "Every read runs in a read-only database session (READ ONLY transaction on PostgreSQL, PRAGMA query_only on SQLite), so a write is refused by the database, not by a regex. Schema knowledge is connection data: any action other than query is a named query from the connection's queries map, overridable per environment.",
+      "The response flattens the first row to the top level and adds rows, row_count, columns and truncated, so the usual assertion operators apply. Secret-like column names are masked; rows are capped (max_rows) and statements timed out (statement_timeout_ms).",
+    ],
+    protocolNotes: [
+      "Writes are a per-environment opt-in (writes: true) and every execute declares a cleanup statement the runner executes when the scenario ends, whatever the outcome. cleanup: null is a permanent write and needs writes: 'permanent'.",
+      "A load run refuses a probe target unless the connection carries load_ok: true. GET /diagnostics?layers=databases reports reachability, whether the session refused a write, and named queries that fail to parse.",
     ],
     configGroups: [
       {
-        title: "Config (planned)",
+        title: "Config",
         keys: [
           {
             key: "engine",
-            type: "string",
-            desc: "Database engine, e.g. postgresql.",
+            type: "postgresql | sqlite",
+            desc: "Database engine (oracle / mssql / mysql: extras, not built).",
           },
           {
-            key: "host / port / dbname / user",
+            key: "host / port / dbname / user / password",
             type: "string / int",
-            desc: "Connection coordinates.",
+            desc: "Connection coordinates; password best as ${key.NAME}.",
           },
           {
             key: "dsn",
-            type: "string",
-            desc: "Full connection string (secret).",
+            type: "string (secret)",
+            desc: "Full connection string; for SQLite :memory: or a file path.",
+          },
+          {
+            key: "queries",
+            type: "object",
+            desc: "Named queries: {name: {sql, params: [payload keys]}} — PostgreSQL binds $1, SQLite ?.",
+          },
+          {
+            key: "writes",
+            type: "false | true | 'permanent'",
+            desc: "Opt into execute; 'permanent' also allows cleanup: null.",
+          },
+          {
+            key: "max_rows / statement_timeout_ms",
+            type: "int",
+            desc: "Row cap (100) and statement timeout (5000 ms).",
+          },
+          {
+            key: "load_ok",
+            type: "bool",
+            desc: "Allow this probe inside a load run (refused otherwise).",
+          },
+          {
+            key: "init_sql",
+            type: "string[]",
+            desc: "SQLite only: statements run once at connect to seed an example database.",
           },
         ],
       },
@@ -1444,11 +1474,21 @@ export const ADAPTERS: AdapterSpec[] = [
       {
         name: "query",
         summary:
-          "Run a SELECT and assert on the rows (planned). Non-SELECT is rejected.",
+          "Ad hoc read: sql + positional params; returns rows / row_count / columns / truncated.",
+      },
+      {
+        name: "<named query>",
+        summary:
+          "Any other action name is looked up in the connection's queries map (query_transaction, query_balance, …); payload keys bind positionally.",
+      },
+      {
+        name: "execute",
+        summary:
+          "Write with a declared cleanup (connection must carry writes); returns rows_affected, RETURNING columns, cleanup_registered.",
       },
     ],
     notes:
-      "Planned adapter — directory currently holds only a README and package stub.",
+      "examples/scenarios/db_probe_settlement.json runs for real against the bundled example_sqlite_probe connection. How-to: docs/adapters/db-probe.md.",
   },
 
   // ---------------------------------------------------------------- group ---

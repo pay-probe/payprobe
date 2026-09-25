@@ -1307,8 +1307,10 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
                 <span>Engine</span>
                 <select [(ngModel)]="d.db.engine" (ngModelChange)="markDirty()">
                   <option value="postgresql">PostgreSQL</option>
-                  <option value="mysql">MySQL</option>
                   <option value="sqlite">SQLite</option>
+                  <option value="oracle">Oracle (extra, not built)</option>
+                  <option value="mssql">MSSQL (extra, not built)</option>
+                  <option value="mysql">MySQL (extra, not built)</option>
                 </select>
               </label>
               <label class="fld">
@@ -1353,11 +1355,103 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
                   type="password"
                   [(ngModel)]="d.db.password"
                   (ngModelChange)="markDirty()"
+                  placeholder="${key.CORE_DB_PASSWORD}"
                 />
               </label>
+              <label class="fld">
+                <span>DSN <small class="muted">(optional, secret)</small></span>
+                <input
+                  type="password"
+                  [(ngModel)]="d.db.dsn"
+                  (ngModelChange)="markDirty()"
+                  [placeholder]="
+                    d.db.engine === 'sqlite'
+                      ? ':memory: or /path/to/file.db'
+                      : 'postgresql://user:pass@host/db'
+                  "
+                />
+              </label>
+              <label class="fld">
+                <span>Writes</span>
+                <select [(ngModel)]="d.db.writes" (ngModelChange)="markDirty()">
+                  <option value="">Read-only (default)</option>
+                  <option value="true">Allowed, with declared cleanup</option>
+                  <option value="permanent">
+                    Allowed, permanent (cleanup: null)
+                  </option>
+                </select>
+              </label>
+              <label class="fld">
+                <span>Max rows</span>
+                <input
+                  type="number"
+                  [(ngModel)]="d.db.maxRows"
+                  (ngModelChange)="markDirty()"
+                  placeholder="100"
+                />
+              </label>
+              <label class="fld">
+                <span>Statement timeout (ms)</span>
+                <input
+                  type="number"
+                  [(ngModel)]="d.db.statementTimeoutMs"
+                  (ngModelChange)="markDirty()"
+                  placeholder="5000"
+                />
+              </label>
+              <label class="fld fld--check">
+                <input
+                  type="checkbox"
+                  [(ngModel)]="d.db.loadOk"
+                  (ngModelChange)="markDirty()"
+                />
+                <span
+                  >Allow in load runs
+                  <small class="muted"
+                    >(a load run would query this database at the target TPS;
+                    refused unless ticked)</small
+                  ></span
+                >
+              </label>
             </div>
+            <label class="fld">
+              <span
+                >Named queries
+                <small class="muted"
+                  >(JSON; the SQL for query_transaction, query_balance, … —
+                  PostgreSQL binds $1, SQLite ?)</small
+                ></span
+              >
+              <textarea
+                rows="6"
+                [(ngModel)]="d.db.queriesJson"
+                (ngModelChange)="markDirty()"
+                placeholder='{"query_transaction": {"sql": "SELECT status, amount, rrn FROM txn WHERE rrn = $1", "params": ["rrn"]}}'
+              ></textarea>
+            </label>
+            @if (d.db.engine === "sqlite") {
+              <label class="fld">
+                <span
+                  >Seed statements
+                  <small class="muted"
+                    >(SQLite only; run once at connect, one per line, before the
+                    session turns read-only)</small
+                  ></span
+                >
+                <textarea
+                  rows="4"
+                  [(ngModel)]="d.db.initSql"
+                  (ngModelChange)="markDirty()"
+                  placeholder="CREATE TABLE txn (rrn TEXT, status TEXT, amount INTEGER)"
+                ></textarea>
+              </label>
+            }
             <p class="muted note">
-              Read-only probe — used for verification queries only.
+              Read-only by the database session (READ ONLY transaction / PRAGMA
+              query_only); writes only where this connection opts in, and every
+              write declares a cleanup the runner executes when the scenario
+              ends. Per-environment values (staging schema, writes) go in the
+              override matrix. See docs/adapters/db-probe.md.
             </p>
           }
 
