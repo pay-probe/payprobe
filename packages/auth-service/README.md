@@ -19,11 +19,18 @@ On first start it seeds an admin (`AUTH_ADMIN_USER`/`AUTH_ADMIN_PASSWORD`; in
 dev, `admin`/`admin`). In prod, set those env vars or the service starts with no
 users rather than a known-default account.
 
+**Demo login (public demos only).** `AUTH_DEMO_LOGIN=username:password` makes
+`GET /demo-login` return those credentials to anyone, and the portal login page
+pre-fills them with a "Demo workspace" notice. It names an existing account and
+creates nothing. Unset (the default), the endpoint is a 404 and the login page
+is unchanged.
+
 ## Endpoints
 
 | Method | Path              | Auth   | Purpose                              |
 |--------|-------------------|--------|--------------------------------------|
 | POST   | `/token`          | none   | password grant → `{access_token}`    |
+| GET    | `/demo-login`     | none   | demo credentials, 404 unless `AUTH_DEMO_LOGIN` |
 | GET    | `/me`             | bearer | claims for the current token         |
 | GET    | `/verify`         | bearer | introspection (`{active, claims}`)   |
 | GET    | `/users`          | admin  | list users                           |

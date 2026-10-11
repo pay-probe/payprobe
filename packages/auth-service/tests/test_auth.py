@@ -147,3 +147,28 @@ def test_can_demote_admin_when_another_exists(client):
     })
     assert r.status_code == 200
     assert r.json()["roles"] == ["operator"]
+
+
+def test_demo_login_is_off_by_default(client, monkeypatch):
+    monkeypatch.delenv("AUTH_DEMO_LOGIN", raising=False)
+    assert client.get("/demo-login").status_code == 404
+
+
+@pytest.mark.parametrize("raw", ["", "admin", "admin:", ":admin"])
+def test_demo_login_malformed_value_stays_off(client, monkeypatch, raw):
+    monkeypatch.setenv("AUTH_DEMO_LOGIN", raw)
+    assert client.get("/demo-login").status_code == 404
+
+
+def test_demo_login_publishes_the_configured_account(client, monkeypatch):
+    monkeypatch.setenv("AUTH_DEMO_LOGIN", "admin:admin")
+    r = client.get("/demo-login")  # no token: the login page calls it signed out
+    assert r.status_code == 200
+    assert r.json() == {"username": "admin", "password": "admin"}
+    assert r.headers["cache-control"] == "no-store"
+    _login(client, r.json()["username"], r.json()["password"])
+
+
+def test_demo_login_password_may_contain_colons(client, monkeypatch):
+    monkeypatch.setenv("AUTH_DEMO_LOGIN", "demo:pa:ss")
+    assert client.get("/demo-login").json() == {"username": "demo", "password": "pa:ss"}

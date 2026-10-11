@@ -1,6 +1,6 @@
 import { HttpClient } from "@angular/common/http";
 import { Injectable, computed, inject, signal } from "@angular/core";
-import { Observable, tap } from "rxjs";
+import { Observable, catchError, of, tap } from "rxjs";
 
 import { RuntimeConfigService } from "../shared/runtime-config.service";
 
@@ -14,6 +14,13 @@ export interface UserInfo {
   username: string;
   roles: string[];
   project_ids: string[];
+}
+
+/** Credentials a public demo publishes for its login page (auth-service
+ *  `AUTH_DEMO_LOGIN`). */
+export interface DemoLogin {
+  username: string;
+  password: string;
 }
 
 const TOKEN_KEY = "pp.auth.token";
@@ -60,6 +67,14 @@ export class AuthService {
           this.refreshUser().subscribe({ error: () => {} });
         }),
       );
+  }
+
+  /** The demo account to pre-fill, or `null` when demo login is off (404) or
+   *  auth-service is unreachable. Never throws: the login page works either way. */
+  demoLogin(): Observable<DemoLogin | null> {
+    return this.http
+      .get<DemoLogin>(`${this.base}/demo-login`)
+      .pipe(catchError(() => of(null)));
   }
 
   /** Verify the current token and load the user's roles / project scope. */

@@ -17,6 +17,10 @@ Environment:
     AUTH_ADMIN_PASSWORD bootstrap admin password (dev default: admin)
     CORS_ORIGINS        comma-separated allowed origins
     PAYPROBE_ENV        dev/test relaxes the bootstrap-password requirement
+    AUTH_DEMO_LOGIN     ``username:password`` the login page pre-fills, served
+                        to anyone by ``GET /demo-login`` (public demos only;
+                        unset = off, the endpoint is a 404). It names an
+                        existing account; it creates nothing.
 """
 from __future__ import annotations
 
@@ -180,6 +184,23 @@ async def ready() -> JSONResponse:
         )
 
 
+def _demo_login() -> dict | None:
+    user, sep, pwd = os.environ.get("AUTH_DEMO_LOGIN", "").partition(":")
+    if not (sep and user.strip() and pwd):
+        return None
+    return {"username": user.strip(), "password": pwd}
+
+
+@app.get("/demo-login")
+async def demo_login() -> JSONResponse:
+    """Public demo: the credentials the login page pre-fills. Off (404) unless
+    ``AUTH_DEMO_LOGIN`` is set; turning it on publishes that account."""
+    creds = _demo_login()
+    if creds is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "demo login is off")
+    return JSONResponse(creds, headers={"Cache-Control": "no-store"})
+
+
 @app.post("/token", response_model=TokenResponse)
 async def token(
     username: Annotated[str, Form()],
@@ -241,9 +262,9 @@ async def update_user(username: str, draft: UserUpdate) -> UserInfo:
     return UserInfo(**user.public())
 
 
-@app.delete("/users/{username}", status_code=204,
+@app.delete("/users/{username}", status_code=204, response_class=Response,
             dependencies=[Depends(require_admin)])
-async def delete_user(username: str) -> None:
+async def delete_user(username: str) -> Response:
     store = app.state.store
     existing = store.get(username)
     # Lockout guard: never delete the last remaining admin.
@@ -252,3 +273,4 @@ async def delete_user(username: str) -> None:
                             "cannot delete the last admin")
     if not store.delete(username):
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"no user '{username}'")
+    return Response(status_code=204)

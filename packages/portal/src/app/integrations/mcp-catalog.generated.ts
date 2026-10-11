@@ -31,7 +31,7 @@ export interface McpCatalog {
 }
 
 export const MCP_CATALOG: McpCatalog = {
-  "toolCount": 171,
+  "toolCount": 248,
   "groups": [
     {
       "name": "Discovery",
@@ -110,6 +110,41 @@ export const MCP_CATALOG: McpCatalog = {
           "name": "update_scenario",
           "title": "Update scenario",
           "kind": "upsert"
+        },
+        {
+          "name": "delete_scenario",
+          "title": "Delete scenario",
+          "kind": "delete"
+        },
+        {
+          "name": "list_scenario_versions",
+          "title": "List scenario versions",
+          "kind": "read"
+        },
+        {
+          "name": "get_scenario_version",
+          "title": "Get scenario version",
+          "kind": "read"
+        },
+        {
+          "name": "restore_scenario_version",
+          "title": "Restore scenario version",
+          "kind": "create"
+        },
+        {
+          "name": "duplicate_scenario",
+          "title": "Duplicate scenario",
+          "kind": "create"
+        },
+        {
+          "name": "move_scenario",
+          "title": "Move scenario to project",
+          "kind": "upsert"
+        },
+        {
+          "name": "import_scenario",
+          "title": "Import scenario",
+          "kind": "create"
         }
       ]
     },
@@ -164,6 +199,16 @@ export const MCP_CATALOG: McpCatalog = {
         {
           "name": "diagnose_run",
           "title": "Diagnose run",
+          "kind": "read"
+        },
+        {
+          "name": "get_run_regression",
+          "title": "Get run regression evidence",
+          "kind": "read"
+        },
+        {
+          "name": "resolve_environment",
+          "title": "Resolve environment",
           "kind": "read"
         },
         {
@@ -265,6 +310,31 @@ export const MCP_CATALOG: McpCatalog = {
           "name": "delete_saved_simulator",
           "title": "Delete saved simulator",
           "kind": "delete"
+        },
+        {
+          "name": "update_saved_simulator",
+          "title": "Update saved simulator",
+          "kind": "upsert"
+        },
+        {
+          "name": "clear_simulator",
+          "title": "Reset simulator counters",
+          "kind": "delete"
+        },
+        {
+          "name": "get_proxy_capture",
+          "title": "Get proxy capture",
+          "kind": "read"
+        },
+        {
+          "name": "clear_proxy_capture",
+          "title": "Clear proxy capture",
+          "kind": "delete"
+        },
+        {
+          "name": "save_proxy_capture_as_scenario",
+          "title": "Save proxy capture as scenario",
+          "kind": "create"
         }
       ]
     },
@@ -295,6 +365,41 @@ export const MCP_CATALOG: McpCatalog = {
           "name": "list_participant_flows",
           "title": "List participant flows",
           "kind": "read"
+        },
+        {
+          "name": "get_participant_flow",
+          "title": "Get participant flow",
+          "kind": "read"
+        },
+        {
+          "name": "list_participant_flow_versions",
+          "title": "List participant flow versions",
+          "kind": "read"
+        },
+        {
+          "name": "create_participant_flow",
+          "title": "Create participant flow",
+          "kind": "create"
+        },
+        {
+          "name": "save_participant_flow",
+          "title": "Save participant flow",
+          "kind": "upsert"
+        },
+        {
+          "name": "duplicate_participant_flow",
+          "title": "Duplicate or rename participant flow",
+          "kind": "create"
+        },
+        {
+          "name": "delete_participant_flow",
+          "title": "Delete participant flow",
+          "kind": "delete"
+        },
+        {
+          "name": "debug_participant_flow",
+          "title": "Debug-run participant flow",
+          "kind": "run"
         },
         {
           "name": "list_participant_groups",
@@ -345,6 +450,41 @@ export const MCP_CATALOG: McpCatalog = {
           "name": "set_trace_capture",
           "title": "Toggle trace capture",
           "kind": "upsert"
+        },
+        {
+          "name": "get_trace_capture",
+          "title": "Get trace capture state",
+          "kind": "read"
+        },
+        {
+          "name": "clear_network_traces",
+          "title": "Clear network traces",
+          "kind": "delete"
+        },
+        {
+          "name": "start_participant",
+          "title": "Start standalone participant",
+          "kind": "run"
+        },
+        {
+          "name": "get_participant",
+          "title": "Get running participant",
+          "kind": "read"
+        },
+        {
+          "name": "stop_participant",
+          "title": "Stop standalone participant",
+          "kind": "stop"
+        },
+        {
+          "name": "get_network_graph",
+          "title": "Get live network graph",
+          "kind": "read"
+        },
+        {
+          "name": "list_peers",
+          "title": "List live sockets",
+          "kind": "read"
         }
       ]
     },
@@ -382,6 +522,11 @@ export const MCP_CATALOG: McpCatalog = {
           "kind": "read"
         },
         {
+          "name": "infer_network_flow_wiring",
+          "title": "Infer network-flow wiring",
+          "kind": "read"
+        },
+        {
           "name": "start_network_flow",
           "title": "Start network flow",
           "kind": "run"
@@ -395,6 +540,51 @@ export const MCP_CATALOG: McpCatalog = {
           "name": "install_showcase",
           "title": "Install showcase demo network",
           "kind": "run"
+        }
+      ]
+    },
+    {
+      "name": "NATS (ADR-0006)",
+      "tools": [
+        {
+          "name": "save_nats_server",
+          "title": "Save NATS broker entry",
+          "kind": "upsert"
+        },
+        {
+          "name": "delete_nats_server",
+          "title": "Delete NATS broker entry",
+          "kind": "delete"
+        },
+        {
+          "name": "nats_cluster_health",
+          "title": "NATS cluster health",
+          "kind": "read"
+        },
+        {
+          "name": "list_nats_streams",
+          "title": "List JetStream streams",
+          "kind": "read"
+        },
+        {
+          "name": "create_nats_stream",
+          "title": "Create JetStream stream",
+          "kind": "run"
+        },
+        {
+          "name": "delete_nats_stream",
+          "title": "Delete JetStream stream",
+          "kind": "stop"
+        },
+        {
+          "name": "list_nats_consumers",
+          "title": "List JetStream consumers",
+          "kind": "read"
+        },
+        {
+          "name": "delete_nats_consumer",
+          "title": "Delete JetStream consumer",
+          "kind": "stop"
         }
       ]
     },
@@ -655,6 +845,106 @@ export const MCP_CATALOG: McpCatalog = {
           "name": "train_insights",
           "title": "Retrain insight models",
           "kind": "upsert"
+        },
+        {
+          "name": "insight_status",
+          "title": "Insight service status",
+          "kind": "read"
+        },
+        {
+          "name": "list_insight_categories",
+          "title": "List failure categories",
+          "kind": "read"
+        },
+        {
+          "name": "rename_insight_category",
+          "title": "Rename failure category",
+          "kind": "upsert"
+        },
+        {
+          "name": "get_insight_prediction",
+          "title": "Predict one scenario",
+          "kind": "read"
+        },
+        {
+          "name": "insight_prediction_calibration",
+          "title": "Prediction calibration trend",
+          "kind": "read"
+        },
+        {
+          "name": "insight_infer",
+          "title": "Run one inference",
+          "kind": "read"
+        },
+        {
+          "name": "insight_label_queue",
+          "title": "Failures worth labelling",
+          "kind": "read"
+        },
+        {
+          "name": "correct_insight_failure",
+          "title": "Correct failure category",
+          "kind": "create"
+        },
+        {
+          "name": "create_insight_dataset",
+          "title": "Create training dataset",
+          "kind": "create"
+        },
+        {
+          "name": "list_insight_datasets",
+          "title": "List training datasets",
+          "kind": "read"
+        },
+        {
+          "name": "get_insight_dataset",
+          "title": "Get training dataset",
+          "kind": "read"
+        },
+        {
+          "name": "list_insight_dataset_rows",
+          "title": "List dataset rows",
+          "kind": "read"
+        },
+        {
+          "name": "relabel_insight_dataset_row",
+          "title": "Relabel dataset row",
+          "kind": "upsert"
+        },
+        {
+          "name": "delete_insight_dataset_row",
+          "title": "Delete dataset row",
+          "kind": "delete"
+        },
+        {
+          "name": "rename_insight_dataset_label",
+          "title": "Rename dataset label",
+          "kind": "upsert"
+        },
+        {
+          "name": "delete_insight_dataset",
+          "title": "Delete training dataset",
+          "kind": "delete"
+        },
+        {
+          "name": "list_insight_models",
+          "title": "List insight models",
+          "kind": "read"
+        },
+        {
+          "name": "train_insight_model",
+          "title": "Train insight model",
+          "kind": "create"
+        },
+        {
+          "name": "activate_insight_model",
+          "title": "Activate insight model",
+          "kind": "upsert"
+        },
+        {
+          "name": "delete_insight_model",
+          "title": "Delete insight model",
+          "kind": "delete"
         }
       ]
     },
@@ -725,6 +1015,31 @@ export const MCP_CATALOG: McpCatalog = {
           "name": "list_approvals",
           "title": "List approvals inbox",
           "kind": "read"
+        },
+        {
+          "name": "get_approval",
+          "title": "Get approval",
+          "kind": "read"
+        },
+        {
+          "name": "list_agent_plans",
+          "title": "List agent plans",
+          "kind": "read"
+        },
+        {
+          "name": "get_agent_plan",
+          "title": "Get agent plan",
+          "kind": "read"
+        },
+        {
+          "name": "get_agent_hub_catalog",
+          "title": "Get agent-hub catalog",
+          "kind": "read"
+        },
+        {
+          "name": "get_agent_pause",
+          "title": "Get agent pause state",
+          "kind": "read"
         }
       ]
     },
@@ -782,6 +1097,26 @@ export const MCP_CATALOG: McpCatalog = {
           "kind": "stop"
         },
         {
+          "name": "retune_load_run",
+          "title": "Retune running load run",
+          "kind": "run"
+        },
+        {
+          "name": "scale_load_run",
+          "title": "Scale load-run workers",
+          "kind": "run"
+        },
+        {
+          "name": "get_load_worker_provisioner",
+          "title": "Get worker provisioner",
+          "kind": "read"
+        },
+        {
+          "name": "reconcile_load_runs",
+          "title": "Reconcile stuck load runs",
+          "kind": "upsert"
+        },
+        {
           "name": "list_load_workers",
           "title": "List load workers",
           "kind": "read"
@@ -825,6 +1160,26 @@ export const MCP_CATALOG: McpCatalog = {
           "name": "playground_execute",
           "title": "Execute against target",
           "kind": "run"
+        },
+        {
+          "name": "list_playground_history",
+          "title": "List playground history",
+          "kind": "read"
+        },
+        {
+          "name": "clear_playground_history",
+          "title": "Clear playground history",
+          "kind": "delete"
+        },
+        {
+          "name": "refire_playground_entry",
+          "title": "Re-fire playground entry",
+          "kind": "run"
+        },
+        {
+          "name": "save_playground_as_scenario",
+          "title": "Save playground as scenario",
+          "kind": "create"
         }
       ]
     },
@@ -959,6 +1314,41 @@ export const MCP_CATALOG: McpCatalog = {
         {
           "name": "delete_project",
           "title": "Delete project",
+          "kind": "delete"
+        },
+        {
+          "name": "list_scenario_sets",
+          "title": "List scenario sets",
+          "kind": "read"
+        },
+        {
+          "name": "create_scenario_set",
+          "title": "Create scenario set",
+          "kind": "create"
+        },
+        {
+          "name": "get_scenario_set",
+          "title": "Get scenario set",
+          "kind": "read"
+        },
+        {
+          "name": "update_scenario_set",
+          "title": "Update scenario set",
+          "kind": "upsert"
+        },
+        {
+          "name": "delete_scenario_set",
+          "title": "Delete scenario set",
+          "kind": "delete"
+        },
+        {
+          "name": "add_scenario_to_set",
+          "title": "Add scenario to set",
+          "kind": "upsert"
+        },
+        {
+          "name": "remove_scenario_from_set",
+          "title": "Remove scenario from set",
           "kind": "delete"
         },
         {
