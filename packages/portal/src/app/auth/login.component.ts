@@ -1,5 +1,6 @@
 import {
   Component,
+  OnInit,
   inject,
   signal,
   ChangeDetectionStrategy,
@@ -25,6 +26,17 @@ import { AuthService } from "./auth.service";
             <p class="brand__sub">Sign in to your workspace</p>
           </div>
         </div>
+
+        @if (demo()) {
+          <p class="demo" role="note">
+            <pp-icon name="info" [size]="16" />
+            <span>
+              <strong>Demo workspace.</strong> The sign-in below is filled in
+              for you. Everyone who opens this demo uses the same account and
+              sees the same data.
+            </span>
+          </p>
+        }
 
         <label class="field">
           <span class="field__label">Username</span>
@@ -146,6 +158,24 @@ import { AuthService } from "./auth.service";
         border-color: var(--brand);
         box-shadow: 0 0 0 3px var(--focus-ring);
       }
+      .demo {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-2);
+        margin: 0;
+        padding: var(--space-2-5) var(--space-3);
+        font-size: var(--text-sm);
+        line-height: 1.45;
+        color: var(--text-primary);
+        background: color-mix(in srgb, var(--color-info) 16%, transparent);
+        border: 1px solid color-mix(in srgb, var(--color-info) 45%, transparent);
+        border-radius: var(--radius-md);
+      }
+      .demo pp-icon {
+        flex: none;
+        margin-top: 2px;
+        color: var(--color-info);
+      }
       .error {
         display: flex;
         align-items: center;
@@ -163,7 +193,7 @@ import { AuthService } from "./auth.service";
     `,
   ],
 })
-export class LoginComponent {
+export class LoginComponent implements OnInit {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
@@ -172,6 +202,18 @@ export class LoginComponent {
   password = "";
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
+  /** On when auth-service publishes a demo account (`AUTH_DEMO_LOGIN`). */
+  readonly demo = signal(false);
+
+  ngOnInit(): void {
+    this.auth.demoLogin().subscribe((creds) => {
+      // Never overwrite what the user already started typing.
+      if (!creds || this.username || this.password) return;
+      this.username = creds.username;
+      this.password = creds.password;
+      this.demo.set(true);
+    });
+  }
 
   submit(): void {
     if (!this.username || !this.password || this.loading()) return;

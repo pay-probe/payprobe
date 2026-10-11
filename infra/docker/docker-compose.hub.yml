@@ -124,6 +124,7 @@ services:
       AUTH_TOKEN_TTL_SEC: ${AUTH_TOKEN_TTL_SEC:-3600}
       AUTH_ADMIN_USER: ${AUTH_ADMIN_USER:-admin}
       AUTH_ADMIN_PASSWORD: ${AUTH_ADMIN_PASSWORD:-}
+      AUTH_DEMO_LOGIN: ${AUTH_DEMO_LOGIN:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:4200}
       PAYPROBE_ENV: ${PAYPROBE_ENV:-dev}
     volumes:

@@ -176,6 +176,7 @@ Drift check:
 | `AUTH_JWT_ISSUER` | `payprobe-auth` | `iss` claim on issued tokens. | prod | `security.py:ISSUER` |
 | `AUTH_ADMIN_USER` | `admin` | First-start bootstrap admin username (only when the store is empty). | prod | `packages/auth-service/api/main.py:_bootstrap_admin` (~line 59) |
 | `AUTH_ADMIN_PASSWORD` | dev envs: `admin`; prod: unset ⇒ NO users seeded (operator must seed explicitly — no known-default account) | Bootstrap admin password. | prod | `api/main.py:_bootstrap_admin` |
+| `AUTH_DEMO_LOGIN` | unset (off) | `username:password` published by public `GET /demo-login` and pre-filled on the portal login page with a demo notice. Names an existing account, creates nothing; malformed = off. Public demos only. | demo | `api/main.py:_demo_login` |
 
 Drift check:
 `grep -rn "environ" packages/auth-service --include="*.py" | grep -v tests`

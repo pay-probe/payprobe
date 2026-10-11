@@ -62,6 +62,8 @@ jobs:
           cd packages/scenario-service && pip install -e ".[dev]" && pytest tests/ -v
       - name: Test mcp-server
         run: cd packages/mcp-server && pip install -e ".[dev]" && pytest tests/ -v
+      - name: Test auth-service
+        run: cd packages/auth-service && pip install -e ".[dev]" && pytest tests/ -v
       - name: Test payprobe-assistant
         # A library since ADR-0010 D2 (mounted inside agent-hub at /assistant;
         # no image of its own). Its tool layer is the shared payprobe_common toolkit.
