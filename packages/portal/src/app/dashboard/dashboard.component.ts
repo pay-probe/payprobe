@@ -417,7 +417,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
           ? `${cfg.scheme}://${cfg.host}:${cfg.port}`
           : // MCP is reached at its /mcp path — show that, not the bare root
             // (which 404s), so the URL is the actual connect target.
-            `${this.cfg.baseUrl(cfg)}${cfg.kind === "mcp" ? (cfg.healthPath ?? "") : ""}`,
+            cfg.kind === "mcp"
+            ? `${this.cfg.baseUrl(cfg)}${cfg.healthPath ?? ""}`
+            : this.cfg.probeBase(cfg),
       result:
         this.endpoints().find((r) => r.cfg.key === cfg.key)?.result ??
         ({ status: "unknown", detail: "checking…" } as ProbeResult),

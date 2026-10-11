@@ -27,11 +27,19 @@ const DEFAULT_TIMEOUT_MS = 4000;
 export class EndpointHealthService {
   private readonly cfg = inject(RuntimeConfigService);
 
-  /** Probe a single endpoint. */
-  async probe(ep: EndpointConfig): Promise<ProbeResult> {
+  /**
+   * Probe a single endpoint. By default an http endpoint is hit at the base
+   * the app really uses (same-origin `/api/...` in production); `literal`
+   * probes the given scheme/host/port instead, for testing unsaved values.
+   */
+  async probe(
+    ep: EndpointConfig,
+    opts: { literal?: boolean } = {},
+  ): Promise<ProbeResult> {
     if (ep.kind === "redis") return this.probeViaOrchestrator("redis");
     if (ep.kind === "mcp") return this.probeViaOrchestrator("mcp-server");
-    return this.probeHttp(ep);
+    const base = opts.literal ? this.cfg.baseUrl(ep) : this.cfg.probeBase(ep);
+    return this.probeHttp(`${base}${ep.healthPath ?? "/"}`);
   }
 
   /** Probe every configured endpoint in parallel. */
@@ -43,8 +51,7 @@ export class EndpointHealthService {
     return new Map(entries);
   }
 
-  private async probeHttp(ep: EndpointConfig): Promise<ProbeResult> {
-    const url = `${this.cfg.baseUrl(ep)}${ep.healthPath ?? "/"}`;
+  private async probeHttp(url: string): Promise<ProbeResult> {
     const started = performance.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
