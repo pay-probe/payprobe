@@ -600,3 +600,176 @@ def test_auth_header_empty_when_unconfigured(monkeypatch):
     for var in ("MCP_API_TOKEN", "API_TOKEN", "AUTH_JWT_SECRET"):
         monkeypatch.delenv(var, raising=False)
     assert tools._auth_header() == {}
+
+
+def test_participant_flow_management(calls):
+    base = f"{tools.SCENARIO_API}/participant-flows"
+    tools.get_participant_flow("flow-1")
+    assert calls[-1][:2] == ("GET", f"{base}/flow-1")
+    tools.get_participant_flow("flow-1", version=2)
+    assert calls[-1][:2] == ("GET", f"{base}/flow-1?version=2")
+    tools.list_participant_flow_versions("flow-1")
+    assert calls[-1][:2] == ("GET", f"{base}/flow-1/versions")
+    draft = {"name": "Issuer", "trigger": {"connection": "issuer_in"},
+             "nodes": [{"id": "t", "kind": "trigger"},
+                       {"id": "ack", "kind": "reply", "payload": {"39": "00"}}],
+             "edges": [{"source": "t", "target": "ack"}]}
+    tools.create_participant_flow(draft)
+    assert calls[-1] == ("POST", base, draft)
+    tools.save_participant_flow("flow-1", draft)
+    assert calls[-1] == ("PUT", f"{base}/flow-1", draft)
+    tools.duplicate_participant_flow("flow-1")
+    assert calls[-1] == ("POST", f"{base}/flow-1/duplicate", {"replace": False})
+    tools.duplicate_participant_flow("flow-1", name="Issuer v2", replace=True)
+    assert calls[-1][2] == {"replace": True, "name": "Issuer v2"}
+    tools.delete_participant_flow("flow-1")
+    assert calls[-1][:2] == ("DELETE", f"{base}/flow-1")
+
+
+_SC, _RUN, _INS, _HUB = (tools.SCENARIO_API, tools.RUN_API, tools.INSIGHT_API,
+                         tools.AGENT_HUB_API)
+
+#: (tool, args, kwargs, method, url, body) for every REST wrapper added when
+#: the MCP surface was brought to parity with the services. ``body`` None =
+#: not asserted (no body sent).
+_PARITY_CASES = [
+    # scenario lifecycle
+    ("delete_scenario", ("s1",), {}, "DELETE", f"{_SC}/scenarios/s1", None),
+    ("list_scenario_versions", ("s1",), {}, "GET", f"{_SC}/scenarios/s1/versions", None),
+    ("get_scenario_version", ("s1", 3), {}, "GET", f"{_SC}/scenarios/s1/versions/3", None),
+    ("restore_scenario_version", ("s1", 3), {}, "POST",
+     f"{_SC}/scenarios/s1/versions/3/restore", None),
+    ("duplicate_scenario", ("s1",), {}, "POST", f"{_SC}/scenarios/s1/duplicate", None),
+    ("move_scenario", ("s1", "p2"), {}, "POST", f"{_SC}/scenarios/s1/move",
+     {"project_id": "p2"}),
+    ("import_scenario", ({"name": "x", "steps": []},), {"project_id": "p1"}, "POST",
+     f"{_SC}/scenarios/import?project_id=p1", {"name": "x", "steps": []}),
+    # scenario sets
+    ("list_scenario_sets", ("p1",), {}, "GET", f"{_SC}/projects/p1/sets", None),
+    ("create_scenario_set", ("p1", "smoke"), {"scenario_ids": ["s1"]}, "POST",
+     f"{_SC}/projects/p1/sets", {"name": "smoke", "description": "", "scenario_ids": ["s1"]}),
+    ("get_scenario_set", ("set1",), {}, "GET", f"{_SC}/sets/set1", None),
+    ("update_scenario_set", ("set1", "nightly"), {}, "PUT", f"{_SC}/sets/set1",
+     {"name": "nightly", "description": "", "scenario_ids": []}),
+    ("delete_scenario_set", ("set1",), {}, "DELETE", f"{_SC}/sets/set1", None),
+    ("add_scenario_to_set", ("set1", "s1"), {}, "PUT", f"{_SC}/sets/set1/scenarios/s1", None),
+    ("remove_scenario_from_set", ("set1", "s1"), {}, "DELETE",
+     f"{_SC}/sets/set1/scenarios/s1", None),
+    # participant flows, listeners, wiring
+    ("debug_participant_flow", (), {"flow_id": "flow-1", "request": {"mti": "0100"}},
+     "POST", f"{_RUN}/flows/debug-run",
+     {"request": {"mti": "0100"}, "debug": True, "breakpoints": [], "state": {},
+      "flow_id": "flow-1"}),
+    ("get_trace_capture", (), {}, "GET", f"{_RUN}/participants/capture", None),
+    ("clear_network_traces", (), {}, "DELETE", f"{_RUN}/participants/traces", None),
+    ("start_participant", ("flow-1",), {"port": 9100}, "POST", f"{_RUN}/participants/start",
+     {"flow_id": "flow-1", "port": 9100}),
+    ("get_participant", ("p1",), {}, "GET", f"{_RUN}/participants/p1", None),
+    ("stop_participant", ("p1",), {}, "DELETE", f"{_RUN}/participants/p1", None),
+    ("get_network_graph", (), {}, "GET", f"{_RUN}/network-graph", None),
+    ("list_peers", (), {}, "GET", f"{_RUN}/peers", None),
+    ("infer_network_flow_wiring", ({"name": "n", "nodes": []},), {}, "POST",
+     f"{_SC}/network-flows/infer-wiring", {"name": "n", "nodes": []}),
+    # simulators
+    ("update_saved_simulator", ("cfg1",), {"enabled": False}, "PUT",
+     f"{_RUN}/simulator-configs/cfg1", {"enabled": False}),
+    ("clear_simulator", ("sim1",), {}, "POST", f"{_RUN}/simulators/sim1/clear", None),
+    ("get_proxy_capture", ("px",), {}, "GET", f"{_RUN}/simulators/px/capture", None),
+    ("clear_proxy_capture", ("px",), {}, "DELETE", f"{_RUN}/simulators/px/capture", None),
+    ("save_proxy_capture_as_scenario", ("px", "Captured"), {}, "POST",
+     f"{_RUN}/simulators/px/capture/save-as-scenario", {"name": "Captured"}),
+    # NATS
+    ("save_nats_server", ("c1", ["nats://h:4222"]), {}, "PUT", f"{_SC}/nats-servers/c1",
+     {"name": "c1", "description": "", "servers": ["nats://h:4222"], "monitoring": []}),
+    ("delete_nats_server", ("c1",), {}, "DELETE", f"{_SC}/nats-servers/c1", None),
+    ("nats_cluster_health", (), {"server": "c1"}, "GET", f"{_RUN}/nats/cluster?server=c1", None),
+    ("list_nats_streams", (), {}, "GET", f"{_RUN}/nats/streams", None),
+    ("create_nats_stream", ("ORDERS", ["orders.>"]), {"server": "c1"}, "POST",
+     f"{_RUN}/nats/streams",
+     {"name": "ORDERS", "subjects": ["orders.>"], "server": "c1", "servers": None}),
+    ("delete_nats_stream", ("ORDERS",), {"server": "c1"}, "DELETE",
+     f"{_RUN}/nats/streams/ORDERS?server=c1", None),
+    ("list_nats_consumers", ("ORDERS",), {}, "GET", f"{_RUN}/nats/streams/ORDERS/consumers",
+     None),
+    ("delete_nats_consumer", ("ORDERS", "d1"), {}, "DELETE",
+     f"{_RUN}/nats/streams/ORDERS/consumers/d1", None),
+    # load
+    ("retune_load_run", ("lr1",), {"target_tps": 250.0}, "POST",
+     f"{_RUN}/load-runs/lr1/retune", {"target_tps": 250.0}),
+    ("scale_load_run", ("lr1", 4), {}, "POST", f"{_RUN}/load-runs/lr1/scale", {"desired": 4}),
+    ("get_load_worker_provisioner", (), {}, "GET", f"{_RUN}/load-workers/provisioner", None),
+    ("reconcile_load_runs", (), {}, "POST", f"{_RUN}/load-runs/reconcile", None),
+    # runs, environments, playground
+    ("get_run_regression", ("r1",), {}, "GET", f"{_RUN}/runs/r1/regression", None),
+    ("resolve_environment", ("mock",), {}, "GET", f"{_RUN}/environments/mock", None),
+    ("list_playground_history", (), {}, "GET", f"{_RUN}/playground/history", None),
+    ("clear_playground_history", (), {}, "DELETE", f"{_RUN}/playground/history", None),
+    ("refire_playground_entry", (7,), {}, "POST", f"{_RUN}/playground/history/7/refire", None),
+    ("save_playground_as_scenario", ("From playground",), {"seqs": [1, 2]}, "POST",
+     f"{_RUN}/playground/save-as-scenario", {"name": "From playground", "seqs": [1, 2]}),
+    # insight service
+    ("insight_status", (), {}, "GET", f"{_INS}/status", None),
+    ("list_insight_categories", (), {}, "GET", f"{_INS}/insights/categories", None),
+    ("rename_insight_category", ("c3", "Timeouts"), {}, "POST",
+     f"{_INS}/insights/categories/c3/rename", {"label": "Timeouts"}),
+    ("get_insight_prediction", ("s1",), {"environment": "staging"}, "GET",
+     f"{_INS}/insights/predictions/s1?environment=staging", None),
+    ("insight_prediction_calibration", (), {"days": 7}, "GET",
+     f"{_INS}/insights/predictions/calibration?days=7", None),
+    ("insight_infer", ("categorize",), {"text": "timeout"}, "POST", f"{_INS}/infer",
+     {"kind": "categorize", "text": "timeout"}),
+    ("insight_label_queue", (), {}, "GET", f"{_INS}/insights/label-queue?limit=20", None),
+    ("correct_insight_failure", ("r1", "s1", "st1", "Timeouts"), {}, "POST",
+     f"{_INS}/insights/corrections",
+     {"run_id": "r1", "scenario_id": "s1", "step_id": "st1", "label": "Timeouts",
+      "apply_to_signature": False}),
+    ("create_insight_dataset", ("ds",), {"csv": "text,label\na,b"}, "POST",
+     f"{_INS}/datasets", {"name": "ds", "kind": "categorizer", "csv": "text,label\na,b"}),
+    ("list_insight_datasets", (), {}, "GET", f"{_INS}/datasets", None),
+    ("get_insight_dataset", ("ds-1",), {}, "GET", f"{_INS}/datasets/ds-1", None),
+    ("list_insight_dataset_rows", ("ds-1",), {"label": "x"}, "GET",
+     f"{_INS}/datasets/ds-1/rows?label=x&limit=50&offset=0", None),
+    ("relabel_insight_dataset_row", ("ds-1", 5, "y"), {}, "PATCH",
+     f"{_INS}/datasets/ds-1/rows/5", {"label": "y"}),
+    ("delete_insight_dataset_row", ("ds-1", 5), {}, "DELETE", f"{_INS}/datasets/ds-1/rows/5",
+     None),
+    ("rename_insight_dataset_label", ("ds-1", "a", "b"), {}, "POST",
+     f"{_INS}/datasets/ds-1/rename-label", {"from_label": "a", "to_label": "b"}),
+    ("delete_insight_dataset", ("ds-1",), {}, "DELETE", f"{_INS}/datasets/ds-1", None),
+    ("list_insight_models", (), {}, "GET", f"{_INS}/models", None),
+    ("train_insight_model", ("m", ["ds-1"]), {}, "POST", f"{_INS}/models/train",
+     {"name": "m", "dataset_ids": ["ds-1"], "activate": False}),
+    ("activate_insight_model", ("cm-1",), {}, "POST", f"{_INS}/models/cm-1/activate", None),
+    ("delete_insight_model", ("cm-1",), {}, "DELETE", f"{_INS}/models/cm-1", None),
+    # agent-hub reads
+    ("get_approval", ("ap-1",), {}, "GET", f"{_HUB}/approvals/ap-1", None),
+    ("list_agent_plans", (), {"run_id": "wr-1"}, "GET", f"{_HUB}/plans?run=wr-1&limit=50",
+     None),
+    ("get_agent_plan", ("pl-1",), {}, "GET", f"{_HUB}/plans/pl-1", None),
+    ("get_agent_hub_catalog", (), {}, "GET", f"{_HUB}/catalog", None),
+    ("get_agent_pause", (), {}, "GET", f"{_HUB}/pause", None),
+]
+
+
+@pytest.mark.parametrize("name,args,kwargs,method,url,body", _PARITY_CASES,
+                         ids=[c[0] for c in _PARITY_CASES])
+def test_parity_tool_calls_its_endpoint(calls, name, args, kwargs, method, url, body):
+    getattr(tools, name)(*args, **kwargs)
+    assert calls[-1][:2] == (method, url)
+    if body is not None:
+        assert calls[-1][2] == body
+
+
+def test_nats_server_entries_have_no_read_tool():
+    """GET /nats-servers returns auth secrets in plaintext; a read tool would
+    put them in front of the model (invariant #8). Add one only after the
+    API masks them."""
+    assert not hasattr(tools, "list_nats_servers")
+    assert not hasattr(tools, "get_nats_server")
+
+
+def test_human_acts_are_not_mcp_tools():
+    """ADR-0010: deciding an approval, reverting a heartbeat and setting the
+    global pause are a person's act in the portal, never an MCP tool."""
+    for name in ("decide_approval", "revert_heartbeat", "set_agent_pause"):
+        assert not hasattr(tools, name)

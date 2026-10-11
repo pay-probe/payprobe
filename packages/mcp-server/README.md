@@ -8,7 +8,9 @@ scenarios, with full knowledge of the live catalog.
 
 The server exposes three MCP surfaces, not just tools:
 
-- **Tools** — ~100 operations over the scenario-service / orchestrator. Every
+- **Tools** — 248 operations (2026-10-11) over the scenario-service,
+  orchestrator, insight-service and agent-hub, in the groups of
+  `registry.TOOL_GROUPS` (the portal's Integrations page lists them). Every
   tool carries a human-friendly **title** and **behaviour annotations**
   (`readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint`) so
   clients know which calls are safe to retry and which (`delete_*`, `stop_*`,
@@ -34,6 +36,21 @@ The server exposes three MCP surfaces, not just tools:
 | `create_scenario` | persist a new scenario |
 | `run_scenario` / `get_run` | start a run and read its per-step results |
 | `run_trend` | regression-health pass-rate over time |
+| `create_participant_flow` / `save_participant_flow` | author a listening flow (trigger → logic → reply); also get, versions, duplicate/rename, delete |
+| `debug_participant_flow` | run a flow once against a sample message, no listener |
+| `delete_scenario` / `restore_scenario_version` / `import_scenario` | scenario lifecycle: also versions, duplicate, move; sets via `*_scenario_set` |
+| `nats_cluster_health` / `list_nats_streams` | NATS cluster health and JetStream admin; `save_nats_server` / `delete_nats_server` |
+
+**Left out on purpose** (the REST endpoints exist; there is no tool):
+
+- Reading NATS broker entries (`GET /nats-servers`): the API returns their
+  `auth` secrets in plaintext, and a read tool would hand them to the model.
+  Add `list_nats_servers` once the API masks them.
+- Deciding an approval, reverting a heartbeat, setting the agent pause: a
+  person's act in the portal (ADR-0010). Reads (`get_approval`,
+  `get_agent_pause`, `list_agent_plans`) are tools.
+- Key and assistant-key material, auth/users, the assistant's own chat
+  endpoints, one-shot `/admin/migrate/*`, probes, streams and HTML renders.
 
 ## Install & run
 

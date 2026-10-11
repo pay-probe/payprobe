@@ -183,6 +183,52 @@ def update_scenario(scenario_id: str, scenario: dict,
     return _request("PUT", f"{SCENARIO_API}/scenarios/{scenario_id}", body)
 
 
+def delete_scenario(scenario_id: str) -> dict:
+    """Delete a scenario and its version history. Not checked against network
+    flows, schedules or sets that name it."""
+    return _request("DELETE", f"{SCENARIO_API}/scenarios/{scenario_id}")
+
+
+def list_scenario_versions(scenario_id: str) -> list[dict]:
+    """Version history of a scenario (newest first): version, timestamp,
+    comment. Every save bumps the version."""
+    return _request("GET", f"{SCENARIO_API}/scenarios/{scenario_id}/versions")
+
+
+def get_scenario_version(scenario_id: str, version: int) -> dict:
+    """One earlier saved version of a scenario (the full document)."""
+    return _request("GET", f"{SCENARIO_API}/scenarios/{scenario_id}/versions/{version}")
+
+
+def restore_scenario_version(scenario_id: str, version: int) -> dict:
+    """Roll a scenario back to ``version``. The restore is saved as a NEW
+    version (history is never rewritten). Returns the restored scenario."""
+    return _request(
+        "POST", f"{SCENARIO_API}/scenarios/{scenario_id}/versions/{version}/restore")
+
+
+def duplicate_scenario(scenario_id: str) -> dict:
+    """Copy a scenario within its project as ``<name> (copy)``, including its
+    set memberships. Returns the new scenario (fresh id)."""
+    return _request("POST", f"{SCENARIO_API}/scenarios/{scenario_id}/duplicate")
+
+
+def move_scenario(scenario_id: str, project_id: str) -> dict:
+    """Move a scenario to another project (no new version). Its memberships in
+    the old project's sets are dropped."""
+    return _request("POST", f"{SCENARIO_API}/scenarios/{scenario_id}/move",
+                    {"project_id": project_id})
+
+
+def import_scenario(document: dict, project_id: str | None = None) -> dict:
+    """Create a scenario from a portable document (what
+    ``export_scenario(format="json")`` produces, as an object). Server fields
+    (id, version, timestamps) are ignored and a fresh id is assigned. The
+    document is validated first; an invalid one is a 422 with the issues."""
+    return _request("POST", f"{SCENARIO_API}/scenarios/import{_q(project_id=project_id)}",
+                    document)
+
+
 # -- ISO 8583 inspector -------------------------------------------------------
 
 def iso8583_analyze(message: str, fields: dict | None = None,
@@ -393,6 +439,44 @@ def delete_saved_simulator(cid: str) -> dict:
     return _request("DELETE", f"{RUN_API}/simulator-configs/{cid}")
 
 
+def update_saved_simulator(cid: str, label: str | None = None,
+                           config: dict | None = None,
+                           enabled: bool | None = None) -> dict:
+    """Edit a saved simulator. Only the fields passed change; ``config``
+    replaces the whole config. A running instance keeps its old config until it
+    is stopped and started again."""
+    body = {k: v for k, v in {"label": label, "config": config,
+                              "enabled": enabled}.items() if v is not None}
+    return _request("PUT", f"{RUN_API}/simulator-configs/{cid}", body)
+
+
+def clear_simulator(sid: str) -> dict:
+    """Reset a running simulator's counters, traffic log and timeline. It
+    keeps listening."""
+    return _request("POST", f"{RUN_API}/simulators/{sid}/clear")
+
+
+def get_proxy_capture(sid: str) -> dict:
+    """Frames a running proxy simulator has recorded (redacted), with capture
+    mode and dropped counts. 400 when ``sid`` is not a proxy."""
+    return _request("GET", f"{RUN_API}/simulators/{sid}/capture")
+
+
+def clear_proxy_capture(sid: str) -> dict:
+    """Discard a proxy simulator's recorded frames."""
+    return _request("DELETE", f"{RUN_API}/simulators/{sid}/capture")
+
+
+def save_proxy_capture_as_scenario(sid: str, name: str,
+                                   project_id: str | None = None) -> dict:
+    """Turn a proxy's recorded request/response pairs into a stored scenario.
+    Returns ``{scenario_id, name, ...}``; 400 when nothing was captured."""
+    body: dict = {"name": name}
+    if project_id:
+        body["project_id"] = project_id
+    return _request("POST", f"{RUN_API}/simulators/{sid}/capture/save-as-scenario", body)
+
+
 # -- payShield 10K HSM simulator ----------------------------------------------
 
 def start_payshield_simulator(
@@ -512,6 +596,84 @@ def list_participant_flows() -> list[dict]:
     return _request("GET", f"{SCENARIO_API}/participant-flows")
 
 
+def get_participant_flow(fid: str, version: int | None = None) -> dict:
+    """One participant flow by id: trigger, nodes, edges, variables. Pass
+    ``version`` to read an earlier saved version (see
+    :func:`list_participant_flow_versions`)."""
+    q = f"?version={version}" if version is not None else ""
+    return _request("GET", f"{SCENARIO_API}/participant-flows/{fid}{q}")
+
+
+def list_participant_flow_versions(fid: str) -> list[dict]:
+    """Version history of a participant flow: ``[{version, updated_at,
+    comment, node_count}]``. Every save bumps the version."""
+    return _request("GET", f"{SCENARIO_API}/participant-flows/{fid}/versions")
+
+
+def create_participant_flow(draft: dict) -> dict:
+    """Create a participant flow; the server assigns the id (``flow-xxxxxxxx``).
+    ``draft`` is a ParticipantFlowDraft: ``{name, description, trigger:
+    {connection}, nodes: [{id, kind, ...}], edges: [{source, source_port,
+    target}], variables}``. ``trigger.connection`` names an inbound
+    (server-mode) connection the flow listens on. The entry node has kind
+    ``trigger`` and every terminal node has kind ``reply`` (``payload`` is the
+    answer); in between go scenario step kinds plus the flow-only ``state`` and
+    ``relay``. Edges mean "then" (``source_port`` ``out``, or ``true``/``false``
+    for ``if``). Minimal example: nodes ``[{id: t, kind: trigger}, {id: ack,
+    kind: reply, payload: {status: 200}}]``, edges ``[{source: t, target:
+    ack}]``. Returns the created flow (with id and version)."""
+    return _request("POST", f"{SCENARIO_API}/participant-flows", draft)
+
+
+def save_participant_flow(fid: str, draft: dict) -> dict:
+    """Create or replace participant flow ``fid`` (version bumps; the previous
+    document stays in the version history). ``draft`` is a
+    ParticipantFlowDraft (see :func:`create_participant_flow`)."""
+    return _request("PUT", f"{SCENARIO_API}/participant-flows/{fid}", draft)
+
+
+def duplicate_participant_flow(fid: str, name: str | None = None,
+                               replace: bool = False) -> dict:
+    """Copy a participant flow into a new flow with a fresh id (Save As).
+    ``replace=True`` makes it a rename: every network flow whose
+    ``participant`` nodes point at ``fid`` is repointed at the copy and ``fid``
+    is deleted. Ids are stable handles, so this is the only rename path.
+    Returns ``{flow, repointed_network_flows, deleted_source}``."""
+    body: dict = {"replace": replace}
+    if name:
+        body["name"] = name
+    return _request("POST", f"{SCENARIO_API}/participant-flows/{fid}/duplicate", body)
+
+
+def delete_participant_flow(fid: str) -> dict:
+    """Delete a participant flow and its version history. Not checked against
+    network flows: a ``participant`` node that still names ``fid`` dangles
+    (:func:`validate_network_flow` reports it)."""
+    return _request("DELETE", f"{SCENARIO_API}/participant-flows/{fid}")
+
+
+def debug_participant_flow(flow_id: str | None = None, flow: dict | None = None,
+                           request: dict | None = None, debug: bool = True,
+                           breakpoints: list[str] | None = None,
+                           state: dict | None = None, label: str | None = None) -> dict:
+    """Run a participant flow once against a sample inbound message, without
+    starting a listener. Give a saved ``flow_id`` or an unsaved ``flow``
+    document. ``request`` is what the inbound message decodes to (seen by
+    nodes as ``${request.*}``); ``state`` seeds ``${state.*}``. With
+    ``debug=True`` the run pauses at ``breakpoints`` (every node when none)
+    and is driven by the ``debug_*`` tools; ``debug=False`` runs straight
+    through. Returns ``{run_id, status}``; read the result with ``get_run``."""
+    body: dict = {"request": request or {}, "debug": debug,
+                  "breakpoints": breakpoints or [], "state": state or {}}
+    if flow is not None:
+        body["flow"] = flow
+    if flow_id:
+        body["flow_id"] = flow_id
+    if label:
+        body["label"] = label
+    return _request("POST", f"{RUN_API}/flows/debug-run", body)
+
+
 def list_participant_groups() -> list[dict]:
     """Participant groups (fleets): member connections + a selection policy."""
     return _request("GET", f"{SCENARIO_API}/participant-groups")
@@ -582,6 +744,56 @@ def set_trace_capture(enabled: bool) -> dict:
     return _request("POST", f"{RUN_API}/participants/capture", {"enabled": enabled})
 
 
+def get_trace_capture() -> dict:
+    """Whether Network Trace recording is on (it is OFF by default)."""
+    return _request("GET", f"{RUN_API}/participants/capture")
+
+
+def clear_network_traces() -> dict:
+    """Empty every live listener's trace buffer (the Network Trace "Clear").
+    Capture state and the listeners themselves are untouched."""
+    return _request("DELETE", f"{RUN_API}/participants/traces")
+
+
+def start_participant(flow_id: str, port: int | None = None) -> dict:
+    """Start ONE participant flow listening on its own, outside any network
+    flow. ``port`` overrides the trigger connection's port. 409 when the flow
+    already runs inside a live network flow. Stop it with
+    :func:`stop_participant`."""
+    body: dict = {"flow_id": flow_id}
+    if port is not None:
+        body["port"] = port
+    return _request("POST", f"{RUN_API}/participants/start", body)
+
+
+def get_participant(pid: str) -> dict:
+    """One running listener: endpoint, stats, the last 50 decoded requests
+    and the last 50 trace hops. ``pid`` comes from :func:`list_participants`."""
+    return _request("GET", f"{RUN_API}/participants/{pid}")
+
+
+def stop_participant(pid: str) -> dict:
+    """Stop one listener started with :func:`start_participant`. It stops any
+    listener by id, so do not use it on one a network-flow run started (that
+    run's health would lose it); stop the run with :func:`stop_network_flow`."""
+    return _request("DELETE", f"{RUN_API}/participants/{pid}")
+
+
+def get_network_graph() -> dict:
+    """The live map of the simulated network: traffic drivers, participant
+    listeners, downstream simulators and hosts, with status and cumulative
+    message counts per node, and the edges between them."""
+    return _request("GET", f"{RUN_API}/network-graph")
+
+
+def list_peers() -> dict:
+    """Live sockets: ``inbound`` (every client connected to a listener this
+    orchestrator hosts) and ``outbound`` (proxy upstreams and engine adapter
+    sockets). Remote address, age, frames, idle time. Sockets inside separate
+    load-worker processes are not reported."""
+    return _request("GET", f"{RUN_API}/peers")
+
+
 # -- network flows (ADR-0004: canvas-authored composites, successor of topologies)
 
 def list_network_flows() -> list[dict]:
@@ -616,6 +828,14 @@ def delete_network_flow(nid: str) -> dict:
     """Delete a network flow (does not touch the participant flows /
     scenarios / simulators it referenced)."""
     return _request("DELETE", f"{SCENARIO_API}/network-flows/{nid}")
+
+
+def infer_network_flow_wiring(draft: dict) -> dict:
+    """Suggest the wiring edges of a network-flow draft from what its
+    participant flows already declare (outbound nodes naming a connection or
+    group, matched to other participants' listen ports). Saves nothing; merge
+    the returned edges into the draft and call :func:`save_network_flow`."""
+    return _request("POST", f"{SCENARIO_API}/network-flows/infer-wiring", draft)
 
 
 def validate_network_flow(draft: dict) -> dict:
@@ -656,6 +876,73 @@ def install_showcase(start: bool = False) -> dict:
     bring it up immediately. THE fastest way to see PayProbe end to end;
     returns the network id (``showcase-net``) + the run when started."""
     return _request("POST", f"{RUN_API}/showcase/install", {"start": start})
+
+
+# -- NATS (ADR-0006): broker registry entries + JetStream admin ---------------
+# No list/get tool for registry entries on purpose: the scenario-service
+# returns their ``auth`` (token, password, nkey seed, creds) in plaintext, and a
+# read tool would hand those to the model. Use the portal to view an entry.
+
+def save_nats_server(name: str, servers: list[str], monitoring: list[str] | None = None,
+                     description: str = "", auth: dict | None = None) -> dict:
+    """Create or replace a NATS broker entry that NATS connections and the
+    cluster/stream tools refer to by name. ``servers`` are client URLs
+    (``nats://host:4222``); ``monitoring`` the HTTP monitoring bases
+    (``http://host:8222``, derived from ``servers`` when empty). ``auth`` may
+    carry token / user / password / nkey_seed / creds (encrypted at rest).
+    Omitting ``auth`` saves the entry WITHOUT auth."""
+    body: dict = {"name": name, "description": description, "servers": servers,
+                  "monitoring": monitoring or []}
+    if auth is not None:
+        body["auth"] = auth
+    return _request("PUT", f"{SCENARIO_API}/nats-servers/{name}", body)
+
+
+def delete_nats_server(name: str) -> dict:
+    """Delete a NATS broker entry. Connections that name it are not checked."""
+    return _request("DELETE", f"{SCENARIO_API}/nats-servers/{name}")
+
+
+def nats_cluster_health(server: str | None = None, servers: str | None = None) -> dict:
+    """Per-node health of a NATS cluster from its monitoring ports (healthz,
+    varz, jsz). ``server`` is a broker entry name; ``servers`` an ad-hoc
+    comma-separated URL list. Probes HTTP only, never opens a client."""
+    return _request("GET", f"{RUN_API}/nats/cluster{_q(server=server, servers=servers)}")
+
+
+def list_nats_streams(server: str | None = None, servers: str | None = None) -> dict:
+    """JetStream streams on a cluster (subjects, messages, bytes)."""
+    return _request("GET", f"{RUN_API}/nats/streams{_q(server=server, servers=servers)}")
+
+
+def create_nats_stream(name: str, subjects: list[str], server: str | None = None,
+                       servers: str | None = None) -> dict:
+    """Create a JetStream stream on the target cluster. An operator action on
+    the real broker, not owned or cleaned up by any run."""
+    return _request("POST", f"{RUN_API}/nats/streams",
+                    {"name": name, "subjects": subjects, "server": server,
+                     "servers": servers})
+
+
+def delete_nats_stream(name: str, server: str | None = None,
+                       servers: str | None = None) -> dict:
+    """Delete a JetStream stream and every message in it."""
+    return _request("DELETE", f"{RUN_API}/nats/streams/{name}"
+                              f"{_q(server=server, servers=servers)}")
+
+
+def list_nats_consumers(stream: str, server: str | None = None,
+                        servers: str | None = None) -> dict:
+    """Consumers of one JetStream stream (pending, ack floor, redelivered)."""
+    return _request("GET", f"{RUN_API}/nats/streams/{stream}/consumers"
+                           f"{_q(server=server, servers=servers)}")
+
+
+def delete_nats_consumer(stream: str, durable: str, server: str | None = None,
+                         servers: str | None = None) -> dict:
+    """Delete one durable consumer of a JetStream stream."""
+    return _request("DELETE", f"{RUN_API}/nats/streams/{stream}/consumers/{durable}"
+                              f"{_q(server=server, servers=servers)}")
 
 
 # -- schedules ----------------------------------------------------------------
@@ -901,6 +1188,144 @@ def train_insights() -> dict:
     return _request("POST", f"{INSIGHT_API}/train", {})
 
 
+def insight_status() -> dict:
+    """Insight-service state: corpus size, categorizer and predictor status,
+    whether scikit-learn is available."""
+    return _request("GET", f"{INSIGHT_API}/status")
+
+
+def list_insight_categories() -> dict:
+    """Failure categories with counts (heuristic and discovered clusters)."""
+    return _request("GET", f"{INSIGHT_API}/insights/categories")
+
+
+def rename_insight_category(cat_id: str, label: str) -> dict:
+    """Give a discovered failure cluster a human name."""
+    return _request("POST", f"{INSIGHT_API}/insights/categories/{cat_id}/rename",
+                    {"label": label})
+
+
+def get_insight_prediction(scenario_id: str, environment: str | None = None) -> dict:
+    """ADVISORY outcome prediction for one scenario (probability the next run
+    fails, basis, top factors). 404 when it has no recorded outcomes."""
+    return _request("GET", f"{INSIGHT_API}/insights/predictions/"
+                           f"{scenario_id}{_q(environment=environment)}")
+
+
+def insight_prediction_calibration(days: int = 30) -> dict:
+    """Daily Brier score trend of scored predictions (1 to 365 days): is the
+    predictor getting sharper or decaying."""
+    return _request("GET", f"{INSIGHT_API}/insights/predictions/calibration{_q(days=days)}")
+
+
+def insight_infer(kind: str, text: str | None = None, model_id: str | None = None,
+                  context: dict | None = None, scenario_id: str | None = None,
+                  environment: str | None = None) -> dict:
+    """One-shot inference without side effects. ``kind`` is ``categorize`` or
+    ``explain`` (need ``text``: a failure message) or ``predict_outcome``
+    (needs ``scenario_id``). ``model_id`` pins a registered model."""
+    body = {k: v for k, v in {"kind": kind, "text": text, "model_id": model_id,
+                              "context": context, "scenario_id": scenario_id,
+                              "environment": environment}.items() if v is not None}
+    return _request("POST", f"{INSIGHT_API}/infer", body)
+
+
+def insight_label_queue(limit: int = 20) -> dict:
+    """The failure shapes most worth a human label, best first (novel shapes,
+    then low confidence, weighted by how many failures share the shape).
+    Label one with :func:`correct_insight_failure`."""
+    return _request("GET", f"{INSIGHT_API}/insights/label-queue{_q(limit=limit)}")
+
+
+def correct_insight_failure(run_id: str, scenario_id: str, step_id: str, label: str,
+                            apply_to_signature: bool = False) -> dict:
+    """Correct one failure's category. Relabels it at once (a human label
+    outranks a model) and appends it to the "Operator corrections" dataset.
+    ``apply_to_signature`` relabels every failure of the same shape."""
+    return _request("POST", f"{INSIGHT_API}/insights/corrections",
+                    {"run_id": run_id, "scenario_id": scenario_id, "step_id": step_id,
+                     "label": label, "apply_to_signature": apply_to_signature})
+
+
+def create_insight_dataset(name: str, rows: list[dict] | None = None,
+                           csv: str | None = None, kind: str = "categorizer") -> dict:
+    """Upload a labeled training dataset: ``rows`` as ``[{text, label}]`` or
+    ``csv`` with text,label columns. Text is normalized (digits, hosts, ids
+    masked) before storage."""
+    body: dict = {"name": name, "kind": kind}
+    if rows is not None:
+        body["rows"] = rows
+    if csv is not None:
+        body["csv"] = csv
+    return _request("POST", f"{INSIGHT_API}/datasets", body)
+
+
+def list_insight_datasets() -> dict:
+    """Uploaded training datasets with row and label counts."""
+    return _request("GET", f"{INSIGHT_API}/datasets")
+
+
+def get_insight_dataset(ds_id: str) -> dict:
+    """One training dataset's metadata."""
+    return _request("GET", f"{INSIGHT_API}/datasets/{ds_id}")
+
+
+def list_insight_dataset_rows(ds_id: str, label: str | None = None, q: str | None = None,
+                              limit: int = 50, offset: int = 0) -> dict:
+    """A page of a dataset's rows (limit 1 to 500), optionally filtered by
+    exact label and/or a text substring."""
+    return _request("GET", f"{INSIGHT_API}/datasets/{ds_id}/rows"
+                           f"{_q(label=label, q=q, limit=limit, offset=offset)}")
+
+
+def relabel_insight_dataset_row(ds_id: str, row_id: int, label: str) -> dict:
+    """Fix one dataset row's label."""
+    return _request("PATCH", f"{INSIGHT_API}/datasets/{ds_id}/rows/{row_id}",
+                    {"label": label})
+
+
+def delete_insight_dataset_row(ds_id: str, row_id: int) -> dict:
+    """Drop one bad row from a dataset."""
+    return _request("DELETE", f"{INSIGHT_API}/datasets/{ds_id}/rows/{row_id}")
+
+
+def rename_insight_dataset_label(ds_id: str, from_label: str, to_label: str) -> dict:
+    """Rename a label on every row of one dataset. Retrain for an active model
+    to pick it up."""
+    return _request("POST", f"{INSIGHT_API}/datasets/{ds_id}/rename-label",
+                    {"from_label": from_label, "to_label": to_label})
+
+
+def delete_insight_dataset(ds_id: str) -> dict:
+    """Delete a training dataset."""
+    return _request("DELETE", f"{INSIGHT_API}/datasets/{ds_id}")
+
+
+def list_insight_models() -> dict:
+    """Registered custom categorizer models with holdout metrics and which
+    one is active."""
+    return _request("GET", f"{INSIGHT_API}/models")
+
+
+def train_insight_model(name: str, dataset_ids: list[str], activate: bool = False) -> dict:
+    """Train and register a custom failure categorizer from datasets. Training
+    runs inside the request; a large dataset can outlast this tool's 30 s
+    timeout (the model may still finish; check :func:`list_insight_models`)."""
+    return _request("POST", f"{INSIGHT_API}/models/train",
+                    {"name": name, "dataset_ids": dataset_ids, "activate": activate})
+
+
+def activate_insight_model(model_id: str) -> dict:
+    """Make a registered model THE custom categorizer. ``"none"`` deactivates
+    (back to clusters and heuristics). Changes labels only, never verdicts."""
+    return _request("POST", f"{INSIGHT_API}/models/{model_id}/activate")
+
+
+def delete_insight_model(model_id: str) -> dict:
+    """Delete a registered model and its artifact (deactivates it if active)."""
+    return _request("DELETE", f"{INSIGHT_API}/models/{model_id}")
+
+
 # -- Go/No-Go sign-off --------------------------------------------------------
 
 def certify_run(run_id: str, pack: str, policy: dict | None = None,
@@ -1005,6 +1430,39 @@ def stop_load_run(run_id: str) -> dict:
     return _request("POST", f"{RUN_API}/load-runs/{run_id}/stop")
 
 
+def retune_load_run(run_id: str, target_tps: float | None = None,
+                    base_tps: float | None = None, spike_tps: float | None = None,
+                    end_tps: float | None = None) -> dict:
+    """Change a RUNNING load run's rate without restarting it. Only the knob of
+    the run's profile takes effect: ``target_tps`` (steady),
+    ``base_tps``/``spike_tps`` (spike), ``end_tps`` (ramp)."""
+    body = {k: v for k, v in {"target_tps": target_tps, "base_tps": base_tps,
+                              "spike_tps": spike_tps, "end_tps": end_tps}.items()
+            if v is not None}
+    return _request("POST", f"{RUN_API}/load-runs/{run_id}/retune", body)
+
+
+def scale_load_run(run_id: str, desired: int) -> dict:
+    """Bring a running load run's worker fleet to ``desired`` workers through
+    the configured provisioner, which may launch or stop worker processes or
+    containers. Without a provisioner the reply carries the manual command
+    instead. See :func:`get_load_worker_provisioner`."""
+    return _request("POST", f"{RUN_API}/load-runs/{run_id}/scale", {"desired": desired})
+
+
+def get_load_worker_provisioner() -> dict:
+    """Which worker provisioner is configured and what it can do (live scale
+    or the manual command template)."""
+    return _request("GET", f"{RUN_API}/load-workers/provisioner")
+
+
+def reconcile_load_runs() -> dict:
+    """Mark load runs stuck in ``running`` that no live coordinator owns (for
+    example after a restart) as ``interrupted``. Runs being driven are skipped.
+    Returns ``{reconciled, count}``."""
+    return _request("POST", f"{RUN_API}/load-runs/reconcile")
+
+
 # -- chaos injection & resilience runs ----------------------------------------
 #
 # Fault-injection dial + timed storms on a *running* simulator, and resilience
@@ -1100,6 +1558,20 @@ def stop_all_load_workers() -> dict:
     return _request("POST", f"{RUN_API}/load-workers/stop-all")
 
 
+def resolve_environment(name: str) -> dict:
+    """The fully resolved environment the orchestrator would run against
+    (registry entry first, else the bundled file). Read-only; edit with
+    :func:`save_environment`."""
+    return _request("GET", f"{RUN_API}/environments/{name}")
+
+
+def get_run_regression(run_id: str) -> dict:
+    """Deterministic regression evidence for a run: per scenario, whether it
+    passed in an earlier run (``regression``), never passed, or has no
+    history (``first_run``)."""
+    return _request("GET", f"{RUN_API}/runs/{run_id}/regression")
+
+
 # -- code / node execution ----------------------------------------------------
 
 def validate_code(language: str, code: str = "") -> dict:
@@ -1154,6 +1626,35 @@ def playground_execute(target: dict, action: str, payload: dict | None = None,
     return _request("POST", f"{RUN_API}/playground/execute", {
         "target": target, "action": action, "payload": payload or {},
         "message_format_id": message_format_id, "label": label})
+
+
+def list_playground_history() -> dict:
+    """Recent playground interactions (masked), newest first. History is
+    kept per caller identity: through MCP it is the MCP server's own
+    history, not the portal user's."""
+    return _request("GET", f"{RUN_API}/playground/history")
+
+
+def clear_playground_history() -> dict:
+    """Delete this caller's playground history (the MCP server's own)."""
+    return _request("DELETE", f"{RUN_API}/playground/history")
+
+
+def refire_playground_entry(seq: int) -> dict:
+    """Send one history entry again, verbatim, to the same target."""
+    return _request("POST", f"{RUN_API}/playground/history/{seq}/refire")
+
+
+def save_playground_as_scenario(name: str, seqs: list[int] | None = None,
+                                project_id: str | None = None) -> dict:
+    """Turn playground history entries (``seqs``, default all, oldest first)
+    into a stored scenario."""
+    body: dict = {"name": name}
+    if seqs is not None:
+        body["seqs"] = seqs
+    if project_id:
+        body["project_id"] = project_id
+    return _request("POST", f"{RUN_API}/playground/save-as-scenario", body)
 
 
 # -- variables ----------------------------------------------------------------
@@ -1390,6 +1891,49 @@ def delete_project(project_id: str) -> dict:
     return _request("DELETE", f"{SCENARIO_API}/projects/{project_id}")
 
 
+def list_scenario_sets(project_id: str) -> list[dict]:
+    """Named sets of a project (a set = an ordered selection of the project's
+    scenarios, e.g. "smoke" or "nightly")."""
+    return _request("GET", f"{SCENARIO_API}/projects/{project_id}/sets")
+
+
+def create_scenario_set(project_id: str, name: str, description: str = "",
+                        scenario_ids: list[str] | None = None) -> dict:
+    """Create a named set in a project. Every scenario id must belong to that
+    project (422 otherwise). Returns the set (with id)."""
+    return _request("POST", f"{SCENARIO_API}/projects/{project_id}/sets",
+                    {"name": name, "description": description,
+                     "scenario_ids": scenario_ids or []})
+
+
+def get_scenario_set(set_id: str) -> dict:
+    """One scenario set: name, description, scenario ids, project."""
+    return _request("GET", f"{SCENARIO_API}/sets/{set_id}")
+
+
+def update_scenario_set(set_id: str, name: str, description: str = "",
+                        scenario_ids: list[str] | None = None) -> dict:
+    """Replace a set's name, description and scenario list."""
+    return _request("PUT", f"{SCENARIO_API}/sets/{set_id}",
+                    {"name": name, "description": description,
+                     "scenario_ids": scenario_ids or []})
+
+
+def delete_scenario_set(set_id: str) -> dict:
+    """Delete a set. The scenarios in it are kept."""
+    return _request("DELETE", f"{SCENARIO_API}/sets/{set_id}")
+
+
+def add_scenario_to_set(set_id: str, scenario_id: str) -> dict:
+    """Add one scenario (of the same project) to a set. Returns the set."""
+    return _request("PUT", f"{SCENARIO_API}/sets/{set_id}/scenarios/{scenario_id}")
+
+
+def remove_scenario_from_set(set_id: str, scenario_id: str) -> dict:
+    """Remove one scenario from a set (the scenario itself is kept)."""
+    return _request("DELETE", f"{SCENARIO_API}/sets/{set_id}/scenarios/{scenario_id}")
+
+
 # -- agents and workflows (ADR-0010, agent-hub) -------------------------------
 # Optional deployment: agent-hub registers agent principals, runs their
 # bounded heartbeats and drives JSON-DAG workflows with human approval gates.
@@ -1521,3 +2065,34 @@ def list_approvals(status: str = "pending", run_id: str | None = None,
     is done by a human in the portal, not through MCP."""
     return _request(
         "GET", f"{AGENT_HUB_API}/approvals{_q(status=status, run=run_id, limit=limit)}")
+
+
+def get_approval(approval_id: str) -> dict:
+    """One approval request: the workflow run it gates, required roles,
+    status, and the decider once decided. Deciding is not an MCP tool: it is
+    a person's act in the portal inbox (ADR-0010)."""
+    return _request(
+        "GET", f"{AGENT_HUB_API}/approvals/{urllib.parse.quote(approval_id, safe='')}")
+
+
+def list_agent_plans(run_id: str | None = None, limit: int = 50) -> list[dict]:
+    """Plans recorded by ``plan``-mode agents: the tool calls an agent
+    proposed instead of executing, optionally for one workflow run."""
+    return _request("GET", f"{AGENT_HUB_API}/plans{_q(run=run_id, limit=limit)}")
+
+
+def get_agent_plan(plan_id: str) -> dict:
+    """One recorded plan with its proposed calls."""
+    return _request("GET", f"{AGENT_HUB_API}/plans/{urllib.parse.quote(plan_id, safe='')}")
+
+
+def get_agent_hub_catalog() -> dict:
+    """What agents can be given: the tool catalog (with tiers), modes,
+    workflow node types and trigger kinds."""
+    return _request("GET", f"{AGENT_HUB_API}/catalog")
+
+
+def get_agent_pause() -> dict:
+    """Whether the global agent pause is on (paused agents and workflow tool
+    nodes do nothing). Setting it is a person's act in the portal."""
+    return _request("GET", f"{AGENT_HUB_API}/pause")
