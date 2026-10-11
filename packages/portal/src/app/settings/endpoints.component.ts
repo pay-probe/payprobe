@@ -391,7 +391,11 @@ export class EndpointsComponent implements OnInit {
       host: row.host,
       port: Number(row.port),
     };
-    const result = await this.health.probe(probeCfg);
+    // An edited row probes exactly what was typed; an untouched one probes
+    // what the app really calls (same-origin `/api/...` in production).
+    const result = await this.health.probe(probeCfg, {
+      literal: this.dirty(row) || this.cfg.hasOverride(row.key),
+    });
     this.patch(row.key, { testing: false, test: result });
   }
 

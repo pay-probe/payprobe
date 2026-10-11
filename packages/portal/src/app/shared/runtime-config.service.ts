@@ -146,6 +146,30 @@ export class RuntimeConfigService {
     return `${cfg.scheme}://${cfg.host}:${cfg.port}`;
   }
 
+  /**
+   * The absolute base the app really calls for this endpoint: what the health
+   * probe hits and the dashboard shows. In a production build an endpoint with
+   * no override is a same-origin path through nginx (`/api/orch`), resolved
+   * against this page's origin; its scheme/host/port are only the editing
+   * placeholder (localhost), which a browser on another machine can't reach.
+   */
+  probeBase(cfg: EndpointConfig): string {
+    const bases: Partial<Record<EndpointKey, () => string>> = {
+      orchestrator: () => this.runApiBase,
+      scenario: () => this.scenarioApiBase,
+      auth: () => this.authApiBase,
+      assistant: () => this.assistantApiBase,
+      insight: () => this.insightApiBase,
+      "agent-hub": () => this.agentHubApiBase,
+    };
+    const hasWindow = typeof window !== "undefined" && !!window.location;
+    if (cfg.key === "portal" && hasWindow) return window.location.origin;
+    const base = bases[cfg.key]?.() ?? this.baseUrl(cfg);
+    return base.startsWith("/") && hasWindow
+      ? `${window.location.origin}${base}`
+      : base;
+  }
+
   /** The current endpoint config for one key. */
   endpoint(key: EndpointKey): EndpointConfig {
     return this.endpoints().find((e) => e.key === key)!;
@@ -215,7 +239,9 @@ export class RuntimeConfigService {
         ? {
             scheme: window.location.protocol.replace(":", ""),
             host: window.location.hostname || "localhost",
-            port: Number(window.location.port) || 8080,
+            port:
+              Number(window.location.port) ||
+              (window.location.protocol === "https:" ? 443 : 80),
           }
         : { scheme: "http", host: "localhost", port: 8080 };
 
