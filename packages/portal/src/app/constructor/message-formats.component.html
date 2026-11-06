@@ -119,6 +119,23 @@
                 <input [ngModel]="d.protocol" readonly />
               }
             </label>
+            @if (d.protocol === "iso8583") {
+              <label class="field"
+                ><span
+                  >Bitmap encoding
+                  <span class="muted"
+                    >(raw <code>binary</code> bytes under an otherwise-ASCII
+                    dialect, e.g. a BPC SmartVista POS host)</span
+                  ></span
+                >
+                <select [(ngModel)]="d.bitmapEncoding" [disabled]="d.builtin">
+                  <option value="">as encoding</option>
+                  @for (b of bitmapEncodings; track b) {
+                    <option [value]="b">{{ b }}</option>
+                  }
+                </select>
+              </label>
+            }
           </div>
           <label class="field"
             ><span

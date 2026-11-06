@@ -90,3 +90,13 @@ as `72 30 05 80 20 C1 80 00`, MTI and LL/LLLVAR indicators ASCII
 The registry format `iso8583-1987-ascii-copy-1` was **not** found on the
 connected instance (404) and was not changed; set `bitmap_encoding: "binary"`
 in its definition and `message_format_id` on `svfe_pos` to use it.
+
+The portal's Message Format editor gained a **Bitmap encoding** select next
+to Encoding (`message-formats.component`), and its save now carries the
+definition keys the form does not edit (`presence`, `mti`, `mac`, …) through
+untouched — before, a save from that editor rebuilt the definition as
+`{encoding, fields}` and dropped them. Prettier + `tsc --noEmit` clean;
+**`npm run build` on the host is owed** (the sandbox cannot run esbuild for
+this platform). `POST /connections/frame-preview` takes `message_format_id`
+and answers a 400 naming the DE for a payload it cannot pack (it was a 500
+`KeyError` for a DE missing from the table).
