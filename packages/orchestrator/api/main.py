@@ -2573,7 +2573,7 @@ async def _resolve_simulator_key_tokens(cfg: dict) -> dict:
     return _sub_key_tokens(cfg, materials) if materials else cfg
 
 
-async def _bind_simulator_format(config: dict) -> dict:
+async def _bind_simulator_format(config: dict, fmt: dict | None = None) -> dict:
     """Resolve a simulator's bound dialect.
 
     When a config carries ``message_format_id``, fetch that Message Format from
@@ -2594,11 +2594,12 @@ async def _bind_simulator_format(config: dict) -> dict:
         fid = _DEFAULT_SIM_FORMAT.get(proto)
     if not fid:
         return config
-    try:
-        fmt = await _http_get_json(f"{SCENARIO_API_URL}/formats/{fid}")
-    except Exception:  # noqa: BLE001 — never block a start on a lookup miss
-        log.warning("simulator: could not resolve message format '%s'", fid, exc_info=True)
-        return config
+    if fmt is None:
+        try:
+            fmt = await _http_get_json(f"{SCENARIO_API_URL}/formats/{fid}")
+        except Exception:  # noqa: BLE001 — never block a start on a lookup miss
+            log.warning("simulator: could not resolve message format '%s'", fid, exc_info=True)
+            return config
     cfg = dict(config)
     definition = (fmt or {}).get("definition") or {}
     if definition.get("fields") and not cfg.get("fields"):
@@ -2620,7 +2621,7 @@ async def _bind_simulator_format(config: dict) -> dict:
     return cfg
 
 
-async def _bind_connection_format(cfg: dict) -> dict:
+async def _bind_connection_format(cfg: dict, fmt: dict | None = None) -> dict:
     """A *connection* carrying ``message_format_id`` binds its dialect exactly
     like a simulator does (:func:`_bind_simulator_format`): the format's DE
     table, wire encoding (``definition.encoding`` ⊕ ``bitmap_encoding``) and
@@ -2631,7 +2632,7 @@ async def _bind_connection_format(cfg: dict) -> dict:
     dropped (the client adapter has nothing to validate)."""
     if not cfg.get("message_format_id"):
         return cfg
-    bound = await _bind_simulator_format(cfg)
+    bound = await _bind_simulator_format(cfg, fmt)
     if bound is not cfg and "validate" not in cfg:
         bound.pop("validate", None)
     return bound
@@ -5744,10 +5745,14 @@ async def test_connection(req: TestConnectionRequest) -> dict:
 
 class FramePreviewRequest(BaseModel):
     """A worker-shaped TCP adapter config plus the message to frame. With no
-    ``action``/``payload`` the health-check message is previewed."""
+    ``action``/``payload`` the health-check message is previewed.
+    ``message_format_id`` binds a Message Format the way a step / connection
+    does (its DE table, wire encoding and MAC block); a step payload may carry
+    it under the same key instead."""
     config: dict[str, Any]
     action: str = ""
     payload: dict[str, Any] | None = None
+    message_format_id: str | None = None
 
 
 @app.post("/connections/frame-preview")
@@ -5773,10 +5778,25 @@ async def frame_preview(req: FramePreviewRequest) -> dict:
         )
     cfg.setdefault("host", "0.0.0.0")  # placeholder: the preview never dials
     cfg.setdefault("port", 0)
+    payload = dict(req.payload or {})
+    fid = req.message_format_id or payload.pop("message_format_id", None)
+    where = "the connection's / stock ISO 8583:1987 table"
+    if fid:
+        # the same binding a run gives a connection (and the playground a step):
+        # the format's DE table, wire encoding (⊕ bitmap_encoding) and MAC block
+        try:
+            fmt = await _http_get_json(f"{SCENARIO_API_URL}/formats/{quote(fid, safe='')}")
+        except Exception as exc:  # noqa: BLE001 — a dry run must say what it could not bind
+            raise HTTPException(404, f"no message format '{fid}' ({type(exc).__name__}: {exc})")
+        cfg = await _bind_connection_format({**cfg, "message_format_id": fid}, fmt)
+        where = f"format '{fid}'"
+    elif not cfg.get("fields") and "fields" not in payload:
+        where += " — pass message_format_id to validate against your dialect"
     try:
-        return cls(cfg).preview_frame(req.action, req.payload)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        return cls(cfg).preview_frame(req.action, payload)
+    except (ValueError, KeyError) as exc:
+        detail = exc.args[0] if isinstance(exc, KeyError) and exc.args else str(exc)
+        raise HTTPException(400, f"{detail} ({where})")
 
 
 async def _test_grpc_connection(cfg: dict) -> dict:

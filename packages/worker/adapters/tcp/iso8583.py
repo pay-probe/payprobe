@@ -35,6 +35,7 @@ from payprobe_common.iso8583 import (
     resolve_encoding,
     tag_map,
     unpack,
+    validate_field,
     validate_message,
     wire_encoding_from_config,
 )
@@ -131,6 +132,7 @@ __all__ = [
     "resolve_encoding",
     "tag_map",
     "unpack",
+    "validate_field",
     "validate_message",
     "wire_encoding_from_config",
 ]

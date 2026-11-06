@@ -249,7 +249,12 @@ class TcpAdapter(BaseAdapter):
             self._configure()
         if not action and payload is None:
             action, payload = self._probe("health_check")
-        msg = self.protocol.encode(action, dict(payload or {}))
+        payload = dict(payload or {})
+        check = getattr(self.protocol, "check", None)
+        issues = check(action, payload) if callable(check) else []
+        if issues:
+            raise ValueError("payload cannot be packed: " + "; ".join(issues))
+        msg = self.protocol.encode(action, payload)
         out = self.frame_spec.parts(msg.body)
         out["framing"] = self.frame_spec.describe()
         out["request"] = msg.request

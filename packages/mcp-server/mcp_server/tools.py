@@ -348,16 +348,24 @@ def test_connection(config: dict) -> dict:
 
 
 def preview_connection_frame(config: dict, action: str = "",
-                             payload: dict | None = None) -> dict:
+                             payload: dict | None = None,
+                             message_format_id: str | None = None) -> dict:
     """Dry run of a TCP connection's framing: the exact bytes the worker would
     put on the wire for ``action``/``payload`` under this ``config`` (framing
     prefix, TPDU, message header ``mhdr``/``framing.header``, body), as hex and
     split into blocks — without dialling anything. With no action/payload the
-    health-check message is previewed. Use it to compare PayProbe's frame
-    byte-for-byte with what a vendor client sends before touching the host."""
+    health-check message is previewed. ``message_format_id`` binds a Message
+    Format exactly as a step / connection would (its DE table, wire encoding
+    incl. ``bitmap_encoding``, MAC); without it the config's own table (or the
+    stock ISO 8583:1987 one) applies. A payload that cannot be packed is a 400
+    naming the DE ("DE24 not defined in the field table", "DE4 expected 12
+    chars, got 11"). Use it to compare PayProbe's frame byte-for-byte with what
+    a vendor client sends before touching the host."""
     body: dict = {"config": config, "action": action}
     if payload is not None:
         body["payload"] = payload
+    if message_format_id:
+        body["message_format_id"] = message_format_id
     return _request("POST", f"{RUN_API}/connections/frame-preview", body)
 
 
