@@ -11,9 +11,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from payprobe_common.iso8583 import ISO8583_1987, ISO8583_1993, VISA_BASE_I
+from payprobe_common.iso8583 import ISO8583_1987, ISO8583_1993, VISA_BASE_I, definition_encoding
 
 Protocol = Literal["iso8583", "iso20022"]
 
@@ -34,6 +34,19 @@ class MessageFormatDraft(BaseModel):
     #:   validate inbound messages (see the worker responder ``validate`` block).
     #: iso20022 -> {"message_type", "namespace", "root", "template"?}
     definition: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_wire_encoding(self):
+        """An ISO 8583 definition's ``encoding`` (profile / axis dict) and
+        ``bitmap_encoding`` (``hex`` | ``binary`` | ``ebcdic`` — a raw-binary
+        bitmap under an otherwise-ASCII dialect, the BPC SmartVista POS shape)
+        are validated on save, so a misspelt value never binds as ASCII."""
+        if self.protocol == "iso8583":
+            try:
+                definition_encoding(self.definition)
+            except ValueError as exc:
+                raise ValueError(f"definition: {exc}") from None
+        return self
 
 
 class MessageFormat(MessageFormatDraft):

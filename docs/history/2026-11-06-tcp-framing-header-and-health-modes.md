@@ -72,3 +72,21 @@ but health check failed" after a 30 s wait.
   `{"length_prefix_bytes": 4, "length_encoding": "ascii"}` + the host's own
   sign-on as `health_check.mode: message` — the dry run and journal exist to
   make that a five-minute comparison against the vendor client's bytes.
+
+## Addendum (same day): `bitmap_encoding` on a Message Format
+
+The SVFE / BPC8583POS host wants a raw-binary bitmap under an otherwise-ASCII
+dialect. `definition.bitmap_encoding` (`hex` | `binary` | `ebcdic`) is the
+one-axis shorthand on top of `definition.encoding`
+(`payprobe_common.iso8583.definition_encoding` folds the two; validated on
+save). It reaches the wire through the existing ADR-0011 injection for
+simulators and — new — for **connections** carrying `message_format_id`
+(`_bind_connection_format`, applied in `_attach_connections` and the
+playground), because the reader decodes every reply on the shared socket with
+the connection's encoding, so a per-step encoding would break correlation.
+Verified: a 0200 with DE 2,3,4,7,11,12,22,24,25,35,41,42,48,49 packs the bitmap
+as `72 30 05 80 20 C1 80 00`, MTI and LL/LLLVAR indicators ASCII
+(`worker/tests/test_iso8583_bitmap_encoding.py`, exact 153-byte hex pinned).
+The registry format `iso8583-1987-ascii-copy-1` was **not** found on the
+connected instance (404) and was not changed; set `bitmap_encoding: "binary"`
+in its definition and `message_format_id` on `svfe_pos` to use it.

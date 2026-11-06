@@ -119,6 +119,34 @@ def resolve_encoding(encoding: Any) -> dict:
     raise ValueError(f"ISO 8583 encoding must be a profile name or an axis dict, got {encoding!r}")
 
 
+def definition_encoding(definition: dict | None) -> Any:
+    """The wire encoding a Message Format *definition* asks for.
+
+    ``definition.encoding`` is the profile (``"ascii"`` default, ``"binary"``,
+    or an axis dict). ``definition.bitmap_encoding`` (``hex`` | ``binary`` |
+    ``ebcdic``) is the one-axis shorthand hosts most often need on top of an
+    otherwise-ASCII dialect — e.g. BPC SmartVista's POS interface: an 8-byte
+    raw-binary bitmap while the MTI, fixed fields and LL/LLLVAR length
+    indicators stay ASCII. When it is set the result is the full axis dict with
+    the bitmap axis replaced; otherwise ``definition.encoding`` is returned as
+    written (``None`` when absent). Unknown values raise ``ValueError``.
+    """
+    definition = definition or {}
+    encoding = definition.get("encoding")
+    bitmap = definition.get("bitmap_encoding")
+    if bitmap is None:
+        return encoding
+    bitmap = str(bitmap).lower()
+    if bitmap not in AXIS_VALUES["bitmap"]:
+        raise ValueError(
+            f"bitmap_encoding cannot be {bitmap!r}; "
+            f"expected one of {', '.join(AXIS_VALUES['bitmap'])}"
+        )
+    opts = resolve_encoding(encoding)
+    opts["bitmap"] = bitmap
+    return opts
+
+
 def is_ascii(opts: dict) -> bool:
     """True when ``opts`` is the plain-ASCII profile (wire == text)."""
     return (

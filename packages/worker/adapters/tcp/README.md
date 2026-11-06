@@ -57,8 +57,12 @@ adapter instead.)
                                  // {"bitmap": "hex|binary|ebcdic", "numeric": "ascii|bcd|ebcdic",
                                  //  "text": "ascii|ebcdic", "binary": "hex|raw",
                                  //  "length": "ascii|bcd|binary|ebcdic", "mti": "ascii|bcd|ebcdic"}.
-                                 // A bound Message Format's definition.encoding is injected
-                                 // here by the orchestrator (PAYPROBE_ISO8583_FORMAT_ENCODING=1).
+                                 // A bound Message Format's definition.encoding (⊕ its
+                                 // definition.bitmap_encoding — "binary" = raw 8-byte bitmap
+                                 // under an otherwise-ASCII dialect, the BPC SmartVista POS
+                                 // shape) is injected here by the orchestrator
+                                 // (PAYPROBE_ISO8583_FORMAT_ENCODING=1) for simulators AND for
+                                 // connections carrying "message_format_id".
 
   "framing": {                   // applies to every protocol
     "length_prefix_bytes": 2,    // width of the length prefix (>= 1)

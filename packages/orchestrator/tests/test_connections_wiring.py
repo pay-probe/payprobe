@@ -254,3 +254,72 @@ async def test_missing_connections_service_is_best_effort(monkeypatch):
     await m._attach_connections(env, scs)  # must not raise
     assert env["adapters"] == {}              # fetch failed -> nothing merged
     assert scs[0]["steps"][0]["target"] == "switch_visa"  # repoint still applied
+
+
+# -- a connection bound to a Message Format packs with the format's dialect ---
+
+
+@pytest.fixture()
+def svfe(monkeypatch):
+    """A connection bound to an SVFE-style format: ASCII dialect, raw-binary
+    bitmap (``bitmap_encoding``), DE 24 added to the 1987 table."""
+    from payprobe_common.iso8583 import ISO8583_1987
+
+    fields = {**ISO8583_1987, "24": {"name": "NII", "len_type": "fixed", "length": 3, "type": "n"}}
+    fmt = {"id": "bpc8583pos", "protocol": "iso8583", "definition": {
+        "encoding": "ascii", "bitmap_encoding": "binary", "fields": fields,
+        "presence": {"0200": {"mandatory": ["2", "3", "4"]}}}}
+    docs = [{"name": "svfe_pos", "adapter": "tcp", "protocol": "iso8583",
+             "host": "172.16.90.11", "port": 7777, "message_format_id": "bpc8583pos",
+             "framing": {"length_prefix_bytes": 4, "length_encoding": "ascii"}}]
+
+    async def fake_get(url):
+        if url.endswith("/connections"):
+            return docs
+        if url.endswith("/formats/bpc8583pos"):
+            return fmt
+        raise AssertionError(url)
+
+    monkeypatch.setattr(m, "_http_get_json", fake_get)
+    monkeypatch.setattr(m, "_ISO8583_FORMAT_ENCODING", True)
+    return fmt
+
+
+async def test_connection_with_message_format_binds_fields_and_bitmap_encoding(svfe):
+    env = {"mode": "real", "adapters": {}}
+    await m._attach_connections(env, _scn("svfe_pos"))
+    cfg = env["adapters"]["svfe_pos"]
+    assert cfg["encoding"] == {
+        "bitmap": "binary", "numeric": "ascii", "text": "ascii", "binary": "hex", "length": "ascii",
+    }
+    assert "24" in cfg["fields"]
+    assert "validate" not in cfg  # a client adapter has nothing to validate
+    assert cfg["framing"] == {"length_prefix_bytes": 4, "length_encoding": "ascii"}
+    # and the worker's protocol packs with it: the bitmap goes out as 8 raw bytes
+    from worker.adapters.tcp.protocols import make_protocol
+
+    msg = make_protocol({**cfg, "auto_fields": False}).encode(
+        "send_0200", {"values": {"2": "4111111111111111", "3": "000000", "4": "000000010000",
+                                 "7": "1106175000", "11": "000123", "12": "175000", "22": "051",
+                                 "24": "001", "25": "00",
+                                 "35": "4111111111111111=29121011234567890000",
+                                 "41": "TERM0001", "42": "MERCHANT0000001", "48": "POSDATA",
+                                 "49": "981"}})
+    assert msg.body[:4] == b"0200" and msg.body[4:12] == bytes.fromhex("7230058020c18000")
+    assert msg.body[12:14] == b"16"
+
+
+async def test_connection_without_a_format_is_untouched(conns):
+    env = {"mode": "real", "adapters": {}}
+    await m._attach_connections(env, _scn("switch_visa"))
+    assert "encoding" not in env["adapters"]["switch_visa"]
+    assert "fields" not in env["adapters"]["switch_visa"]
+
+
+async def test_bad_bitmap_encoding_on_a_bound_format_is_a_400(svfe):
+    svfe["definition"]["bitmap_encoding"] = "raw"
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        await m._attach_connections({"mode": "real", "adapters": {}}, _scn("svfe_pos"))
+    assert exc.value.status_code == 400 and "bitmap_encoding" in exc.value.detail
