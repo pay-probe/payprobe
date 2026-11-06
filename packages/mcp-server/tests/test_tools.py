@@ -171,6 +171,8 @@ def test_preview_connection_frame_posts_config_action_and_payload(calls):
     assert body["action"] == "send_0800" and body["payload"]["values"]["70"] == "301"
     tools.preview_connection_frame({"mhdr": "CDb4"})
     assert "payload" not in calls[-1][2]  # omitted -> the health-check message
+    tools.preview_connection_frame({}, "send_message", {"mti": "0200"}, "bpc8583pos")
+    assert calls[-1][2]["message_format_id"] == "bpc8583pos"
 
 
 def test_start_simulator_posts_label_and_config(calls):

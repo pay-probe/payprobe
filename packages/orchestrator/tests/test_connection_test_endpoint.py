@@ -1,6 +1,8 @@
 """POST /connections/test — probe a connection's reachability/health."""
 import asyncio
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from orchestrator.api import main as m
@@ -198,3 +200,140 @@ def test_frame_preview_rejects_a_bad_framing_key_with_400():
         assert r.status_code == 400 and "length_encoding" in r.json()["detail"]
         r = c.post("/connections/frame-preview", json={"config": {"adapter": "http"}})
         assert r.status_code == 400 and "TCP" in r.json()["detail"]
+
+
+# -- frame preview: a step payload against its dialect ----------------------
+
+SVFE_CONFIG = {
+    "adapter": "tcp", "protocol": "iso8583", "host": "172.16.90.11", "port": 52000,
+    "mode": "outbound",
+    "framing": {"length_prefix_bytes": 4, "length_byte_order": "big",
+                "length_encoding": "ascii", "encoding": "ascii"},
+    "health_check": {"mode": "connect"}, "sign_on": {"enabled": False},
+}
+SVFE_0200 = {"mti": "0200", "values": {
+    "2": "5488350005706204", "3": "000000", "4": "000000000200", "7": "0303083731",
+    "11": "000005", "12": "260303083731", "22": "020", "24": "200", "25": "00",
+    "41": "POS20001", "42": "GCPOS13        ", "49": "981"}}
+
+
+@pytest.fixture()
+def svfe_format(monkeypatch):
+    """A fake scenario-service holding the SVFE dialect — the 1987 table with
+    DE 24 (NII, n 3) added and DE 12 widened to YYMMDDhhmmss — in two copies:
+    ``iso8583-1987-ascii-copy-1`` (all ASCII, as the registry copy is today) and
+    ``svfe-binary-bitmap`` (the same with ``bitmap_encoding: binary``)."""
+    fields = {**iso8583.DEFAULT_FIELDS,
+              "12": {"name": "Local date & time", "len_type": "fixed", "length": 12, "type": "n"},
+              "24": {"name": "NII", "len_type": "fixed", "length": 3, "type": "n"}}
+    formats = {
+        "iso8583-1987-ascii-copy-1": {"id": "iso8583-1987-ascii-copy-1", "protocol": "iso8583",
+                                      "definition": {"encoding": "ascii", "fields": fields}},
+        "svfe-binary-bitmap": {"id": "svfe-binary-bitmap", "protocol": "iso8583",
+                               "definition": {"encoding": "ascii", "bitmap_encoding": "binary",
+                                              "fields": fields}},
+    }
+
+    async def fake_get(url):
+        fid = url.rsplit("/formats/", 1)[-1] if "/formats/" in url else None
+        if fid in formats:
+            return formats[fid]
+        raise RuntimeError(f"404 {url}")
+
+    monkeypatch.setattr(m, "_http_get_json", fake_get)
+    monkeypatch.setattr(m, "_ISO8583_FORMAT_ENCODING", True)
+    return formats
+
+
+#: The 0200 above, byte for byte, under the ASCII dialect (DE 13 is not
+#: stamped: auto_fields is off in the preview so the frame is reproducible).
+SVFE_0200_BODY_ASCII = (
+    b"0200" b"7230058000C08000"  # no DE 35 / 48 in this set: bytes 5-6 = 00 C0
+    b"165488350005706204" b"000000" b"000000000200" b"0303083731" b"000005"
+    b"260303083731" b"020" b"200" b"00" b"POS20001" b"GCPOS13        " b"981"
+)
+
+
+async def test_frame_preview_of_the_0200_payload_against_the_svfe_format(svfe_format):
+    """The reproduced request, exactly as sent, plus ``message_format_id``."""
+    out = await m.frame_preview(m.FramePreviewRequest(
+        config={**SVFE_CONFIG, "auto_fields": False},
+        action="send_message", payload=SVFE_0200,
+        message_format_id="iso8583-1987-ascii-copy-1"))
+    body = bytes.fromhex(out["body_hex"])
+    assert body == SVFE_0200_BODY_ASCII and len(body) == 118
+    assert out["prefix_hex"] == "30313138" and out["declared_length"] == 118  # "0118"
+    assert out["total_bytes"] == 122
+    assert out["hex"] == (
+        "30313138"  # 4-digit ASCII length
+        "30323030" "37323330303538303030433038303030"  # MTI + ASCII bitmap
+        "3136" "35343838333530303035373036323034"  # DE 2
+        "303030303030" "303030303030303030323030" "30333033303833373331" "303030303035"
+        "323630333033303833373331" "303230" "323030" "3030"
+        "504f533230303031" "4743504f5331332020202020202020" "393831"
+    )
+    assert out["request"]["values"]["24"] == "200"
+    # the same request through the HTTP surface, with the id in the payload
+    with _client() as c:
+        r = c.post("/connections/frame-preview", json={
+            "config": {**SVFE_CONFIG, "auto_fields": False}, "action": "send_message",
+            "payload": {**SVFE_0200, "message_format_id": "iso8583-1987-ascii-copy-1"}})
+    assert r.status_code == 200, r.text
+    assert r.json()["hex"] == out["hex"]
+
+
+async def test_frame_preview_with_a_binary_bitmap_format(svfe_format):
+    """With ``bitmap_encoding: binary`` on the format the bitmap goes out as 8
+    raw bytes — once the connection's legacy ``framing.encoding`` text codec is
+    out of the way (ADR-0011 refuses a config whose own encoding disagrees
+    with the bound format's rather than silently picking one)."""
+    cfg = {**SVFE_CONFIG, "auto_fields": False,
+           "framing": {k: v for k, v in SVFE_CONFIG["framing"].items() if k != "encoding"}}
+    out = await m.frame_preview(m.FramePreviewRequest(
+        config=cfg, action="send_message", payload=SVFE_0200,
+        message_format_id="svfe-binary-bitmap"))
+    body = bytes.fromhex(out["body_hex"])
+    assert body[:4] == b"0200" and body[4:12] == bytes.fromhex("7230058000C08000")
+    assert body[12:] == SVFE_0200_BODY_ASCII[20:]  # everything after the bitmap unchanged
+    assert out["declared_length"] == 110 and out["prefix_hex"] == "30313130"
+    # the reproduced config still carries framing.encoding: "ascii" -> refused, named
+    with _client() as c:
+        r = c.post("/connections/frame-preview", json={
+            "config": SVFE_CONFIG, "action": "send_message", "payload": SVFE_0200,
+            "message_format_id": "svfe-binary-bitmap"})
+    assert r.status_code == 400
+    assert "declares encoding" in r.json()["detail"] and "keep one" in r.json()["detail"]
+
+
+def test_frame_preview_without_the_format_is_a_400_naming_the_de(svfe_format):
+    """The reproduced 500: DE 24 is not in the stock 1987 table."""
+    with _client() as c:
+        r = c.post("/connections/frame-preview", json={
+            "config": SVFE_CONFIG, "action": "send_message", "payload": SVFE_0200})
+    assert r.status_code == 400, r.text
+    detail = r.json()["detail"]
+    assert "DE24 not defined in the field table" in detail
+    assert "DE12 expected 6 chars, got 12" in detail  # the 1987 DE 12 is hhmmss
+    assert "pass message_format_id" in detail
+
+
+def test_frame_preview_reports_length_and_charset_errors_with_the_format(svfe_format):
+    bad = {"mti": "0200", "values": {**SVFE_0200["values"], "4": "00000000020", "49": "98A"}}
+    bad["values"]["4"] = "0000000002A"  # 11 chars: _coerce zero-fills only digits
+    with _client() as c:
+        r = c.post("/connections/frame-preview", json={
+            "config": SVFE_CONFIG, "action": "send_message", "payload": bad,
+            "message_format_id": "iso8583-1987-ascii-copy-1"})
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    assert "DE4 expected 12 chars, got 11" in detail
+    assert "DE49 must be numeric" in detail
+    assert detail.endswith("(format 'iso8583-1987-ascii-copy-1')")
+
+
+def test_frame_preview_unknown_format_is_a_404(svfe_format):
+    with _client() as c:
+        r = c.post("/connections/frame-preview", json={
+            "config": SVFE_CONFIG, "action": "send_message", "payload": SVFE_0200,
+            "message_format_id": "nope"})
+    assert r.status_code == 404 and "no message format 'nope'" in r.json()["detail"]

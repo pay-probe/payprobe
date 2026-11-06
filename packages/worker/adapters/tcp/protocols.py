@@ -164,6 +164,27 @@ class Iso8583Protocol(TcpProtocol):
             body = iso8583.pack(mti, values, fields, self.wire_encoding)
         return EncodedMessage(self._key(corr, expected), body, {"mti": mti, "values": values})
 
+    def check(self, action: str, payload: dict) -> list[str]:
+        """Why ``(action, payload)`` cannot be packed, one line per data
+        element — an undefined DE, a fixed-length mismatch, a charset
+        violation — or ``[]``. Runs on the values exactly as :meth:`encode`
+        would coerce them (zero-filled fixed numerics, explicit ``values``
+        winning), against the same table (a per-step ``fields`` snapshot or the
+        connection's), so a dry run fails the way a real send would, but with
+        the field named instead of a bare codec error."""
+        fields = self._resolve_fields(payload)
+        values = self._build_values(payload, fields)
+        issues: list[str] = []
+        for de in sorted(values, key=lambda d: int(d) if d.isdigit() else 0):
+            spec = fields.get(de)
+            if spec is None:
+                issues.append(f"DE{de} not defined in the field table")
+                continue
+            err = iso8583.validate_field(values[de], spec)
+            if err:
+                issues.append(f"DE{de} {err}")
+        return issues
+
     def _resolve_fields(self, payload: dict) -> dict:
         """Effective DE table for this message: a per-step ``fields`` override
         (dict or JSON string, e.g. a snapshotted Message Format) if supplied and
