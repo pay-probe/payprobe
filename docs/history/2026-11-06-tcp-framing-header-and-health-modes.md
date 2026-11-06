@@ -100,3 +100,30 @@ untouched — before, a save from that editor rebuilt the definition as
 this platform). `POST /connections/frame-preview` takes `message_format_id`
 and answers a 400 naming the DE for a payload it cannot pack (it was a 500
 `KeyError` for a DE missing from the table).
+
+## Addendum 2: steps resolve their Message Format; Inspector dialect selectors
+
+- **Run path.** `_attach_message_formats` (after connections / groups / step
+  environments) resolves each action step's `message_format_id`: the format's
+  `fields` and `presence` are snapshotted into the step payload unless the step
+  carries its own, and the format's wire encoding (`encoding` ⊕
+  `bitmap_encoding`) + MAC go onto the *adapter the step runs on* (one socket
+  decodes with one encoding; a disagreeing explicit encoding, or two steps
+  needing different encodings on one adapter, is a 400; an unresolvable format
+  is a 404). Before this, a step with only `message_format_id` packed against
+  the connection's / stock 1987 table ("DE 24 is not defined…").
+- **Inspector.** `/iso8583/build|analyze|diff` (MCP `iso8583_*`) take
+  `format_id` and a standalone `bitmap_encoding` axis; `resolve_encoding`
+  accepts the `bitmap_encoding` spelling in an axis dict.
+- **Validation.** Track-2 (`z`) admits the `;`…`?` sentinels (counted by the
+  LL indicator); `a` / `an` admit space padding (the fixed-length convention);
+  `Iso8583Protocol.check` enforces a snapshotted presence matrix (auto-stamped
+  DE 7/12/13 and an auto STAN count as present) — used by the frame preview,
+  not by `execute`, so existing scenarios keep their behaviour.
+- Acceptance: `orchestrator/tests/test_step_message_format_binding.py` packs
+  the SVFE 0200 (DE 2,3,4,7,11,12,22,24,25,35,41,42,48,49; ASCII text, raw
+  bitmap `72 30 05 80 20 C1 80 00`, track-2 sentinels, 15-byte DE 42) and
+  frames it with the connection's 4-digit ASCII prefix, byte for byte against
+  a hand-written reference. Note `auto_fields` (default on) stamps DE 13 when
+  the table has it — set DE 13 explicitly or `auto_fields: false` on the
+  connection to match a vendor capture that lacks it.

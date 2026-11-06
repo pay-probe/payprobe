@@ -106,6 +106,8 @@ def resolve_encoding(encoding: Any) -> dict:
     if isinstance(encoding, dict):
         opts = dict(ASCII_OPTS)
         for axis, value in encoding.items():
+            if axis == "bitmap_encoding":
+                axis = "bitmap"  # the format-definition spelling of the bitmap axis
             if axis not in AXIS_VALUES:
                 continue  # foreign keys (e.g. a per-field 'pad') are not axes
             value = str(value).lower()

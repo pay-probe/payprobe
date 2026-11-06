@@ -52,3 +52,36 @@ def test_bad_bitmap_encoding_is_refused_on_save(client):
     assert r.status_code == 422
     assert "bitmap_encoding cannot be 'raw'" in r.text
     assert "bitmap_encoding" not in client.get(f"/formats/{f['id']}").json()["definition"]
+
+
+def test_inspector_builds_through_a_registered_format_with_a_binary_bitmap(client):
+    cloned = client.post("/formats/iso8583-1987/clone", json={"name": "svfe", "version": "1"})
+    f = cloned.json()
+    fields = {**f["definition"]["fields"],
+              "24": {"name": "NII", "len_type": "fixed", "length": 3, "type": "n"}}
+    d = {k: f[k] for k in ("protocol", "name", "version", "description")}
+    d["definition"] = {**f["definition"], "fields": fields, "bitmap_encoding": "binary"}
+    assert client.put(f"/formats/{f['id']}", json=d).status_code == 200
+    values = {"2": "5488350005706204", "3": "000000", "4": "000000000200", "11": "000005",
+              "24": "200", "35": ";5488350005706204=2912101?", "42": "MERCHANT01     ", "49": "981"}
+    r = client.post("/iso8583/build", json={"mti": "0200", "values": values, "format_id": f["id"]})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["errors"] == []
+    wire = bytes.fromhex(out["message"])
+    assert wire[:4] == b"0200" and wire[4:12] == bytes.fromhex("7020010020408000")  # DE 2,3,4 · 11 · 24 · 35 · 42 · 49
+    assert wire[12:] == (b"165488350005706204" b"000000" b"000000000200" b"000005" b"200"
+                         b"26;5488350005706204=2912101?" b"MERCHANT01     " b"981")
+    # the bitmap axis on its own, with inline fields, no format
+    r2 = client.post("/iso8583/build", json={"mti": "0200", "values": values, "fields": fields,
+                                             "bitmap_encoding": "binary"})
+    assert r2.status_code == 200 and r2.json()["message"] == out["message"]
+    # and the message analyzes back under the same dialect
+    a = client.post("/iso8583/analyze", json={"message": out["message"], "format_id": f["id"]})
+    assert a.status_code == 200, a.text
+    assert a.json()["mti"] == "0200"
+    assert client.post("/iso8583/build", json={"mti": "0200", "values": values,
+                                               "format_id": "nope"}).status_code == 404
+    assert client.post("/iso8583/build", json={"mti": "0200", "values": values,
+                                               "bitmap_encoding": "raw"}).status_code == 400
+    client.delete(f"/formats/{f['id']}")

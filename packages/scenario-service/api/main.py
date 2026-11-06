@@ -55,6 +55,7 @@ from models import (
     validate_scenario,
 )
 from models.message_format import MessageFormat, MessageFormatDraft
+from payprobe_common.iso8583 import definition_encoding, resolve_encoding
 from models.pack import Pack, get_pack, list_packs
 from models.starter_flow import StarterFlow, StarterFlowDraft
 from models.iso8583_analyzer import (
@@ -1499,39 +1500,74 @@ async def migrate_seed_default_connections(
 Iso8583Encoding = str | dict | None
 
 
-class Iso8583AnalyzeRequest(BaseModel):
-    message: str
+class _Iso8583Dialect(BaseModel):
+    """How an Inspector request picks its dialect: a registered Message Format
+    (``format_id`` — its DE table, ``encoding`` and ``bitmap_encoding``), or an
+    inline ``fields`` table plus an ``encoding`` profile / axis dict, plus the
+    optional ``bitmap_encoding`` axis (``hex`` | ``binary`` | ``ebcdic``) on its
+    own, so an otherwise-ASCII message can carry a raw-binary bitmap. Inline
+    keys override the format's."""
     #: optional DE table ({de: {name,len_type,length,type}}); defaults to 1987
     fields: dict[str, dict] | None = None
     encoding: Iso8583Encoding = None
+    bitmap_encoding: str | None = None
+    format_id: str | None = None
 
 
-class Iso8583BuildRequest(BaseModel):
+class Iso8583AnalyzeRequest(_Iso8583Dialect):
+    message: str
+
+
+class Iso8583BuildRequest(_Iso8583Dialect):
     mti: str
     values: dict[str, Any] = {}
-    fields: dict[str, dict] | None = None
-    encoding: Iso8583Encoding = None
+
+
+def _dialect(req: _Iso8583Dialect, formats: FormatStore) -> tuple[dict, Any]:
+    """``(fields, encoding)`` for an Inspector request (see :class:`_Iso8583Dialect`)."""
+    fields, encoding, bitmap = req.fields, req.encoding, req.bitmap_encoding
+    if req.format_id:
+        fmt = formats.get(req.format_id)
+        if fmt is None:
+            raise HTTPException(404, f"no message format '{req.format_id}'")
+        definition = fmt.definition or {}
+        fields = fields or definition.get("fields")
+        if encoding is None:
+            encoding = definition.get("encoding")
+        if bitmap is None:
+            bitmap = definition.get("bitmap_encoding")
+    try:
+        if bitmap is not None:
+            encoding = definition_encoding({"encoding": encoding, "bitmap_encoding": bitmap})
+        resolve_encoding(encoding)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return fields or ISO8583_DEFAULT_FIELDS, encoding
 
 
 @router.post("/iso8583/analyze", operation_id="analyzeIso8583")
-async def iso8583_analyze(req: Iso8583AnalyzeRequest) -> dict:
+async def iso8583_analyze(
+    req: Iso8583AnalyzeRequest, formats: FormatStore = Depends(get_format_store)
+) -> dict:
     """Decode a wire message into MTI + bitmap + validated DEs (+ EMV TLV)."""
-    return iso8583_analyze_message(
-        req.message, req.fields or ISO8583_DEFAULT_FIELDS, req.encoding)
+    fields, encoding = _dialect(req, formats)
+    return iso8583_analyze_message(req.message, fields, encoding)
 
 
 @router.post("/iso8583/build", operation_id="buildIso8583")
-async def iso8583_build(req: Iso8583BuildRequest) -> dict:
-    """Validate a {DE: value} map against the field table, then pack it."""
-    return iso8583_build_message(
-        req.mti, req.values, req.fields or ISO8583_DEFAULT_FIELDS, req.encoding)
+async def iso8583_build(
+    req: Iso8583BuildRequest, formats: FormatStore = Depends(get_format_store)
+) -> dict:
+    """Validate a {DE: value} map against the field table, then pack it. Under
+    any non-ASCII axis (a raw-binary bitmap, say) ``message`` is the hex of the
+    wire bytes."""
+    fields, encoding = _dialect(req, formats)
+    return iso8583_build_message(req.mti, req.values, fields, encoding)
 
 
-class Iso8583DiffRequest(BaseModel):
+class Iso8583DiffRequest(_Iso8583Dialect):
     a: str
     b: str
-    fields: dict[str, dict] | None = None
-    encoding: Iso8583Encoding = None
 
 
 class Iso8583TlvBuildRequest(BaseModel):
@@ -1777,10 +1813,12 @@ async def agent_revert(req: AgentRevertRequest, request: Request) -> dict:
 
 
 @router.post("/iso8583/diff", operation_id="diffIso8583")
-async def iso8583_diff(req: Iso8583DiffRequest) -> dict:
+async def iso8583_diff(
+    req: Iso8583DiffRequest, formats: FormatStore = Depends(get_format_store)
+) -> dict:
     """Field-level diff of two ISO 8583 messages (added / removed / changed)."""
-    return iso8583_diff_messages(
-        req.a, req.b, req.fields or ISO8583_DEFAULT_FIELDS, req.encoding)
+    fields, encoding = _dialect(req, formats)
+    return iso8583_diff_messages(req.a, req.b, fields, encoding)
 
 
 @router.post("/iso8583/tlv/build", operation_id="buildTlv")

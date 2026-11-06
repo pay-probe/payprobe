@@ -162,6 +162,17 @@ def test_test_connection_wraps_config(calls):
     assert body["config"]["host"] == "h"
 
 
+def test_iso8583_build_passes_the_dialect_selectors(calls):
+    tools.iso8583_build("0200", {"2": "4111"}, format_id="bpc8583pos", bitmap_encoding="binary")
+    method, url, body = calls[-1]
+    assert url.endswith("/iso8583/build")
+    assert body["format_id"] == "bpc8583pos" and body["bitmap_encoding"] == "binary"
+    tools.iso8583_analyze("0200...", format_id="bpc8583pos")
+    assert calls[-1][2]["format_id"] == "bpc8583pos" and "encoding" not in calls[-1][2]
+    tools.iso8583_diff("a", "b", bitmap_encoding="binary")
+    assert calls[-1][2]["bitmap_encoding"] == "binary"
+
+
 def test_preview_connection_frame_posts_config_action_and_payload(calls):
     tools.preview_connection_frame({"framing": {"length_prefix_bytes": 4}},
                                    "send_0800", {"values": {"70": "301"}})

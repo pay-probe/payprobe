@@ -25,9 +25,12 @@ _TEXT_CLASSES = ("ans", "anp", "p", "s")
 def charset_error(value: str, type_code: str) -> str | None:
     """Why ``value`` violates its data-element class, or ``None`` if it fits.
 
-    ``n`` numeric, ``a`` alphabetic, ``an`` alphanumeric, ``ans`` / ``anp`` /
-    ``p`` / ``s`` printable ASCII, ``z`` track 2/3 data (digits plus the ``=`` /
-    ``D`` separators), ``b`` binary as whole hex bytes. Unknown classes pass.
+    ``n`` numeric, ``a`` alphabetic, ``an`` alphanumeric (both may be
+    space-padded, the fixed-length convention: left-justified, space-filled),
+    ``ans`` / ``anp`` / ``p`` / ``s`` printable ASCII, ``z`` track 2/3 data
+    (digits plus the ``=`` / ``D`` separators, optionally wrapped in the
+    start ``;`` and end ``?`` sentinels a reader emits), ``b`` binary as whole
+    hex bytes. Unknown classes pass.
     """
     typ = (type_code or "").lower()
     if not value:
@@ -35,16 +38,19 @@ def charset_error(value: str, type_code: str) -> str | None:
     if typ == "n":
         return None if value.isdigit() else "must be numeric"
     if typ == "a":
-        return None if value.isalpha() else "must be alphabetic"
+        core = value.strip(" ")
+        return None if (not core or core.isalpha()) else "must be alphabetic"
     if typ == "an":
-        return None if value.isalnum() else "must be alphanumeric"
+        core = value.strip(" ")
+        return None if (not core or core.isalnum()) else "must be alphanumeric"
     if typ in _TEXT_CLASSES:
         if any(not (0x20 <= ord(c) <= 0x7E) for c in value):
             return "must be printable ASCII (ans)"
         return None
     if typ == "z":
-        if any(c not in "0123456789=Dd" for c in value):
-            return "must be track 2/3 data (digits, '=', 'D')"
+        core = value.removeprefix(";").removesuffix("?")
+        if any(c not in "0123456789=Dd" for c in core):
+            return "must be track 2/3 data (digits, '=', 'D'; ';' … '?' sentinels allowed)"
         return None
     if typ == "b":
         try:
