@@ -37,6 +37,7 @@ class EncodedMessage:
     key: str  # correlation key the reply must resolve to
     body: bytes  # protocol body (transport adds framing/TPDU)
     request: dict = field(default_factory=dict)  # human-readable request repr
+    reply: bytes = b""  # raw reply frame, filled in by the transport once correlated
 
 
 class TcpProtocol(ABC):

@@ -103,3 +103,98 @@ async def test_healthy_connection_reports_ok():
     finally:
         server.close()
         await server.wait_closed()
+
+
+# -- why it failed, and what went over the wire ------------------------------
+
+
+async def _slamming_host(after_ms: int = 10):
+    """A host that reads one frame and hangs up ``after_ms`` later."""
+    seen: list[bytes] = []
+
+    async def handle(reader, writer):
+        seen.append(await reader.read(4096))
+        await asyncio.sleep(after_ms / 1000)
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    return server, server.sockets[0].getsockname()[1], seen
+
+
+async def test_health_failure_reports_the_reason_bytes_and_close_timing():
+    """The probe's frame, and the host's hang-up relative to it, come back in
+    the result — no packet capture needed to see what the host rejected."""
+    server, port, seen = await _slamming_host()
+    try:
+        result = await m.test_connection(
+            m.TestConnectionRequest(config={
+                "host": "127.0.0.1", "port": port, "protocol": "iso8583",
+                "sign_on": {"enabled": False}, "response_timeout_sec": 2,
+                "framing": {"length_prefix_bytes": 4, "length_encoding": "chardec"},
+                "mhdr": "CDb4",
+            })
+        )
+        assert result["ok"] is False
+        assert result["error"].startswith("connected, but health check failed: ")
+        assert "ms after the last send" in result["error"]
+        health = result["health"]
+        assert health["mode"] == "probe" and health["healthy"] is False
+        assert bytes.fromhex(health["sent"]["hex"]) == seen[0]  # exactly what the host got
+        assert seen[0][:8] == b"0069CDb4"
+        dirs = [e["dir"] for e in result["wire"]]
+        assert dirs == ["open", "tx", "close"]
+        assert "0 of 4 expected bytes arrived" in result["wire"][-1]["note"]
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+async def test_connect_only_health_mode_sends_nothing():
+    server, port, seen = await _slamming_host()
+    try:
+        result = await m.test_connection(
+            m.TestConnectionRequest(config={
+                "host": "127.0.0.1", "port": port, "protocol": "iso8583",
+                "sign_on": {"enabled": False},
+                "health_check": {"mode": "connect", "settle_ms": 50},
+            })
+        )
+        assert result["ok"] is True and result["error"] is None
+        assert result["health"]["sent"] is None
+        assert [e["dir"] for e in result["wire"]] == ["open"]
+        assert seen == []  # not a byte went out
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+def test_frame_preview_returns_the_exact_bytes_without_dialling():
+    with _client() as c:
+        r = c.post("/connections/frame-preview", json={
+            "config": {
+                "adapter": "tcp", "protocol": "iso8583",
+                "framing": {"length_prefix_bytes": 4, "length_encoding": "chardec"},
+                "mhdr": "CDb4",
+            },
+            "action": "send_0800",
+            "payload": {"values": {"70": "301", "11": "000001", "7": "1106123000",
+                                   "12": "123000", "13": "1106"}},
+        })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    frame = bytes.fromhex(body["hex"])
+    assert frame[:8] == b"0069CDb4" and frame[8:12] == b"0800"
+    assert body["total_bytes"] == 73 and body["declared_length"] == 69
+    assert body["header_hex"] == "43446234" and body["prefix_hex"] == "30303639"
+    assert body["framing"] == "prefix=4 ascii · header=43446234/4in (counted)"
+
+
+def test_frame_preview_rejects_a_bad_framing_key_with_400():
+    with _client() as c:
+        r = c.post("/connections/frame-preview", json={
+            "config": {"protocol": "iso8583", "framing": {"length_encoding": "hex"}},
+            "action": "send_0200", "payload": {"amount": 1},
+        })
+        assert r.status_code == 400 and "length_encoding" in r.json()["detail"]
+        r = c.post("/connections/frame-preview", json={"config": {"adapter": "http"}})
+        assert r.status_code == 400 and "TCP" in r.json()["detail"]

@@ -31,7 +31,7 @@ export interface McpCatalog {
 }
 
 export const MCP_CATALOG: McpCatalog = {
-  "toolCount": 248,
+  "toolCount": 249,
   "groups": [
     {
       "name": "Discovery",
@@ -239,6 +239,11 @@ export const MCP_CATALOG: McpCatalog = {
         {
           "name": "test_connection",
           "title": "Test connection",
+          "kind": "read"
+        },
+        {
+          "name": "preview_connection_frame",
+          "title": "Preview connection frame (dry run)",
           "kind": "read"
         },
         {

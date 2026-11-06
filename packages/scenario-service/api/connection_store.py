@@ -31,6 +31,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .crypto import SecretBox, default_box, fingerprint, is_secret_key
 
 _ALLOWED_PROTOCOLS = {"iso8583", "header_echo"}
+# Length-prefix encodings the worker frames with (mirror of
+# ``worker.adapters.tcp.framing.LENGTH_ENCODINGS`` / ``LENGTH_ENCODING_ALIASES``;
+# the scenario-service image does not ship the worker package, so the two
+# tuples are kept in step by hand — test_connection_store checks the set).
+_LENGTH_ENCODINGS = ("binary", "ascii", "bcd")
+_LENGTH_ENCODING_ALIASES = {"chardec": "ascii", "char": "ascii", "decimal": "ascii", "bin": "binary"}
 # Adapter implementations a connection may target. The first two are the
 # original wire connections — "tcp" (universal ISO 8583 / header-echo) and
 # "grpc" (descriptor-driven). The rest are the other network endpoints the
@@ -152,9 +158,32 @@ class ConnectionDraft(BaseModel):
             if lpb < 1:
                 raise ValueError("framing.length_prefix_bytes must be >= 1")
         if isinstance(framing, dict) and framing.get("length_encoding") is not None:
-            enc = str(framing["length_encoding"]).lower()
-            if enc not in ("binary", "ascii"):
-                raise ValueError("framing.length_encoding must be 'binary' or 'ascii'")
+            # Same set the worker's FrameSpec honours
+            # (worker/adapters/tcp/framing.py); vendor spellings are folded so
+            # the stored record carries one canonical name.
+            enc = _LENGTH_ENCODING_ALIASES.get(
+                str(framing["length_encoding"]).lower(), str(framing["length_encoding"]).lower()
+            )
+            if enc not in _LENGTH_ENCODINGS:
+                raise ValueError(
+                    "framing.length_encoding must be one of "
+                    + ", ".join(_LENGTH_ENCODINGS)
+                    + " (aliases: "
+                    + ", ".join(sorted(_LENGTH_ENCODING_ALIASES))
+                    + ")"
+                )
+            framing["length_encoding"] = enc
+        header_keys = [k for k in ("header", "header_hex", "mhdr") if (framing or {}).get(k)]
+        if isinstance(framing, dict) and len(header_keys) > 1:
+            raise ValueError(
+                "framing: set the message header once — framing.header (text) "
+                "or framing.header_hex (hex), not both"
+            )
+        if isinstance(framing, dict) and framing.get("header_hex"):
+            try:
+                bytes.fromhex(str(framing["header_hex"]).replace(" ", ""))
+            except ValueError:
+                raise ValueError("framing.header_hex must be hex digits")
         return self
 
 

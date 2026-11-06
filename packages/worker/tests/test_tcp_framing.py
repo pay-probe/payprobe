@@ -203,3 +203,191 @@ async def test_responder_and_adapter_round_trip_over_ascii_framing():
     finally:
         await adapter.disconnect()
         await responder.stop()
+
+
+# -- FrameSpec: the one framing model, exact bytes per configuration ----------
+#
+# The reference frame throughout is the one a vendor POS-host client builds
+# against a BPC SmartVista host ("standard header GENERIC4, header type
+# CHARDEC, bytes length 4, byte order Big"): a 4-character ASCII decimal
+# length equal to the payload length, followed by the payload. For a 16-byte
+# payload 0x00..0x0F that is ``"0016"`` + 16 bytes = 20 bytes on the wire.
+
+PAYLOAD_00_0F = bytes(range(16))
+ISO_BODY = b"0800" + b"8238000000000000"  # a stand-in body: 20 ASCII bytes
+MHDR = "CDb4"  # 43 44 62 34
+
+
+def _spec(**framing_cfg) -> framing.FrameSpec:
+    return framing.FrameSpec.from_config({"framing": framing_cfg})
+
+
+def test_client_frame_0016_plus_16_payload_bytes_is_20_bytes():
+    """The SmartVista client's test frame: ``0016`` + 0x00..0x0F."""
+    spec = _spec(length_prefix_bytes=4, length_encoding="ascii")
+    frame = spec.frame(PAYLOAD_00_0F)
+    assert frame == b"0016" + PAYLOAD_00_0F
+    assert frame.hex() == "30303136" + "000102030405060708090a0b0c0d0e0f"
+    assert len(frame) == 4 + 16 == 20
+    assert spec.declared_length(PAYLOAD_00_0F) == 16  # payload only, prefix not counted
+
+
+def test_chardec_is_the_vendor_name_for_an_ascii_digit_prefix():
+    """``CHARDEC`` (characters, decimal) folds to ``ascii`` and frames identically."""
+    chardec = _spec(length_prefix_bytes=4, length_encoding="chardec")
+    ascii_ = _spec(length_prefix_bytes=4, length_encoding="ascii")
+    assert chardec.length_encoding == "ascii"
+    assert chardec.frame(PAYLOAD_00_0F) == ascii_.frame(PAYLOAD_00_0F) == b"0016" + PAYLOAD_00_0F
+    assert framing.normalise_length_encoding("CHARDEC") == "ascii"
+
+
+@pytest.mark.parametrize(
+    "name,cfg,expected_hex",
+    [
+        # 2-byte binary big-endian MLI, the ISO 8583 norm (default config)
+        ("2-byte binary MLI", {}, "0014" + ISO_BODY.hex()),
+        # 2-byte binary little-endian
+        ("2-byte binary little", {"length_byte_order": "little"}, "1400" + ISO_BODY.hex()),
+        # 4-digit ASCII length, payload only
+        (
+            "4-digit ASCII",
+            {"length_prefix_bytes": 4, "length_encoding": "ascii"},
+            "30303230" + ISO_BODY.hex(),
+        ),
+        # 4-digit ASCII counting its own prefix: 20 + 4 = "0024"
+        (
+            "4-digit ASCII counting prefix",
+            {"length_prefix_bytes": 4, "length_encoding": "ascii", "length_includes_prefix": True},
+            "30303234" + ISO_BODY.hex(),
+        ),
+        # mhdr "CDb4" after a 4-digit ASCII length that COUNTS the header: 4 + 20 = "0024"
+        (
+            "mhdr counted in length",
+            {"length_prefix_bytes": 4, "length_encoding": "ascii", "header": MHDR},
+            "30303234" + "43446234" + ISO_BODY.hex(),
+        ),
+        # same header NOT counted: the length stays "0020"
+        (
+            "mhdr not counted in length",
+            {
+                "length_prefix_bytes": 4,
+                "length_encoding": "ascii",
+                "header": MHDR,
+                "length_includes_header": False,
+            },
+            "30303230" + "43446234" + ISO_BODY.hex(),
+        ),
+        # header given as hex bytes, binary MLI counting it: 4 + 20 = 0x0018
+        (
+            "header_hex with binary MLI",
+            {"header_hex": "43446234"},
+            "0018" + "43446234" + ISO_BODY.hex(),
+        ),
+        # TPDU and header together, both counted: 5 + 4 + 20 = 0x001d
+        (
+            "tpdu + header",
+            {"tpdu_outbound_hex": "6000000000", "tpdu_bytes": 5, "header": MHDR},
+            "001d" + "6000000000" + "43446234" + ISO_BODY.hex(),
+        ),
+        # 2-byte BCD prefix (ADR-0011): 20 -> 0x00 0x20
+        ("2-byte BCD", {"length_encoding": "bcd"}, "0020" + ISO_BODY.hex()),
+    ],
+)
+def test_frame_spec_exact_hex_per_configuration(name, cfg, expected_hex):
+    spec = _spec(**cfg)
+    frame = spec.frame(ISO_BODY)
+    assert frame.hex() == expected_hex, name
+    # and the read side of the same spec gets the body back, byte for byte
+    prefix, rest = frame[: spec.prefix_bytes], frame[spec.prefix_bytes :]
+    assert spec.remaining_after_prefix(prefix) == len(rest), name
+    assert spec.strip_inbound(rest) == (rest[: spec.fixed_in], ISO_BODY), name
+
+
+def test_no_prefix_is_refused_by_design():
+    """Without a length prefix the stream has no message boundary — the
+    adapter refuses it at configuration time (not silently as 2-byte binary)."""
+    with pytest.raises(ValueError, match="length_prefix_bytes must be >= 1"):
+        _spec(length_prefix_bytes=0)
+
+
+def test_top_level_mhdr_is_an_alias_of_framing_header():
+    via_root = framing.FrameSpec.from_config(
+        {"mhdr": MHDR, "framing": {"length_prefix_bytes": 4, "length_encoding": "ascii"}}
+    )
+    via_framing = _spec(length_prefix_bytes=4, length_encoding="ascii", header=MHDR)
+    assert via_root == via_framing
+    assert via_root.header_out == b"CDb4" and via_root.header_bytes == 4
+    assert via_root.frame(PAYLOAD_00_0F) == b"0020" + b"CDb4" + PAYLOAD_00_0F
+
+
+def test_conflicting_headers_are_refused():
+    with pytest.raises(ValueError, match="conflicting message headers"):
+        framing.FrameSpec.from_config({"mhdr": "AAAA", "framing": {"header": "BBBB"}})
+    # the same value spelt twice is fine
+    spec = framing.FrameSpec.from_config({"mhdr": MHDR, "framing": {"header_hex": "43446234"}})
+    assert spec.header_out == b"CDb4"
+
+
+def test_header_text_must_be_ascii_and_hex_must_be_hex():
+    with pytest.raises(ValueError, match="ASCII"):
+        _spec(header="héader")
+    with pytest.raises(ValueError, match="hex digits"):
+        _spec(header_hex="xyz")
+
+
+def test_inbound_header_width_defaults_to_outbound_and_is_overridable():
+    spec = _spec(header=MHDR)
+    assert spec.fixed_in == 4
+    spec = _spec(header=MHDR, header_bytes=8)
+    assert spec.fixed_in == 8
+    # not counted in the length: the reader adds the fixed blocks back on
+    spec = _spec(header=MHDR, length_includes_header=False)
+    assert spec.remaining_after_prefix(b"\x00\x14") == 20 + 4
+
+
+def test_frame_parts_and_describe_are_what_a_dry_run_shows():
+    spec = _spec(length_prefix_bytes=4, length_encoding="chardec", header=MHDR)
+    parts = spec.parts(PAYLOAD_00_0F)
+    assert parts["hex"] == "30303230" + "43446234" + PAYLOAD_00_0F.hex()
+    assert parts["prefix_hex"] == "30303230" and parts["declared_length"] == 20
+    assert parts["header_hex"] == "43446234" and parts["tpdu_hex"] == ""
+    assert parts["body_bytes"] == 16 and parts["total_bytes"] == 24
+    assert spec.describe() == "prefix=4 ascii · header=43446234/4in (counted)"
+    assert framing.FrameSpec().describe() == "prefix=2 binary big-endian"
+
+
+def test_responder_and_adapter_agree_on_a_header_framed_wire():
+    """The same FrameSpec on both ends: a simulator can stand in for a host
+    that wants ``0024CDb4`` + body, and the adapter reads its header-framed
+    replies back."""
+    cfg = {"length_prefix_bytes": 4, "length_encoding": "chardec", "header": MHDR}
+    responder = TcpResponder(
+        {"protocol": "iso8583", "framing": cfg, "default": {"echo": ["11"], "set": {"39": "00"}}}
+    )
+    adapter_spec = framing.FrameSpec.from_config({"framing": cfg})
+    assert responder.frame_spec == adapter_spec
+    body = b"0200" + b"2000000000000000" + b"000123"
+    assert responder._frame(body) == adapter_spec.frame(body) == b"0030CDb4" + body
+
+
+async def test_adapter_round_trips_through_a_header_framed_responder():
+    cfg = {"length_prefix_bytes": 4, "length_encoding": "chardec", "header": MHDR}
+    responder = TcpResponder(
+        {"protocol": "iso8583", "framing": cfg, "default": {"echo": ["11"], "set": {"39": "00"}}}
+    )
+    port = await responder.start()
+    adapter = _adapter(port, cfg, timeout=2)
+    await adapter.connect()
+    try:
+        res = await adapter.execute("send_0200", {"amount": 1000})
+        assert res.success, res.error
+        assert res.response_payload["mti"] == "0210"
+        assert res.response_payload["response_code"] == "00"
+        tx = next(e for e in adapter.wire_events() if e["dir"] == "tx")
+        assert tx["hex"].startswith("3030")  # ASCII digits …
+        assert bytes.fromhex(tx["hex"])[4:8] == b"CDb4"  # … then the header
+        rx = next(e for e in adapter.wire_events() if e["dir"] == "rx")
+        assert bytes.fromhex(rx["hex"])[4:8] == b"CDb4"  # the reply carries it too
+    finally:
+        await adapter.disconnect()
+        await responder.stop()

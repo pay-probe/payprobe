@@ -237,15 +237,50 @@ def test_persists_to_file(tmp_path):
 
 
 def test_framing_length_encoding_is_validated():
+    """The store accepts exactly the prefix encodings the worker frames with
+    (binary / ascii / bcd — ADR-0011) and folds vendor spellings: a BPC
+    SmartVista "CHARDEC" header is an ASCII digit prefix, stored as ``ascii``."""
+    import pytest
+
+    from api.connection_store import ConnectionDraft
+
+    def enc(value):
+        d = ConnectionDraft.model_validate(
+            {**_draft(framing={"length_prefix_bytes": 4, "length_encoding": value}).model_dump()}
+        )
+        return d.model_extra["framing"]["length_encoding"]
+
+    assert enc("ascii") == "ascii"
+    assert enc("bcd") == "bcd"
+    assert enc("CHARDEC") == "ascii"  # vendor name, canonicalised on save
+    with pytest.raises(ValueError, match="length_encoding must be one of binary, ascii, bcd"):
+        enc("hex")
+
+
+def test_framing_length_encodings_match_the_worker():
+    """The store mirrors the worker's tuple by hand (the scenario-service image
+    does not ship the worker): fail here the day they drift."""
+    pytest = __import__("pytest")
+    worker_framing = pytest.importorskip("worker.adapters.tcp.framing")
+    from api import connection_store as cs
+
+    assert tuple(cs._LENGTH_ENCODINGS) == tuple(worker_framing.LENGTH_ENCODINGS)
+    assert cs._LENGTH_ENCODING_ALIASES == worker_framing.LENGTH_ENCODING_ALIASES
+
+
+def test_framing_message_header_keys_are_validated():
+    import pytest
+
     from api.connection_store import ConnectionDraft
 
     ok = ConnectionDraft.model_validate(
-        {**_draft(framing={"length_prefix_bytes": 4, "length_encoding": "ascii"}).model_dump()}
+        {**_draft(framing={"length_prefix_bytes": 4, "length_encoding": "ascii",
+                           "header": "CDb4"}).model_dump()}
     )
-    assert ok.model_extra["framing"]["length_encoding"] == "ascii"
-    import pytest
-
-    with pytest.raises(ValueError, match="length_encoding"):
+    assert ok.model_extra["framing"]["header"] == "CDb4"
+    with pytest.raises(ValueError, match="message header once"):
         ConnectionDraft.model_validate(
-            {**_draft(framing={"length_prefix_bytes": 4, "length_encoding": "bcd"}).model_dump()}
+            {**_draft(framing={"header": "CDb4", "header_hex": "43446234"}).model_dump()}
         )
+    with pytest.raises(ValueError, match="header_hex must be hex"):
+        ConnectionDraft.model_validate({**_draft(framing={"header_hex": "zz"}).model_dump()})

@@ -5653,6 +5653,12 @@ async def test_connection(req: TestConnectionRequest) -> dict:
     Returns ``{ok, latency_ms, error}``. Never raises — a failure to connect is
     a normal result the UI shows. Reconnect is disabled for the probe so a bad
     host fails fast instead of retrying.
+
+    For the TCP adapter the result also carries ``health`` (what the check
+    did: its mode, the exact bytes it sent, the reply or the reason it failed)
+    and ``wire`` (the socket's journal: open / tx / rx / close with the first
+    bytes as hex and millisecond timing) — enough to see a host hang up 10 ms
+    after a frame without a packet capture.
     """
     cfg = dict(req.config)
     impl = (cfg.get("adapter") or cfg.get("type") or "tcp").lower()
@@ -5681,21 +5687,74 @@ async def test_connection(req: TestConnectionRequest) -> dict:
 
     adapter = cls(cfg)
     start = time.monotonic()
+
+    def _wire_detail(out: dict) -> dict:
+        # TCP-family adapters record what crossed the socket; others don't.
+        health = getattr(adapter, "last_health", None)
+        if isinstance(health, dict) and health:
+            out["health"] = {k: v for k, v in health.items() if k != "wire"}
+        wire = getattr(adapter, "wire_events", None)
+        if callable(wire):
+            out["wire"] = wire()
+        return out
+
     try:
         await asyncio.wait_for(adapter.connect(),
                                timeout=float(cfg["connect_timeout_sec"]) + 1)
         healthy = await adapter.health_check()
         latency = int((time.monotonic() - start) * 1000)
-        return {"ok": bool(healthy), "latency_ms": latency,
-                "error": None if healthy else "connected, but health check failed"}
+        error = None
+        if not healthy:
+            error = "connected, but health check failed"
+            reason = (getattr(adapter, "last_health", None) or {}).get("error")
+            if reason:
+                error += f": {reason}"
+        return _wire_detail({"ok": bool(healthy), "latency_ms": latency, "error": error})
     except Exception as exc:  # noqa: BLE001 - report, don't raise
-        return {"ok": False, "latency_ms": int((time.monotonic() - start) * 1000),
-                "error": f"{type(exc).__name__}: {exc}"}
+        return _wire_detail({"ok": False, "latency_ms": int((time.monotonic() - start) * 1000),
+                             "error": f"{type(exc).__name__}: {exc}"})
     finally:
         try:
             await adapter.disconnect()
         except Exception:  # noqa: BLE001
             pass
+
+
+class FramePreviewRequest(BaseModel):
+    """A worker-shaped TCP adapter config plus the message to frame. With no
+    ``action``/``payload`` the health-check message is previewed."""
+    config: dict[str, Any]
+    action: str = ""
+    payload: dict[str, Any] | None = None
+
+
+@app.post("/connections/frame-preview")
+async def frame_preview(req: FramePreviewRequest) -> dict:
+    """Dry run of the TCP adapter's framing: the exact bytes a connection
+    config would put on the wire for a message, without opening a socket.
+
+    Returns the frame as ``hex`` plus its blocks (``prefix_hex``,
+    ``tpdu_hex``, ``header_hex``, ``body_hex``), ``declared_length``,
+    ``total_bytes``, a one-line ``framing`` description and the
+    human-readable ``request``. A config the adapter would refuse (unknown
+    ``framing.length_encoding``, conflicting headers, …) is a 400 naming the
+    key. ``host``/``port`` are not needed — nothing is dialled.
+    """
+    cfg = dict(req.config)
+    impl = (cfg.get("adapter") or cfg.get("type") or "tcp").lower()
+    from worker.adapters.registry import ADAPTER_MAP
+
+    cls = ADAPTER_MAP.get(impl)
+    if cls is None or not issubclass(cls, TcpAdapter):
+        raise HTTPException(
+            400, f"frame preview is for TCP connections (adapter 'tcp'), not '{impl}'"
+        )
+    cfg.setdefault("host", "0.0.0.0")  # placeholder: the preview never dials
+    cfg.setdefault("port", 0)
+    try:
+        return cls(cfg).preview_frame(req.action, req.payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 async def _test_grpc_connection(cfg: dict) -> dict:
