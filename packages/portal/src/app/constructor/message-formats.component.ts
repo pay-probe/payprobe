@@ -35,7 +35,12 @@ interface EditFormat {
   isNew: boolean;
   // iso8583
   encoding: string;
+  /** definition.bitmap_encoding: "" (follow the encoding profile) | hex | binary | ebcdic. */
+  bitmapEncoding: string;
   rows: Iso8583Row[];
+  /** Definition keys the form does not edit (presence, mti, mac, …), carried
+   *  through a save untouched instead of being dropped. */
+  extras: Record<string, unknown>;
   // iso20022
   messageType: string;
   namespace: string;
@@ -43,6 +48,16 @@ interface EditFormat {
 }
 
 const LEN_TYPES = ["fixed", "llvar", "lllvar"];
+const BITMAP_ENCODINGS = ["hex", "binary", "ebcdic"];
+/** Definition keys the form edits itself; everything else is an extra. */
+const EDITED_KEYS = new Set([
+  "encoding",
+  "bitmap_encoding",
+  "fields",
+  "message_type",
+  "namespace",
+  "root",
+]);
 const FIELD_TYPES = ["n", "an", "ans", "b", "z"];
 
 /**
@@ -64,6 +79,7 @@ export class MessageFormatsComponent implements OnInit {
   private readonly ui = inject(UiService);
 
   readonly lenTypes = LEN_TYPES;
+  readonly bitmapEncodings = BITMAP_ENCODINGS;
   readonly fieldTypes = FIELD_TYPES;
 
   readonly formats = signal<MessageFormat[]>([]);
@@ -157,6 +173,8 @@ export class MessageFormatsComponent implements OnInit {
       builtin: false,
       isNew: true,
       encoding: "ascii",
+      bitmapEncoding: "",
+      extras: {},
       rows:
         protocol === "iso8583"
           ? [{ de: "2", name: "PAN", len_type: "llvar", length: 19, type: "n" }]
@@ -235,6 +253,10 @@ export class MessageFormatsComponent implements OnInit {
       builtin: f.builtin,
       isNew: false,
       encoding: def["encoding"] ?? "ascii",
+      bitmapEncoding: def["bitmap_encoding"] ?? "",
+      extras: Object.fromEntries(
+        Object.entries(def).filter(([k]) => !EDITED_KEYS.has(k)),
+      ),
       rows,
       messageType: def["message_type"] ?? "",
       namespace: def["namespace"] ?? "",
@@ -255,9 +277,11 @@ export class MessageFormatsComponent implements OnInit {
           type: r.type,
         };
       }
-      definition = { encoding: d.encoding || "ascii", fields };
+      definition = { ...d.extras, encoding: d.encoding || "ascii", fields };
+      if (d.bitmapEncoding) definition["bitmap_encoding"] = d.bitmapEncoding;
     } else {
       definition = {
+        ...d.extras,
         message_type: d.messageType,
         namespace: d.namespace,
         root: d.root || "Document",
