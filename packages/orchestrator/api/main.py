@@ -88,6 +88,7 @@ from report_service.provenance import provenance as _provenance, content_hash as
 
 # Shared encryption-at-rest (no-op passthrough unless PAYPROBE_SECRET_KEY is set).
 from payprobe_common.crypto import SecretBox as _SecretBox
+from payprobe_common.iso8583 import definition_encoding as _iso_definition_encoding
 from payprobe_common.iso8583 import resolve_encoding as _iso_resolve_encoding
 from payprobe_common.iso8583 import wire_encoding_from_config as _iso_wire_encoding_from_config
 
@@ -900,7 +901,7 @@ async def _attach_connections(
         name = doc.get("name")
         if not (name and name in referenced):
             continue
-        base = _connection_effective(doc, env_name)
+        base = await _bind_connection_format(_connection_effective(doc, env_name))
         if _CONNECTION_OVERRIDE_WINS:
             adapters[name] = base  # migrated model: connection wins over inline env
         else:
@@ -2607,12 +2608,33 @@ async def _bind_simulator_format(config: dict) -> dict:
         validate.setdefault("presence", presence)
         validate.setdefault("mode", "warn")
         cfg["validate"] = validate
-    _apply_format_encoding(cfg, fid, definition.get("encoding"))
+    try:
+        fmt_encoding = _iso_definition_encoding(definition)
+    except ValueError as exc:
+        raise HTTPException(400, f"message format '{fid}': {exc}")
+    _apply_format_encoding(cfg, fid, fmt_encoding)
     if definition.get("mac") and cfg.get("mac") is None:
         # the format's MAC block is dialect data like its encoding (ADR-0013);
         # an inline block on the config wins, like inline ``fields``.
         cfg["mac"] = dict(definition["mac"])
     return cfg
+
+
+async def _bind_connection_format(cfg: dict) -> dict:
+    """A *connection* carrying ``message_format_id`` binds its dialect exactly
+    like a simulator does (:func:`_bind_simulator_format`): the format's DE
+    table, wire encoding (``definition.encoding`` ⊕ ``bitmap_encoding``) and
+    MAC block land on the adapter config, inline keys win. The wire encoding
+    has to live on the connection, not the step: the reader decodes every
+    reply on the shared socket with it. Without the key the config is
+    returned untouched; the presence matrix a simulator would validate with is
+    dropped (the client adapter has nothing to validate)."""
+    if not cfg.get("message_format_id"):
+        return cfg
+    bound = await _bind_simulator_format(cfg)
+    if bound is not cfg and "validate" not in cfg:
+        bound.pop("validate", None)
+    return bound
 
 
 def _apply_format_encoding(cfg: dict, fid: str, fmt_encoding: Any) -> None:
@@ -6006,6 +6028,7 @@ async def _resolve_playground_target(
                                      "(administratively out of rotation)")
         cfg = {k: v for k, v in _connection_effective(doc, t.environment).items()
                if k not in _SKIP_CONN_KEYS}
+        cfg = await _bind_connection_format(cfg)
         summary = {"kind": kind, "id": t.id, "environment": t.environment,
                    "adapter": cfg.get("adapter", "tcp"),
                    "host": cfg.get("host"), "port": cfg.get("port"),
