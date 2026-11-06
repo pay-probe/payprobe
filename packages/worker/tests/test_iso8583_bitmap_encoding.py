@@ -115,3 +115,21 @@ def test_pos_0200_round_trips_and_a_secondary_bitmap_is_binary_too():
     assert wire[4:12] == bytes.fromhex("8020000000000000")
     assert wire[12:20] == bytes.fromhex("0400000000000000")  # DE 70 = bit 6 of byte 65–72
     assert wire[20:] == b"000001301"
+
+
+def test_track2_sentinels_and_space_padded_an_fields_validate():
+    assert shared.charset_error(";5488350005706204=2912101?", "z") is None
+    assert shared.charset_error("5488350005706204=2912101", "z") is None
+    assert shared.charset_error("5488;350005706204", "z")  # a sentinel only at the ends
+    assert shared.charset_error("MERCHANT01     ", "an") is None
+    assert shared.charset_error("MERCH ANT", "an")  # padding, not embedded spaces
+    assert shared.charset_error("ABC   ", "a") is None
+    # the sentinels are wire bytes: counted by the LLVAR indicator
+    spec = {"len_type": "llvar", "length": 37, "type": "z"}
+    wire = shared.pack("0200", {"35": ";5488350005706204=2912101?"}, {"35": spec}, "ascii")
+    assert wire[20:] == b"26;5488350005706204=2912101?"
+
+
+def test_resolve_encoding_accepts_the_bitmap_encoding_spelling():
+    assert shared.resolve_encoding({"bitmap_encoding": "binary"})["bitmap"] == "binary"
+    assert shared.resolve_encoding({"bitmap_encoding": "binary"})["numeric"] == "ascii"

@@ -183,6 +183,20 @@ class Iso8583Protocol(TcpProtocol):
             err = iso8583.validate_field(values[de], spec)
             if err:
                 issues.append(f"DE{de} {err}")
+        # a snapshotted presence matrix (a bound Message Format's): mandatory
+        # DEs for this MTI that the step does not set — the auto-stamped time
+        # fields (DE 7/12/13) and an auto-generated STAN count as present
+        presence = payload.get("presence")
+        if isinstance(presence, dict) and presence:
+            mti = str(payload.get("mti") or _ACTION_MTI.get(action) or "0200")
+            rule = presence.get(mti) or presence.get("default") or {}
+            auto = {"7", "12", "13"} if self.auto_fields else set()
+            if self.corr_auto:
+                auto.add(self.corr_field)
+            for de in rule.get("mandatory") or []:
+                de = str(de)
+                if de not in values and de not in auto:
+                    issues.append(f"DE{de} mandatory for MTI {mti} but missing")
         return issues
 
     def _resolve_fields(self, payload: dict) -> dict:

@@ -1031,6 +1031,89 @@ async def _attach_groups(env: dict, scenarios: list[dict]) -> None:
                 step["target"] = chosen
 
 
+async def _attach_message_formats(env: dict, scenarios: list[dict]) -> None:
+    """Bind each action step's ``message_format_id`` (the dialect picked in the
+    step editor) to the registered Message Format for the run.
+
+    Two things come from the format. The step gets the format's DE table and
+    presence matrix snapshotted into its payload (``fields`` / ``presence``)
+    unless it already carries its own, so the worker packs against the named
+    dialect, not the connection's / stock 1987 table. The *adapter the step
+    runs on* gets the format's wire encoding (``encoding`` ⊕
+    ``bitmap_encoding``) and MAC block — those are per socket, not per step:
+    the reader decodes every reply on the shared connection with them, so a
+    step cannot pick a bitmap encoding its connection does not share. An
+    adapter with its own ``encoding`` (or a bound ``message_format_id``) keeps
+    it, and two steps that would need different wire encodings on one adapter
+    are refused (400) rather than silently sending one of them wrong.
+
+    Runs after the connection / environment attachment, when ``step['target']``
+    is the final adapter name. An unresolvable format is a 404: a step that
+    named a dialect must not run against another one.
+    """
+    wanted: dict[str, str] = {}  # fid -> first step id that names it
+    for sc in scenarios:
+        for step in sc.get("steps", []):
+            if step.get("kind", "action") != "action":
+                continue
+            payload = step.get("payload")
+            fid = payload.get("message_format_id") if isinstance(payload, dict) else None
+            if fid:
+                wanted.setdefault(str(fid), str(step.get("id")))
+    if not wanted:
+        return
+    formats: dict[str, dict] = {}
+    for fid, step_id in wanted.items():
+        try:
+            formats[fid] = await _http_get_json(
+                f"{SCENARIO_API_URL}/formats/{quote(fid, safe='')}")
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                404, f"step '{step_id}' names message format '{fid}', which could not "
+                     f"be resolved ({type(exc).__name__}: {exc})")
+    adapters = env.setdefault("adapters", {})
+    bound: dict[str, tuple[str, Any]] = {}  # adapter -> (fid, wire encoding)
+    for sc in scenarios:
+        for step in sc.get("steps", []):
+            if step.get("kind", "action") != "action":
+                continue
+            payload = step.get("payload")
+            if not isinstance(payload, dict) or not payload.get("message_format_id"):
+                continue
+            fid = str(payload["message_format_id"])
+            definition = (formats[fid] or {}).get("definition") or {}
+            if definition.get("fields") and not payload.get("fields"):
+                payload["fields"] = definition["fields"]
+            if definition.get("presence") and not payload.get("presence"):
+                payload["presence"] = definition["presence"]
+            try:
+                fmt_encoding = _iso_definition_encoding(definition)
+            except ValueError as exc:
+                raise HTTPException(400, f"message format '{fid}': {exc}")
+            target = str(step.get("target") or "")
+            cfg = adapters.get(target)
+            if not isinstance(cfg, dict) or fmt_encoding is None:
+                continue
+            resolved = _iso_resolve_encoding(fmt_encoding)
+            if target in bound:
+                prev_fid, prev = bound[target]
+                if prev != resolved:
+                    raise HTTPException(
+                        400, f"step '{step.get('id')}' (format '{fid}') and an earlier step "
+                             f"(format '{prev_fid}') need different wire encodings on "
+                             f"adapter '{target}'; one socket decodes with one encoding")
+                continue
+            if cfg.get("message_format_id"):
+                continue  # the connection binds its own format (already applied)
+            # same rules as a simulator binding: the format's encoding wins over
+            # none, agrees with an explicit one, and a disagreement is a 400
+            _apply_format_encoding(
+                cfg, fid, fmt_encoding, who=f"step '{step.get('id')}' on adapter '{target}'")
+            if _ISO8583_FORMAT_ENCODING and definition.get("mac") and cfg.get("mac") is None:
+                cfg["mac"] = dict(definition["mac"])
+            bound[target] = (fid, resolved)
+
+
 async def _attach_step_environments(env: dict, scenarios: list[dict]) -> None:
     """Apply per-step environment overrides into a run (best-effort).
 
@@ -1331,6 +1414,7 @@ async def _resolve_run(req: CreateRunRequest) -> tuple[dict, list[dict], str]:
     await _attach_connections(env, scs, req.environment_name)
     await _attach_groups(env, scs)
     await _attach_step_environments(env, scs)
+    await _attach_message_formats(env, scs)
     # fleet discovery (ADR-0001): listeners hosted on the worker fleet bound
     # their planned ports on worker hosts — re-point matching adapters there.
     _attach_fleet_endpoints(env)
@@ -1377,6 +1461,7 @@ async def _resolve_run_fixtures(req: CreateRunRequest, env: dict) -> dict | None
         await _attach_test_data(scs)
         await _attach_connections(env, scs, req.environment_name)
         await _attach_groups(env, scs)
+        await _attach_message_formats(env, scs)
         out[kind] = scs
     return out or None
 
@@ -2638,7 +2723,9 @@ async def _bind_connection_format(cfg: dict, fmt: dict | None = None) -> dict:
     return bound
 
 
-def _apply_format_encoding(cfg: dict, fid: str, fmt_encoding: Any) -> None:
+def _apply_format_encoding(
+    cfg: dict, fid: str, fmt_encoding: Any, who: str = "simulator"
+) -> None:
     """ADR-0011: the bound format's wire ``encoding`` wins over the simulator
     config's own (``encoding`` or the legacy ``framing.encoding``), and the two
     may never disagree silently. Injection is gated by
@@ -2650,13 +2737,13 @@ def _apply_format_encoding(cfg: dict, fid: str, fmt_encoding: Any) -> None:
         wanted = _iso_resolve_encoding(fmt_encoding)
         own = _iso_wire_encoding_from_config(cfg)
     except ValueError as exc:
-        raise HTTPException(400, f"simulator: message format '{fid}': {exc}")
+        raise HTTPException(400, f"{who}: message format '{fid}': {exc}")
     has_own = cfg.get("encoding") is not None or (cfg.get("framing") or {}).get(
         "encoding"
     ) is not None
     if has_own and _iso_resolve_encoding(own) != wanted:
         msg = (
-            f"simulator: message format '{fid}' declares encoding {fmt_encoding!r} but the "
+            f"{who}: message format '{fid}' declares encoding {fmt_encoding!r} but the "
             f"config carries {own!r} (encoding / framing.encoding); keep one"
         )
         if _ISO8583_FORMAT_ENCODING:

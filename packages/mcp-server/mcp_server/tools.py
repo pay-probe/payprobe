@@ -231,38 +231,55 @@ def import_scenario(document: dict, project_id: str | None = None) -> dict:
 
 # -- ISO 8583 inspector -------------------------------------------------------
 
-def iso8583_analyze(message: str, fields: dict | None = None,
-                    encoding: str | None = None) -> dict:
-    """Decode a raw ISO 8583 wire message into MTI + bitmap + validated data
-    elements (+ EMV TLV). ``fields`` overrides the default 1987 DE table."""
-    body: dict = {"message": message}
+def _iso_dialect(body: dict, fields: dict | None, encoding: str | dict | None,
+                 bitmap_encoding: str | None, format_id: str | None) -> dict:
     if fields is not None:
         body["fields"] = fields
     if encoding is not None:
         body["encoding"] = encoding
+    if bitmap_encoding is not None:
+        body["bitmap_encoding"] = bitmap_encoding
+    if format_id:
+        body["format_id"] = format_id
+    return body
+
+
+def iso8583_analyze(message: str, fields: dict | None = None,
+                    encoding: str | dict | None = None,
+                    bitmap_encoding: str | None = None,
+                    format_id: str | None = None) -> dict:
+    """Decode a raw ISO 8583 wire message into MTI + bitmap + validated data
+    elements (+ EMV TLV). ``format_id`` takes the dialect (DE table, encoding,
+    bitmap_encoding) from a registered Message Format; ``fields`` overrides
+    the table, ``encoding`` the profile, ``bitmap_encoding`` (hex | binary |
+    ebcdic) just the bitmap axis. Under any non-ASCII axis ``message`` is hex."""
+    body = _iso_dialect({"message": message}, fields, encoding, bitmap_encoding, format_id)
     return _request("POST", f"{SCENARIO_API}/iso8583/analyze", body)
 
 
 def iso8583_build(mti: str, values: dict | None = None,
-                  fields: dict | None = None, encoding: str | None = None) -> dict:
+                  fields: dict | None = None, encoding: str | dict | None = None,
+                  bitmap_encoding: str | None = None,
+                  format_id: str | None = None) -> dict:
     """Validate a ``{DE: value}`` map against the field table and pack it into a
-    wire message. ``fields`` overrides the default 1987 DE table."""
-    body: dict = {"mti": mti, "values": values or {}}
-    if fields is not None:
-        body["fields"] = fields
-    if encoding is not None:
-        body["encoding"] = encoding
+    wire message. ``format_id`` takes the dialect (DE table, encoding,
+    bitmap_encoding) from a registered Message Format; ``fields`` overrides
+    the table, ``encoding`` the profile, ``bitmap_encoding`` (hex | binary |
+    ebcdic) just the bitmap axis — e.g. a raw 8-byte bitmap under an
+    otherwise-ASCII dialect. Under any non-ASCII axis ``message`` is hex."""
+    body = _iso_dialect({"mti": mti, "values": values or {}}, fields, encoding,
+                        bitmap_encoding, format_id)
     return _request("POST", f"{SCENARIO_API}/iso8583/build", body)
 
 
 def iso8583_diff(a: str, b: str, fields: dict | None = None,
-                 encoding: str | None = None) -> dict:
-    """Field-level diff of two ISO 8583 messages (added / removed / changed)."""
-    body: dict = {"a": a, "b": b}
-    if fields is not None:
-        body["fields"] = fields
-    if encoding is not None:
-        body["encoding"] = encoding
+                 encoding: str | dict | None = None,
+                 bitmap_encoding: str | None = None,
+                 format_id: str | None = None) -> dict:
+    """Field-level diff of two ISO 8583 messages (added / removed / changed),
+    decoded under the same dialect (``format_id`` / ``fields`` / ``encoding`` /
+    ``bitmap_encoding`` as for :func:`iso8583_analyze`)."""
+    body = _iso_dialect({"a": a, "b": b}, fields, encoding, bitmap_encoding, format_id)
     return _request("POST", f"{SCENARIO_API}/iso8583/diff", body)
 
 
