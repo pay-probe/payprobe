@@ -225,20 +225,33 @@ a known-good message. Never debug an ISO 8583 problem from the request dict.
 ### Worked example: length-prefix framing in TcpAdapter/TcpResponder
 
 TCP has no message boundaries, so every PayProbe TCP exchange is
-length-prefix framed. Both sides implement the *same* four-knob model —
-`TcpAdapter._frame`/`._read_frame` (`packages/worker/adapters/tcp/adapter.py`)
-and the mirrored `TcpResponder._frame`/`._read_frame`
-(`packages/worker/adapters/tcp/responder.py`):
+length-prefix framed. Both sides share one model — `framing.FrameSpec`
+(`packages/worker/adapters/tcp/framing.py`), built from the config by
+`TcpAdapter` and `TcpResponder` alike (2026-11-06; before that each had its own
+mirrored `_frame`/`_read_frame`):
 
 ```
-frame = length_prefix + [TPDU header] + body
+frame = length_prefix + [TPDU] + [message header] + body
 
 length_prefix_bytes     width of the prefix (default 2; validated >= 1)
-length_byte_order       "big" (default) or "little"
+length_encoding         "binary" (default) | "ascii" digits ("0043"; vendor alias "chardec") | "bcd"
+length_byte_order       "big" (default) or "little" (binary prefixes only)
 length_includes_prefix  does the declared length count the prefix itself? (default False)
-length_includes_header  does it count the TPDU header? (default True)
-tpdu_bytes / tpdu_outbound_hex   optional TPDU header handling
+length_includes_header  does it count the TPDU + message header? (default True)
+tpdu_bytes / tpdu_outbound_hex   optional TPDU handling
+header / header_hex / header_bytes   optional fixed message header (top-level "mhdr" alias)
 ```
+
+Three ways to *see* the bytes instead of reasoning about them:
+
+- `POST /connections/frame-preview` (MCP `preview_connection_frame`) — the
+  frame a config would send, hex + blocks, no socket (dry run).
+- `POST /connections/test` returns `health` (mode, exact bytes sent, reply or
+  reason) and `wire` (open / tx / rx / close journal with ms timing — "peer
+  closed 11 ms after the last send, 0 of 4 expected bytes arrived").
+- `PAYPROBE_TCP_WIRE_LOG=1` logs the same journal at INFO for every adapter
+  socket in a run (`worker.adapters.tcp.wire`); `StepResult.raw_log` now has
+  both the `TX` and the `RX` frame.
 
 The read side is `await reader.readexactly(prefix_bytes)` → decode length →
 `readexactly(remaining)`. **This is why a framing mismatch presents as a hang,

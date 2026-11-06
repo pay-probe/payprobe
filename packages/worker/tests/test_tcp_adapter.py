@@ -442,3 +442,292 @@ async def test_length_encoding_mismatch_fails_loudly_not_silently():
         framing.decode_length((43).to_bytes(2, "big"), "big", "ascii")
     with pytest.raises(ValueError, match="length_encoding"):
         framing.normalise_length_encoding("hex")  # bcd is valid since ADR-0011
+
+
+# -- health-check modes, wire journal, dry run ------------------------------
+#
+# Background (2026-11): against a real POS host the probe's 0800 echo went
+# unanswered for 30 s and *Test connection* said only "connected, but health
+# check failed"; on another port the host hung up ~10 ms after the first frame
+# and nothing recorded which bytes had gone out. These tests pin the three
+# health-check modes, the reasons they report, and the byte-level journal.
+
+
+class SlammingHost:
+    """A host that reads whatever arrives, then hangs up ``after_ms`` later —
+    what a switch does with a frame it cannot parse ("invalid format")."""
+
+    def __init__(self, after_ms: int = 10):
+        self.after_ms = after_ms
+        self.received: list[bytes] = []
+
+    async def start(self) -> int:
+        self.server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
+        return self.server.sockets[0].getsockname()[1]
+
+    async def stop(self) -> None:
+        self.server.close()
+        await self.server.wait_closed()
+
+    async def _handle(self, reader, writer):
+        try:
+            data = await asyncio.wait_for(reader.read(4096), timeout=2)
+            self.received.append(data)
+        except TimeoutError:
+            pass
+        await asyncio.sleep(self.after_ms / 1000)
+        writer.close()
+
+
+class SilentHost:
+    """Accepts the connection, reads nothing, answers nothing, never closes
+    until the test stops it."""
+
+    async def start(self) -> int:
+        self._stop = asyncio.Event()
+        self.server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
+        return self.server.sockets[0].getsockname()[1]
+
+    async def stop(self) -> None:
+        self._stop.set()
+        self.server.close()
+        await self.server.wait_closed()
+
+    async def _handle(self, reader, writer):
+        await self._stop.wait()
+        writer.close()
+
+
+_NO_RECONNECT = {"reconnect": {"enabled": False}}
+
+
+async def test_health_probe_mode_sends_the_default_echo_and_reports_the_reply():
+    """Default mode (today's behaviour): the protocol's 0800 echo, healthy when
+    the host answers; ``last_health`` carries the exact bytes both ways."""
+    server = MockIsoServer()
+    port = await server.start()
+    adapter = await _make_adapter(port)
+    try:
+        assert await adapter.health_check() is True
+        h = adapter.last_health
+        assert h["mode"] == "probe" and h["healthy"] is True and h["error"] is None
+        assert h["sent"]["source"] == "iso8583 default probe"
+        assert bytes.fromhex(h["sent"]["hex"])[2:6] == b"0800"  # 2-byte MLI then the MTI
+        assert bytes.fromhex(h["reply"]["hex"])[2:6] == b"0810"
+        assert [e["dir"] for e in h["wire"]] == ["open", "tx", "rx"]
+    finally:
+        await adapter.disconnect()
+        await server.stop()
+
+
+async def test_health_probe_mode_names_the_unanswered_probe_and_the_way_out():
+    host = SilentHost()
+    port = await host.start()
+    adapter = await _make_adapter(port, response_timeout_sec=0.2, **_NO_RECONNECT)
+    try:
+        assert await adapter.health_check() is False
+        err = adapter.last_health["error"]
+        assert "no reply within 0.2s" in err
+        assert "health_check.mode" in err and "'connect'" in err and "'message'" in err
+        assert adapter.last_health["sent"]["bytes"] > 0  # it did send the echo
+    finally:
+        await adapter.disconnect()
+        await host.stop()
+
+
+async def test_health_connect_mode_sends_nothing_and_passes_on_an_open_socket():
+    """``sign_on.enabled: false`` + ``health_check.mode: connect``: not one
+    byte goes out; a socket still open after ``settle_ms`` is healthy."""
+    host = SilentHost()
+    port = await host.start()
+    adapter = await _make_adapter(
+        port, health_check={"mode": "connect", "settle_ms": 50}, **_NO_RECONNECT
+    )
+    try:
+        assert await adapter.health_check() is True
+        h = adapter.last_health
+        assert h["mode"] == "connect" and h["sent"] is None
+        assert [e["dir"] for e in adapter.wire_events()] == ["open"]  # nothing sent
+        assert "still open after 50 ms" in h["note"]
+    finally:
+        await adapter.disconnect()
+        await host.stop()
+
+
+async def test_health_connect_mode_fails_when_the_host_hangs_up_within_settle():
+    host = SlammingHost(after_ms=10)
+    port = await host.start()
+    adapter = await _make_adapter(
+        port, health_check={"mode": "connect", "settle_ms": 150}, **_NO_RECONNECT
+    )
+    try:
+        # a sign-on-free connect sends nothing, so poke the host once so it
+        # hangs up the way it would on an unparseable frame
+        adapter._writer.write(b"junk")
+        await adapter._writer.drain()
+        assert await adapter.health_check() is False
+        err = adapter.last_health["error"]
+        # "connection closed by the host" when it dropped during settle, or
+        # "not connected" when the reader saw the close first — either way the
+        # timing hint travels with the reason
+        assert "closed" in err or "not connected" in err
+        assert "peer closed the connection before anything was sent" in err
+        assert adapter.wire_events()[-1]["dir"] == "close"
+    finally:
+        await adapter.disconnect()
+        await host.stop()
+
+
+async def test_health_message_mode_sends_the_configured_message():
+    server = MockIsoServer()
+    port = await server.start()
+    adapter = await _make_adapter(
+        port,
+        health_check={
+            "mode": "message",
+            "action": "send_0800",
+            "payload": {"mti": "0800", "values": {"70": "001"}},
+        },
+    )
+    try:
+        assert await adapter.health_check() is True
+        sent = server.received[-1]
+        assert sent["mti"] == "0800" and sent["fields"]["70"]["value"] == "001"
+        assert adapter.last_health["sent"]["source"] == "health_check message"
+    finally:
+        await adapter.disconnect()
+        await server.stop()
+
+
+async def test_health_message_mode_without_a_message_is_refused_at_connect():
+    server = MockIsoServer()
+    port = await server.start()
+    try:
+        with pytest.raises(ValueError, match="health_check.mode 'message' needs"):
+            await _make_adapter(port, health_check={"mode": "message"})
+        with pytest.raises(ValueError, match="health_check.mode must be one of"):
+            await _make_adapter(port, health_check={"mode": "ping"})
+    finally:
+        await server.stop()
+
+
+async def test_configured_sign_on_message_doubles_as_the_health_probe():
+    """One sign-on message (0800 / DE70 = 001) serves sign-on *and* the probe
+    — the probe never silently falls back to the default 301 echo."""
+    server = MockIsoServer()
+    port = await server.start()
+    adapter = await _make_adapter(
+        port,
+        sign_on={"enabled": True, "payload": {"mti": "0800", "values": {"70": "001"}}},
+    )
+    try:
+        assert server.received[-1]["fields"]["70"]["value"] == "001"  # sign-on at connect
+        assert await adapter.health_check() is True
+        assert server.received[-1]["fields"]["70"]["value"] == "001"  # the probe too
+        assert adapter.last_health["sent"]["source"] == "sign_on message"
+    finally:
+        await adapter.disconnect()
+        await server.stop()
+
+
+async def test_wire_journal_records_the_exact_bytes_and_the_close_timing():
+    """A host that hangs up ~10 ms after the first frame: the journal holds the
+    frame as sent, the close, and how long after the send it came; the step
+    error carries the same timing."""
+    host = SlammingHost(after_ms=10)
+    port = await host.start()
+    adapter = await _make_adapter(
+        port,
+        framing={"length_prefix_bytes": 4, "length_encoding": "chardec"},
+        mhdr="CDb4",
+        response_timeout_sec=2,
+        **_NO_RECONNECT,
+    )
+    try:
+        res = await adapter.execute("send_0800", {"values": {"70": "301"}})
+        assert res.success is False
+        assert "peer closed the connection" in (res.error or "")
+        assert "ms after the last send" in res.error
+        events = adapter.wire_events()
+        assert [e["dir"] for e in events] == ["open", "tx", "close"]
+        tx, close = events[1], events[2]
+        # the exact bytes the host saw are the bytes the journal recorded
+        assert host.received[0].hex().startswith(tx["hex"])
+        assert host.received[0][:8] == b"0069CDb4"  # 4-digit ASCII length, then mhdr
+        assert tx["bytes"] == len(host.received[0]) == 73
+        assert "MTI 0800" in tx["note"]
+        assert close["note"].startswith("peer closed:")
+        assert "ms after the last send, 0 bytes read since" in close["note"]
+        assert "0 of 4 expected bytes arrived" in close["note"]
+        assert 0 <= close["t_ms"] - tx["t_ms"] < 1000
+        assert adapter.last_health == {}  # no health check ran
+    finally:
+        await adapter.disconnect()
+        await host.stop()
+
+
+async def test_raw_log_now_carries_the_received_frame_too():
+    server = MockIsoServer()
+    port = await server.start()
+    adapter = await _make_adapter(port)
+    try:
+        res = await adapter.execute("send_0200", {"amount": 100})
+        assert res.success
+        lines = res.raw_log.splitlines()
+        assert lines[0].startswith("[iso8583] → sent") and lines[1].startswith("  TX ")
+        assert lines[2].startswith("[iso8583] ← recv ") and "MTI 0210" in lines[2]
+        assert lines[3].startswith("  RX ")
+        assert bytes.fromhex(lines[3].split()[1])[2:6] == b"0210"
+    finally:
+        await adapter.disconnect()
+        await server.stop()
+
+
+def test_preview_frame_is_a_dry_run_that_needs_no_socket():
+    adapter = TcpAdapter(
+        {
+            "host": "203.0.113.9",  # TEST-NET: never dialled
+            "port": 1,
+            "protocol": "iso8583",
+            "framing": {"length_prefix_bytes": 4, "length_encoding": "chardec"},
+            "mhdr": "CDb4",
+            "sign_on": {"enabled": False},
+        }
+    )
+    out = adapter.preview_frame(
+        "send_0800",
+        {"values": {"70": "301", "11": "000001", "7": "1106123000", "12": "123000", "13": "1106"}},
+    )
+    frame = bytes.fromhex(out["hex"])
+    assert frame[:8] == b"0069CDb4" and frame[8:12] == b"0800"
+    assert out["total_bytes"] == 73 == 4 + 4 + out["body_bytes"]
+    assert out["declared_length"] == 69 == 4 + out["body_bytes"]  # header counted
+    assert out["prefix_hex"] == "30303639" and out["header_hex"] == "43446234"
+    assert out["framing"] == "prefix=4 ascii · header=43446234/4in (counted)"
+    assert out["request"]["mti"] == "0800" and out["health_check_mode"] == "probe"
+    # with nothing given it previews the health-check message (what *Test
+    # connection* sends): the default 0800 echo here
+    assert adapter.preview_frame()["request"]["values"]["70"] == "301"
+
+
+def test_preview_frame_refuses_a_framing_typo_instead_of_binding_the_default():
+    adapter = TcpAdapter(
+        {"host": "h", "port": 1, "framing": {"length_encoding": "hex"}, "sign_on": {}}
+    )
+    with pytest.raises(ValueError, match="length_encoding must be one of binary, ascii, bcd"):
+        adapter.preview_frame("send_0200", {"amount": 1})
+
+
+async def test_top_level_header_key_is_called_out_not_dropped(caplog):
+    """``header`` at the top level was never a TcpAdapter key; it now logs a
+    warning pointing at framing.header / mhdr instead of vanishing silently."""
+    server = MockIsoServer()
+    port = await server.start()
+    with caplog.at_level("WARNING", logger="worker.adapters.tcp.adapter"):
+        adapter = await _make_adapter(port, header="CDb4")
+    try:
+        assert any("'header' is not a TcpAdapter key" in r.message for r in caplog.records)
+        assert adapter.frame_spec.header_out == b""  # and it did not frame with it
+    finally:
+        await adapter.disconnect()
+        await server.stop()

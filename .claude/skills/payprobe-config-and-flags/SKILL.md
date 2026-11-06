@@ -192,6 +192,7 @@ Drift check:
 | `LOAD_RUN_ID` | REQUIRED (SystemExit if missing) | Which load run this standalone worker binds to. | prod | `packages/worker/load_worker.py:_main` (~line 353) |
 | `REDIS_URL` | REQUIRED for standalone worker (SystemExit if missing) | Load bus coordination. | prod | `packages/worker/load_worker.py:_make_bus` (~line 343) |
 | `LOG_LEVEL` | `INFO` | Standalone load-worker logging level. | prod | `packages/worker/load_worker.py:_main` (~line 352) |
+| `PAYPROBE_TCP_WIRE_LOG` | unset (DEBUG) | `1`/`true`/`yes` promotes the TCP adapter's wire journal (every open / send / receive / close on a socket: first 256 bytes as hex + ms timing, logger `worker.adapters.tcp.wire`) from DEBUG to INFO so an operator can watch a host without turning the whole process to DEBUG. Frames carry whatever the step sent (PANs included) — ops-only, like `raw_log`. The journal itself is always kept (bounded, 200 events per socket) and returned by `POST /connections/test` as `wire`. | ops | `packages/worker/adapters/tcp/adapter.py:_WIRE_LEVEL` |
 
 Drift check:
 `grep -rn "environ" packages/worker --include="*.py" | grep -v tests | grep -v node_modules`

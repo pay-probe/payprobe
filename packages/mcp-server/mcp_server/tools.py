@@ -339,8 +339,26 @@ def list_environments() -> list[dict]:
 def test_connection(config: dict) -> dict:
     """Open a connection to a worker-shaped adapter ``config`` (host/port/
     protocol/...), sign on / health-check it, and report whether it's reachable.
-    Use to verify an endpoint before running scenarios against it."""
+    Use to verify an endpoint before running scenarios against it. For TCP
+    connections the result also carries ``health`` (the check's mode, the exact
+    bytes it sent, the reply or the reason it failed) and ``wire`` (the socket
+    journal: open / tx / rx / close with the first bytes as hex and millisecond
+    timing — e.g. a host hanging up 10 ms after the first frame)."""
     return _request("POST", f"{RUN_API}/connections/test", {"config": config})
+
+
+def preview_connection_frame(config: dict, action: str = "",
+                             payload: dict | None = None) -> dict:
+    """Dry run of a TCP connection's framing: the exact bytes the worker would
+    put on the wire for ``action``/``payload`` under this ``config`` (framing
+    prefix, TPDU, message header ``mhdr``/``framing.header``, body), as hex and
+    split into blocks — without dialling anything. With no action/payload the
+    health-check message is previewed. Use it to compare PayProbe's frame
+    byte-for-byte with what a vendor client sends before touching the host."""
+    body: dict = {"config": config, "action": action}
+    if payload is not None:
+        body["payload"] = payload
+    return _request("POST", f"{RUN_API}/connections/frame-preview", body)
 
 
 def diagnose_platform(

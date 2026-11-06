@@ -162,6 +162,17 @@ def test_test_connection_wraps_config(calls):
     assert body["config"]["host"] == "h"
 
 
+def test_preview_connection_frame_posts_config_action_and_payload(calls):
+    tools.preview_connection_frame({"framing": {"length_prefix_bytes": 4}},
+                                   "send_0800", {"values": {"70": "301"}})
+    method, url, body = calls[-1]
+    assert method == "POST" and url.endswith("/connections/frame-preview")
+    assert body["config"]["framing"]["length_prefix_bytes"] == 4
+    assert body["action"] == "send_0800" and body["payload"]["values"]["70"] == "301"
+    tools.preview_connection_frame({"mhdr": "CDb4"})
+    assert "payload" not in calls[-1][2]  # omitted -> the health-check message
+
+
 def test_start_simulator_posts_label_and_config(calls):
     tools.start_simulator({"port": 5000}, label="acquirer")
     method, url, body = calls[-1]

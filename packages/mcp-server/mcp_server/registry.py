@@ -90,6 +90,7 @@ TOOL_GROUPS: list[tuple[str, list[tuple[str, str, dict]]]] = [
         ("save_connection", "Save connection", UPSERT),
         ("delete_connection", "Delete connection", DELETE),
         ("test_connection", "Test connection", READ_EXTERNAL),
+        ("preview_connection_frame", "Preview connection frame (dry run)", READ),
         ("diagnose_platform", "Diagnose platform connectivity", READ_EXTERNAL),
     ]),
     ("Simulators", [

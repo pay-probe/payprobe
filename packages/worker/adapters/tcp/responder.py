@@ -107,13 +107,18 @@ class TcpResponder:
         self.validate_on_error: dict = vcfg.get("on_error") or {"39": "30"}
 
         f = config.get("framing", {})
-        self.prefix_bytes = int(f.get("length_prefix_bytes", 2))
-        self.byte_order = f.get("length_byte_order", "big")
-        self.length_encoding = framing.normalise_length_encoding(f.get("length_encoding"))
-        self.length_includes_prefix = bool(f.get("length_includes_prefix", False))
-        self.length_includes_header = bool(f.get("length_includes_header", True))
-        self.tpdu_bytes = int(f.get("tpdu_bytes", 0))
-        self.tpdu_out = bytes.fromhex(f.get("tpdu_outbound_hex", "") or "")
+        #: The one framing model (shared with the adapter, so a simulator can
+        #: stand in for any host the adapter can talk to — fixed message header
+        #: included). The scalar mirrors below are what the chaos engine, the
+        #: proxy and tests read.
+        self.frame_spec = framing.FrameSpec.from_config(config)
+        self.prefix_bytes = self.frame_spec.prefix_bytes
+        self.byte_order = self.frame_spec.byte_order
+        self.length_encoding = self.frame_spec.length_encoding
+        self.length_includes_prefix = self.frame_spec.length_includes_prefix
+        self.length_includes_header = self.frame_spec.length_includes_header
+        self.tpdu_bytes = self.frame_spec.tpdu_bytes
+        self.tpdu_out = self.frame_spec.tpdu_out
         #: Text codec for ``header_echo`` bodies (legacy ``framing.encoding``).
         self.encoding = f.get("encoding", "ascii")
         #: ISO 8583 wire encoding profile (ADR-0011): a top-level ``encoding``
@@ -346,7 +351,7 @@ class TcpResponder:
                         byte_order=self.byte_order,
                         length_encoding=self.length_encoding,
                         mti_encoding=self.mti_encoding,
-                        header_bytes=len(self.tpdu_out),
+                        header_bytes=len(self.frame_spec.fixed_out),
                     )
 
                 if outcome.partial:
@@ -371,29 +376,21 @@ class TcpResponder:
             except Exception as exc:  # noqa: BLE001 — best-effort teardown
                 log.debug("responder: error closing client socket: %s", exc)
 
-    # -- framing (mirrors TcpAdapter) ---------------------------------------
+    # -- framing (the same FrameSpec as TcpAdapter) -------------------------
 
     def _frame(self, body: bytes) -> bytes:
-        payload = self.tpdu_out + body
-        counted = len(payload) if self.length_includes_header else len(body)
-        length = counted + (self.prefix_bytes if self.length_includes_prefix else 0)
-        prefix = framing.encode_length(
-            length, self.prefix_bytes, self.byte_order, self.length_encoding
-        )
-        return prefix + payload
+        return self.frame_spec.frame(body)
 
     async def _read_frame(self, reader: asyncio.StreamReader) -> bytes | None:
         try:
-            prefix = await reader.readexactly(self.prefix_bytes)
+            prefix = await reader.readexactly(self.frame_spec.prefix_bytes)
         except asyncio.IncompleteReadError:
             return None
-        length = framing.decode_length(prefix, self.byte_order, self.length_encoding)
-        core = length - (self.prefix_bytes if self.length_includes_prefix else 0)
-        remaining = core if self.length_includes_header else core + self.tpdu_bytes
+        remaining = self.frame_spec.remaining_after_prefix(prefix)
         if remaining <= 0:
             return b""
         data = await reader.readexactly(remaining)
-        return data[self.tpdu_bytes :]
+        return self.frame_spec.strip_inbound(data)[1]
 
     # -- protocol decode / encode -------------------------------------------
 

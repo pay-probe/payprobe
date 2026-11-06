@@ -31,7 +31,18 @@ adapter instead.)
 - **Sign-on** on connect and **keep-alive** on an interval, both optional;
   default to the protocol's health probe (ISO 8583 ⇒ 0800 echo; header_echo ⇒
   the configured diagnostic command).
-- `health_check()` runs the protocol's health probe and never raises.
+- `health_check()` never raises; `health_check.mode` decides what it puts on
+  the wire (`probe` — the sign-on message or the protocol's default probe,
+  `connect` — nothing, `message` — your own message; see below). The reason
+  for a failure is on `adapter.last_health`, and `POST /connections/test`
+  returns it together with the socket's wire journal.
+- **Wire journal**: every open / send / receive / close on the socket is
+  recorded (`adapter.wire_events()`) with the first 256 bytes as hex and
+  millisecond timing, and logged on `worker.adapters.tcp.wire` (DEBUG;
+  `PAYPROBE_TCP_WIRE_LOG=1` promotes it to INFO). `adapter.preview_frame()` /
+  `POST /connections/frame-preview` is the dry run: the exact frame a config
+  would send, without a socket. Both carry whatever the message carries (PANs
+  included), exactly like `StepResult.raw_log` already does.
 
 ## Config
 
@@ -52,12 +63,20 @@ adapter instead.)
   "framing": {                   // applies to every protocol
     "length_prefix_bytes": 2,    // width of the length prefix (>= 1)
     "length_encoding": "binary", // "binary" integer | "ascii" zero-padded digits (0043) |
-                                 // "bcd" packed digits (0x00 0x43)
+                                 // "bcd" packed digits (0x00 0x43). Vendor spelling "chardec"
+                                 // (vendor spelling "header type CHARDEC") folds to "ascii".
     "length_byte_order": "big",  // "big" | "little" (binary prefixes only)
     "length_includes_prefix": false, // does the length count its own prefix bytes?
     "length_includes_header": true,  // does the length count the TPDU header?
     "tpdu_bytes": 0,             // inbound TPDU header width to strip
     "tpdu_outbound_hex": "",     // static TPDU prepended on send (hex)
+    "header": "",                // fixed message header written after the length prefix
+                                 // (and after the TPDU) on every send, as ASCII text —
+                                 // e.g. "CDb4"; "header_hex" takes the same as hex bytes.
+                                 // A top-level "mhdr" is accepted as an alias.
+    "header_bytes": null,        // inbound header width to strip (default: len(header));
+                                 // length_includes_header says whether the length counts
+                                 // the TPDU + header
     "encoding": "ascii"          // LEGACY for iso8583 (folded into the top-level
                                  // "encoding": ascii/utf-8/latin-1 -> "ascii", cp037/ebcdic
                                  // -> {"text": "ebcdic"}; anything else, or a value that
@@ -76,14 +95,48 @@ adapter instead.)
 
   "sign_on":   { "enabled": true, "action": "...", "payload": { } },
   "keepalive": { "enabled": true, "interval_sec": 30, "action": "...", "payload": { } },
+  "health_check": { "mode": "probe",   // probe (default) | connect | message
+                    "action": "...", "payload": { },  // the message for mode "message"
+                    "settle_ms": 200 }, // mode "connect": how long the socket must stay open
   "response_timeout_sec": 30,
   "connect_timeout_sec": 10
 }
 ```
 
 All `framing` keys are optional; defaults match the most common deployment
-(2-byte big-endian length prefix, no TPDU). `sign_on`/`keepalive` `action` and
-`payload` are optional — omit them to use the protocol's default probe.
+(2-byte big-endian length prefix, no TPDU, no header). `sign_on`/`keepalive`
+`action` and `payload` are optional — omit them to use the protocol's default
+probe. Keys this transport does not read are dropped — a top-level `header`
+in particular is logged as ignored (the message header is `framing.header` /
+`mhdr`); check `preview_frame` when in doubt.
+
+### Framing recipes
+
+| Host says | `framing` |
+|---|---|
+| 2-byte binary length, big-endian (ISO 8583 norm) | `{}` (the default) |
+| "GENERIC4 / CHARDEC / 4 bytes / Big" — a 4-character ASCII decimal length equal to the payload length (a POS host) | `{"length_prefix_bytes": 4, "length_encoding": "ascii"}` → `"0016"` + 16 payload bytes = 20 bytes on the wire |
+| …plus a fixed header `CDb4` counted in the length | `{"length_prefix_bytes": 4, "length_encoding": "ascii", "header": "CDb4"}` → `0020CDb4` + 16 bytes |
+| …the same header **not** counted | add `"length_includes_header": false` → `0016CDb4` + 16 bytes |
+| 5-byte TPDU `60 00 00 00 00` in front of the body | `{"tpdu_outbound_hex": "6000000000", "tpdu_bytes": 5}` |
+
+### Health check modes
+
+*Test connection* (`POST /connections/test`) and the `/diagnostics` connections
+layer call `health_check()`. What it sends is `health_check.mode`:
+
+- **`probe`** (default, unchanged behaviour): the `sign_on` message if one is
+  configured, else the protocol's default probe (ISO 8583 ⇒ `0800` with DE 70 =
+  `301`); healthy when the host answers. A host that does not echo `0800`
+  fails this after `response_timeout_sec` — the error now says so and names the
+  other two modes.
+- **`connect`**: nothing is sent. Healthy when the socket is still open after
+  `settle_ms` (default 200) — a host that rejects the client hangs up within
+  milliseconds, and the journal records how many ms after the last send.
+  This is the mode for `sign_on.enabled: false` against a host whose sign-on
+  you do not want to fake.
+- **`message`**: send `health_check.action` / `payload` (e.g. the host's real
+  sign-on, `0800` with DE 70 = `001`) and judge the reply like a probe.
 
 ### `iso8583` protocol
 
