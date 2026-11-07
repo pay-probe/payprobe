@@ -261,7 +261,7 @@ async def test_missing_connections_service_is_best_effort(monkeypatch):
 
 @pytest.fixture()
 def pos(monkeypatch):
-    """A connection bound to a POS host-style format: ASCII dialect, raw-binary
+    """A connection bound to an POS host-style format: ASCII dialect, raw-binary
     bitmap (``bitmap_encoding``), DE 24 added to the 1987 table."""
     from payprobe_common.iso8583 import ISO8583_1987
 

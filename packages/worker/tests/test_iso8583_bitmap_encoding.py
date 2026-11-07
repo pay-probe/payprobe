@@ -1,5 +1,5 @@
 """``bitmap_encoding`` on a Message Format: a raw-binary bitmap under an
-otherwise-ASCII dialect (a POS host). MTI, fixed fields and
+otherwise-ASCII dialect (a POS-host dialect). MTI, fixed fields and
 LL/LLLVAR length indicators stay ASCII; only the bitmap bytes change."""
 
 from __future__ import annotations

@@ -39,7 +39,7 @@ class MessageFormatDraft(BaseModel):
     def _check_wire_encoding(self):
         """An ISO 8583 definition's ``encoding`` (profile / axis dict) and
         ``bitmap_encoding`` (``hex`` | ``binary`` | ``ebcdic`` — a raw-binary
-        bitmap under an otherwise-ASCII dialect, the POS host shape)
+        bitmap under an otherwise-ASCII dialect, the shape some POS hosts use)
         are validated on save, so a misspelt value never binds as ASCII."""
         if self.protocol == "iso8583":
             try:

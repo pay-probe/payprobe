@@ -1,5 +1,5 @@
 """Message Format ``definition.bitmap_encoding`` (a raw-binary bitmap under an
-otherwise-ASCII dialect — the POS host shape): accepted and
+otherwise-ASCII dialect — the shape some POS hosts use): accepted and
 persisted on save, folded into the wire encoding, and a misspelt value is a
 422 rather than an ASCII bind."""
 

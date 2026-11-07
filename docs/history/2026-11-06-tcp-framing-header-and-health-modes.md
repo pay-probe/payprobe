@@ -68,7 +68,7 @@ but health check failed" after a 30 s wait.
   `health_check` (and drops them on save) — a host `npm run build` is needed
   for any portal change, so this is left for a follow-up; until then save such
   connections through the API / MCP `save_connection`.
-- The real-host run against the host port with
+- The real-host run against the POS host's port with
   `{"length_prefix_bytes": 4, "length_encoding": "ascii"}` + the host's own
   sign-on as `health_check.mode: message` — the dry run and journal exist to
   make that a five-minute comparison against the vendor client's bytes.

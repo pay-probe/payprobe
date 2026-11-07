@@ -219,7 +219,7 @@ POS_0200 = {"mti": "0200", "values": {
 
 @pytest.fixture()
 def pos_format(monkeypatch):
-    """A fake scenario-service holding the POS dialect — the 1987 table with
+    """A fake scenario-service holding the POS host dialect — the 1987 table with
     DE 24 (NII, n 3) added and DE 12 widened to YYMMDDhhmmss — in two copies:
     ``iso8583-1987-ascii-copy-1`` (all ASCII, as the registry copy is today) and
     ``pos-binary-bitmap`` (the same with ``bitmap_encoding: binary``)."""

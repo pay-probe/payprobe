@@ -1,6 +1,6 @@
 """A run step that names ``message_format_id`` packs with that registered
 dialect — its DE table, presence rules and wire encoding (``bitmap_encoding``)
-— not the connection's / stock 1987 table. Acceptance shape: the POS host 0200 (ASCII text, raw-binary bitmap, track-2 sentinels,
+— not the connection's / stock 1987 table. Acceptance shape: a POS-host 0200 (ASCII text, raw-binary bitmap, track-2 sentinels,
 space-padded DE 42) framed with the connection's 4-digit ASCII length."""
 import pytest
 
