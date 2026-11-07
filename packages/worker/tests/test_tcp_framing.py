@@ -208,7 +208,7 @@ async def test_responder_and_adapter_round_trip_over_ascii_framing():
 # -- FrameSpec: the one framing model, exact bytes per configuration ----------
 #
 # The reference frame throughout is the one a vendor POS-host client builds
-# against a BPC SmartVista host ("standard header GENERIC4, header type
+# against a POS host (vendor settings "standard header GENERIC4, header type
 # CHARDEC, bytes length 4, byte order Big"): a 4-character ASCII decimal
 # length equal to the payload length, followed by the payload. For a 16-byte
 # payload 0x00..0x0F that is ``"0016"`` + 16 bytes = 20 bytes on the wire.
@@ -223,7 +223,7 @@ def _spec(**framing_cfg) -> framing.FrameSpec:
 
 
 def test_client_frame_0016_plus_16_payload_bytes_is_20_bytes():
-    """The SmartVista client's test frame: ``0016`` + 0x00..0x0F."""
+    """The vendor client's test frame: ``0016`` + 0x00..0x0F."""
     spec = _spec(length_prefix_bytes=4, length_encoding="ascii")
     frame = spec.frame(PAYLOAD_00_0F)
     assert frame == b"0016" + PAYLOAD_00_0F

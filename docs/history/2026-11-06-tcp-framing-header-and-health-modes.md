@@ -5,10 +5,10 @@
 `POST /connections/test` and the new `POST /connections/frame-preview`
 (MCP `preview_connection_frame`). No ISO 8583 field table or Message Format
 changed; no saved connection was touched.
-**Trigger:** testing a BPC SmartVista POS host whose vendor client frames with
+**Trigger:** testing a POS host whose vendor client frames with
 "standard header GENERIC4, header type CHARDEC, bytes length 4, byte order
 Big" — a 4-character ASCII decimal length equal to the payload length (`"0016"`
-+ 16 bytes). The saved `svfe_pos` connection did not produce that framing,
++ 16 bytes). The saved `pos_host` connection did not produce that framing,
 several keys looked ignored, and *Test connection* reported only "connected,
 but health check failed" after a 30 s wait.
 
@@ -68,14 +68,14 @@ but health check failed" after a 30 s wait.
   `health_check` (and drops them on save) — a host `npm run build` is needed
   for any portal change, so this is left for a follow-up; until then save such
   connections through the API / MCP `save_connection`.
-- The real-host run against the SmartVista port with
+- The real-host run against the POS host's port with
   `{"length_prefix_bytes": 4, "length_encoding": "ascii"}` + the host's own
   sign-on as `health_check.mode: message` — the dry run and journal exist to
   make that a five-minute comparison against the vendor client's bytes.
 
 ## Addendum (same day): `bitmap_encoding` on a Message Format
 
-The SVFE / BPC8583POS host wants a raw-binary bitmap under an otherwise-ASCII
+The POS host wants a raw-binary bitmap under an otherwise-ASCII
 dialect. `definition.bitmap_encoding` (`hex` | `binary` | `ebcdic`) is the
 one-axis shorthand on top of `definition.encoding`
 (`payprobe_common.iso8583.definition_encoding` folds the two; validated on
@@ -89,7 +89,7 @@ as `72 30 05 80 20 C1 80 00`, MTI and LL/LLLVAR indicators ASCII
 (`worker/tests/test_iso8583_bitmap_encoding.py`, exact 153-byte hex pinned).
 The registry format `iso8583-1987-ascii-copy-1` was **not** found on the
 connected instance (404) and was not changed; set `bitmap_encoding: "binary"`
-in its definition and `message_format_id` on `svfe_pos` to use it.
+in its definition and `message_format_id` on `pos_host` to use it.
 
 The portal's Message Format editor gained a **Bitmap encoding** select next
 to Encoding (`message-formats.component`), and its save now carries the
@@ -121,7 +121,7 @@ and answers a 400 naming the DE for a payload it cannot pack (it was a 500
   DE 7/12/13 and an auto STAN count as present) — used by the frame preview,
   not by `execute`, so existing scenarios keep their behaviour.
 - Acceptance: `orchestrator/tests/test_step_message_format_binding.py` packs
-  the SVFE 0200 (DE 2,3,4,7,11,12,22,24,25,35,41,42,48,49; ASCII text, raw
+  the POS host 0200 (DE 2,3,4,7,11,12,22,24,25,35,41,42,48,49; ASCII text, raw
   bitmap `72 30 05 80 20 C1 80 00`, track-2 sentinels, 15-byte DE 42) and
   frames it with the connection's 4-digit ASCII prefix, byte for byte against
   a hand-written reference. Note `auto_fields` (default on) stamps DE 13 when

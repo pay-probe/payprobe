@@ -59,7 +59,7 @@ adapter instead.)
                                  //  "length": "ascii|bcd|binary|ebcdic", "mti": "ascii|bcd|ebcdic"}.
                                  // A bound Message Format's definition.encoding (⊕ its
                                  // definition.bitmap_encoding — "binary" = raw 8-byte bitmap
-                                 // under an otherwise-ASCII dialect, the BPC SmartVista POS
+                                 // under an otherwise-ASCII dialect, the shape some POS hosts
                                  // shape) is injected here by the orchestrator
                                  // (PAYPROBE_ISO8583_FORMAT_ENCODING=1) for simulators AND for
                                  // connections carrying "message_format_id".
@@ -68,7 +68,7 @@ adapter instead.)
     "length_prefix_bytes": 2,    // width of the length prefix (>= 1)
     "length_encoding": "binary", // "binary" integer | "ascii" zero-padded digits (0043) |
                                  // "bcd" packed digits (0x00 0x43). Vendor spelling "chardec"
-                                 // (BPC SmartVista: "header type CHARDEC") folds to "ascii".
+                                 // (vendor spelling "header type CHARDEC") folds to "ascii".
     "length_byte_order": "big",  // "big" | "little" (binary prefixes only)
     "length_includes_prefix": false, // does the length count its own prefix bytes?
     "length_includes_header": true,  // does the length count the TPDU header?
@@ -119,7 +119,7 @@ in particular is logged as ignored (the message header is `framing.header` /
 | Host says | `framing` |
 |---|---|
 | 2-byte binary length, big-endian (ISO 8583 norm) | `{}` (the default) |
-| "GENERIC4 / CHARDEC / 4 bytes / Big" — a 4-character ASCII decimal length equal to the payload length (BPC SmartVista POS host) | `{"length_prefix_bytes": 4, "length_encoding": "ascii"}` → `"0016"` + 16 payload bytes = 20 bytes on the wire |
+| "GENERIC4 / CHARDEC / 4 bytes / Big" — a 4-character ASCII decimal length equal to the payload length (a POS host's vendor client) | `{"length_prefix_bytes": 4, "length_encoding": "ascii"}` → `"0016"` + 16 payload bytes = 20 bytes on the wire |
 | …plus a fixed header `CDb4` counted in the length | `{"length_prefix_bytes": 4, "length_encoding": "ascii", "header": "CDb4"}` → `0020CDb4` + 16 bytes |
 | …the same header **not** counted | add `"length_includes_header": false` → `0016CDb4` + 16 bytes |
 | 5-byte TPDU `60 00 00 00 00` in front of the body | `{"tpdu_outbound_hex": "6000000000", "tpdu_bytes": 5}` |

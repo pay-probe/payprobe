@@ -238,8 +238,8 @@ def test_persists_to_file(tmp_path):
 
 def test_framing_length_encoding_is_validated():
     """The store accepts exactly the prefix encodings the worker frames with
-    (binary / ascii / bcd — ADR-0011) and folds vendor spellings: a BPC
-    SmartVista "CHARDEC" header is an ASCII digit prefix, stored as ``ascii``."""
+    (binary / ascii / bcd — ADR-0011) and folds vendor spellings: a vendor
+    "CHARDEC" header is an ASCII digit prefix, stored as ``ascii``."""
     import pytest
 
     from api.connection_store import ConnectionDraft

@@ -1,5 +1,5 @@
 """Message Format ``definition.bitmap_encoding`` (a raw-binary bitmap under an
-otherwise-ASCII dialect — the BPC SmartVista / SVFE POS shape): accepted and
+otherwise-ASCII dialect — the shape some POS hosts use): accepted and
 persisted on save, folded into the wire encoding, and a misspelt value is a
 422 rather than an ASCII bind."""
 
@@ -28,7 +28,7 @@ def _draft(f: dict, **definition_changes) -> dict:
 
 def test_bitmap_encoding_round_trips_on_a_cloned_ascii_dialect(client):
     cloned = client.post("/formats/iso8583-1987/clone",
-                         json={"name": "BPC8583POS / SVFE", "version": "1987"})
+                         json={"name": "POS host dialect", "version": "1987"})
     assert cloned.status_code == 201
     f = cloned.json()
     fid = f["id"]
@@ -55,7 +55,7 @@ def test_bad_bitmap_encoding_is_refused_on_save(client):
 
 
 def test_inspector_builds_through_a_registered_format_with_a_binary_bitmap(client):
-    cloned = client.post("/formats/iso8583-1987/clone", json={"name": "svfe", "version": "1"})
+    cloned = client.post("/formats/iso8583-1987/clone", json={"name": "pos", "version": "1"})
     f = cloned.json()
     fields = {**f["definition"]["fields"],
               "24": {"name": "NII", "len_type": "fixed", "length": 3, "type": "n"}}

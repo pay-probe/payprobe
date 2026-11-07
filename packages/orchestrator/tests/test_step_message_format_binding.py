@@ -1,7 +1,6 @@
 """A run step that names ``message_format_id`` packs with that registered
 dialect — its DE table, presence rules and wire encoding (``bitmap_encoding``)
-— not the connection's / stock 1987 table. Acceptance shape: the BPC
-SmartVista / SVFE POS 0200 (ASCII text, raw-binary bitmap, track-2 sentinels,
+— not the connection's / stock 1987 table. Acceptance shape: a POS-host 0200 (ASCII text, raw-binary bitmap, track-2 sentinels,
 space-padded DE 42) framed with the connection's 4-digit ASCII length."""
 import pytest
 
@@ -12,14 +11,14 @@ from worker.adapters.tcp.framing import FrameSpec
 from worker.adapters.tcp.protocols import make_protocol
 
 PAN = "5488350005706204"
-SVFE_FIELDS = {
+POS_FIELDS = {
     **ISO8583_1987,
     "12": {"name": "Local date & time (YYMMDDhhmmss)", "len_type": "fixed", "length": 12, "type": "n"},
     "24": {"name": "NII", "len_type": "fixed", "length": 3, "type": "n"},  # not in the stock table
     "42": {"name": "Card Acceptor ID Code", "len_type": "fixed", "length": 15, "type": "ans"},
 }
-SVFE_FORMAT = {"id": "bpc8583pos", "protocol": "iso8583", "definition": {
-    "encoding": "ascii", "bitmap_encoding": "binary", "fields": SVFE_FIELDS,
+POS_FORMAT = {"id": "pos-dialect", "protocol": "iso8583", "definition": {
+    "encoding": "ascii", "bitmap_encoding": "binary", "fields": POS_FIELDS,
     "presence": {"0200": {"mandatory": ["2", "3", "4", "11", "41", "49"]}},
 }}
 VALUES = {
@@ -54,9 +53,9 @@ REFERENCE_FRAME = f"{len(REFERENCE_BODY):04d}".encode() + REFERENCE_BODY
 
 
 def _registry(monkeypatch, formats=None, connections=None):
-    formats = formats if formats is not None else {"bpc8583pos": SVFE_FORMAT}
+    formats = formats if formats is not None else {"pos-dialect": POS_FORMAT}
     connections = connections if connections is not None else [{
-        "name": "svfe_pos", "adapter": "tcp", "protocol": "iso8583",
+        "name": "pos_host", "adapter": "tcp", "protocol": "iso8583",
         "host": "172.16.90.11", "port": 52000, "auto_fields": False,
         "framing": {"length_prefix_bytes": 4, "length_byte_order": "big",
                     "length_encoding": "ascii"},
@@ -77,7 +76,7 @@ def _registry(monkeypatch, formats=None, connections=None):
     monkeypatch.setattr(m, "_ISO8583_FORMAT_ENCODING", True)
 
 
-def _scenario(*payloads, connection="svfe_pos"):
+def _scenario(*payloads, connection="pos_host"):
     return [{"id": "sc", "steps": [
         {"id": f"s{i}", "kind": "action", "target": "tcp_iso8583", "action": "send_message",
          "config": {"connection": connection}, "payload": dict(p)}
@@ -92,13 +91,13 @@ async def _resolve(env, scs):
 async def test_step_with_message_format_id_only_packs_the_registered_dialect(monkeypatch):
     _registry(monkeypatch)
     env = {"mode": "real", "adapters": {}}
-    scs = _scenario({"message_format_id": "bpc8583pos", "mti": "0200", "values": VALUES})
+    scs = _scenario({"message_format_id": "pos-dialect", "mti": "0200", "values": VALUES})
     await _resolve(env, scs)
     step = scs[0]["steps"][0]
-    cfg = env["adapters"]["svfe_pos"]
+    cfg = env["adapters"]["pos_host"]
     # the dialect reached the step (table + presence) …
-    assert step["payload"]["fields"] == SVFE_FIELDS
-    assert step["payload"]["presence"] == SVFE_FORMAT["definition"]["presence"]
+    assert step["payload"]["fields"] == POS_FIELDS
+    assert step["payload"]["presence"] == POS_FORMAT["definition"]["presence"]
     # … and its wire encoding the socket the step runs on
     assert cfg["encoding"]["bitmap"] == "binary" and cfg["encoding"]["text"] == "ascii"
     # pack exactly as the worker will: the protocol built from the resolved
@@ -138,10 +137,10 @@ async def test_presence_rules_and_field_classes_come_from_the_format(monkeypatch
     _registry(monkeypatch)
     env = {"mode": "real", "adapters": {}}
     short = {k: v for k, v in VALUES.items() if k not in ("41", "49")}
-    scs = _scenario({"message_format_id": "bpc8583pos", "mti": "0200",
+    scs = _scenario({"message_format_id": "pos-dialect", "mti": "0200",
                      "values": {**short, "35": f"{PAN}?x=2912101"}})
     await _resolve(env, scs)
-    issues = make_protocol(env["adapters"]["svfe_pos"]).check("send_message", scs[0]["steps"][0]["payload"])
+    issues = make_protocol(env["adapters"]["pos_host"]).check("send_message", scs[0]["steps"][0]["payload"])
     assert "DE35 must be track 2/3 data (digits, '=', 'D'; ';' … '?' sentinels allowed)" in issues
     assert "DE41 mandatory for MTI 0200 but missing" in issues
     assert "DE49 mandatory for MTI 0200 but missing" in issues
@@ -150,36 +149,36 @@ async def test_presence_rules_and_field_classes_come_from_the_format(monkeypatch
 async def test_inline_fields_on_the_step_win_over_the_format(monkeypatch):
     _registry(monkeypatch)
     env = {"mode": "real", "adapters": {}}
-    mine = {"2": SVFE_FIELDS["2"], "11": SVFE_FIELDS["11"]}
-    scs = _scenario({"message_format_id": "bpc8583pos", "mti": "0200", "fields": mine,
+    mine = {"2": POS_FIELDS["2"], "11": POS_FIELDS["11"]}
+    scs = _scenario({"message_format_id": "pos-dialect", "mti": "0200", "fields": mine,
                      "values": {"2": PAN, "11": "000005"}})
     await _resolve(env, scs)
     assert scs[0]["steps"][0]["payload"]["fields"] == mine
-    assert env["adapters"]["svfe_pos"]["encoding"]["bitmap"] == "binary"  # the socket still binds
+    assert env["adapters"]["pos_host"]["encoding"]["bitmap"] == "binary"  # the socket still binds
 
 
 async def test_adapter_with_a_disagreeing_encoding_is_refused(monkeypatch):
     from fastapi import HTTPException
 
     _registry(monkeypatch, connections=[{
-        "name": "svfe_pos", "adapter": "tcp", "protocol": "iso8583", "host": "h", "port": 1,
+        "name": "pos_host", "adapter": "tcp", "protocol": "iso8583", "host": "h", "port": 1,
         "encoding": "ascii"}])
     with pytest.raises(HTTPException) as exc:
         await _resolve({"mode": "real", "adapters": {}},
-                       _scenario({"message_format_id": "bpc8583pos", "mti": "0200", "values": {}}))
+                       _scenario({"message_format_id": "pos-dialect", "mti": "0200", "values": {}}))
     assert exc.value.status_code == 400
-    assert "step 's0' on adapter 'svfe_pos'" in exc.value.detail and "keep one" in exc.value.detail
+    assert "step 's0' on adapter 'pos_host'" in exc.value.detail and "keep one" in exc.value.detail
 
 
 async def test_two_formats_with_different_encodings_on_one_socket_are_refused(monkeypatch):
     from fastapi import HTTPException
 
     ascii_fmt = {"id": "plain", "protocol": "iso8583",
-                 "definition": {"encoding": "ascii", "fields": SVFE_FIELDS}}
-    _registry(monkeypatch, formats={"bpc8583pos": SVFE_FORMAT, "plain": ascii_fmt})
+                 "definition": {"encoding": "ascii", "fields": POS_FIELDS}}
+    _registry(monkeypatch, formats={"pos-dialect": POS_FORMAT, "plain": ascii_fmt})
     with pytest.raises(HTTPException) as exc:
         await _resolve({"mode": "real", "adapters": {}},
-                       _scenario({"message_format_id": "bpc8583pos", "mti": "0200", "values": {}},
+                       _scenario({"message_format_id": "pos-dialect", "mti": "0200", "values": {}},
                                  {"message_format_id": "plain", "mti": "0200", "values": {}}))
     assert exc.value.status_code == 400 and "different wire encodings" in exc.value.detail
 
@@ -187,9 +186,9 @@ async def test_two_formats_with_different_encodings_on_one_socket_are_refused(mo
 async def test_two_steps_on_the_same_format_share_the_socket_fine(monkeypatch):
     _registry(monkeypatch)
     env = {"mode": "real", "adapters": {}}
-    await _resolve(env, _scenario({"message_format_id": "bpc8583pos", "mti": "0200", "values": {}},
-                                  {"message_format_id": "bpc8583pos", "mti": "0800", "values": {}}))
-    assert env["adapters"]["svfe_pos"]["encoding"]["bitmap"] == "binary"
+    await _resolve(env, _scenario({"message_format_id": "pos-dialect", "mti": "0200", "values": {}},
+                                  {"message_format_id": "pos-dialect", "mti": "0800", "values": {}}))
+    assert env["adapters"]["pos_host"]["encoding"]["bitmap"] == "binary"
 
 
 async def test_unknown_format_on_a_step_is_a_404_not_a_silent_fallback(monkeypatch):
@@ -208,4 +207,4 @@ async def test_steps_without_a_format_are_untouched(monkeypatch):
     scs = _scenario({"mti": "0200", "values": {"2": PAN}})
     await _resolve(env, scs)
     assert "fields" not in scs[0]["steps"][0]["payload"]
-    assert "encoding" not in env["adapters"]["svfe_pos"]
+    assert "encoding" not in env["adapters"]["pos_host"]

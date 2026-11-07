@@ -204,32 +204,32 @@ def test_frame_preview_rejects_a_bad_framing_key_with_400():
 
 # -- frame preview: a step payload against its dialect ----------------------
 
-SVFE_CONFIG = {
+POS_CONFIG = {
     "adapter": "tcp", "protocol": "iso8583", "host": "172.16.90.11", "port": 52000,
     "mode": "outbound",
     "framing": {"length_prefix_bytes": 4, "length_byte_order": "big",
                 "length_encoding": "ascii", "encoding": "ascii"},
     "health_check": {"mode": "connect"}, "sign_on": {"enabled": False},
 }
-SVFE_0200 = {"mti": "0200", "values": {
+POS_0200 = {"mti": "0200", "values": {
     "2": "5488350005706204", "3": "000000", "4": "000000000200", "7": "0303083731",
     "11": "000005", "12": "260303083731", "22": "020", "24": "200", "25": "00",
     "41": "POS20001", "42": "GCPOS13        ", "49": "981"}}
 
 
 @pytest.fixture()
-def svfe_format(monkeypatch):
-    """A fake scenario-service holding the SVFE dialect — the 1987 table with
+def pos_format(monkeypatch):
+    """A fake scenario-service holding the POS host dialect — the 1987 table with
     DE 24 (NII, n 3) added and DE 12 widened to YYMMDDhhmmss — in two copies:
     ``iso8583-1987-ascii-copy-1`` (all ASCII, as the registry copy is today) and
-    ``svfe-binary-bitmap`` (the same with ``bitmap_encoding: binary``)."""
+    ``pos-binary-bitmap`` (the same with ``bitmap_encoding: binary``)."""
     fields = {**iso8583.DEFAULT_FIELDS,
               "12": {"name": "Local date & time", "len_type": "fixed", "length": 12, "type": "n"},
               "24": {"name": "NII", "len_type": "fixed", "length": 3, "type": "n"}}
     formats = {
         "iso8583-1987-ascii-copy-1": {"id": "iso8583-1987-ascii-copy-1", "protocol": "iso8583",
                                       "definition": {"encoding": "ascii", "fields": fields}},
-        "svfe-binary-bitmap": {"id": "svfe-binary-bitmap", "protocol": "iso8583",
+        "pos-binary-bitmap": {"id": "pos-binary-bitmap", "protocol": "iso8583",
                                "definition": {"encoding": "ascii", "bitmap_encoding": "binary",
                                               "fields": fields}},
     }
@@ -247,21 +247,21 @@ def svfe_format(monkeypatch):
 
 #: The 0200 above, byte for byte, under the ASCII dialect (DE 13 is not
 #: stamped: auto_fields is off in the preview so the frame is reproducible).
-SVFE_0200_BODY_ASCII = (
+POS_0200_BODY_ASCII = (
     b"0200" b"7230058000C08000"  # no DE 35 / 48 in this set: bytes 5-6 = 00 C0
     b"165488350005706204" b"000000" b"000000000200" b"0303083731" b"000005"
     b"260303083731" b"020" b"200" b"00" b"POS20001" b"GCPOS13        " b"981"
 )
 
 
-async def test_frame_preview_of_the_0200_payload_against_the_svfe_format(svfe_format):
+async def test_frame_preview_of_the_0200_payload_against_the_pos_format(pos_format):
     """The reproduced request, exactly as sent, plus ``message_format_id``."""
     out = await m.frame_preview(m.FramePreviewRequest(
-        config={**SVFE_CONFIG, "auto_fields": False},
-        action="send_message", payload=SVFE_0200,
+        config={**POS_CONFIG, "auto_fields": False},
+        action="send_message", payload=POS_0200,
         message_format_id="iso8583-1987-ascii-copy-1"))
     body = bytes.fromhex(out["body_hex"])
-    assert body == SVFE_0200_BODY_ASCII and len(body) == 118
+    assert body == POS_0200_BODY_ASCII and len(body) == 118
     assert out["prefix_hex"] == "30313138" and out["declared_length"] == 118  # "0118"
     assert out["total_bytes"] == 122
     assert out["hex"] == (
@@ -276,40 +276,40 @@ async def test_frame_preview_of_the_0200_payload_against_the_svfe_format(svfe_fo
     # the same request through the HTTP surface, with the id in the payload
     with _client() as c:
         r = c.post("/connections/frame-preview", json={
-            "config": {**SVFE_CONFIG, "auto_fields": False}, "action": "send_message",
-            "payload": {**SVFE_0200, "message_format_id": "iso8583-1987-ascii-copy-1"}})
+            "config": {**POS_CONFIG, "auto_fields": False}, "action": "send_message",
+            "payload": {**POS_0200, "message_format_id": "iso8583-1987-ascii-copy-1"}})
     assert r.status_code == 200, r.text
     assert r.json()["hex"] == out["hex"]
 
 
-async def test_frame_preview_with_a_binary_bitmap_format(svfe_format):
+async def test_frame_preview_with_a_binary_bitmap_format(pos_format):
     """With ``bitmap_encoding: binary`` on the format the bitmap goes out as 8
     raw bytes — once the connection's legacy ``framing.encoding`` text codec is
     out of the way (ADR-0011 refuses a config whose own encoding disagrees
     with the bound format's rather than silently picking one)."""
-    cfg = {**SVFE_CONFIG, "auto_fields": False,
-           "framing": {k: v for k, v in SVFE_CONFIG["framing"].items() if k != "encoding"}}
+    cfg = {**POS_CONFIG, "auto_fields": False,
+           "framing": {k: v for k, v in POS_CONFIG["framing"].items() if k != "encoding"}}
     out = await m.frame_preview(m.FramePreviewRequest(
-        config=cfg, action="send_message", payload=SVFE_0200,
-        message_format_id="svfe-binary-bitmap"))
+        config=cfg, action="send_message", payload=POS_0200,
+        message_format_id="pos-binary-bitmap"))
     body = bytes.fromhex(out["body_hex"])
     assert body[:4] == b"0200" and body[4:12] == bytes.fromhex("7230058000C08000")
-    assert body[12:] == SVFE_0200_BODY_ASCII[20:]  # everything after the bitmap unchanged
+    assert body[12:] == POS_0200_BODY_ASCII[20:]  # everything after the bitmap unchanged
     assert out["declared_length"] == 110 and out["prefix_hex"] == "30313130"
     # the reproduced config still carries framing.encoding: "ascii" -> refused, named
     with _client() as c:
         r = c.post("/connections/frame-preview", json={
-            "config": SVFE_CONFIG, "action": "send_message", "payload": SVFE_0200,
-            "message_format_id": "svfe-binary-bitmap"})
+            "config": POS_CONFIG, "action": "send_message", "payload": POS_0200,
+            "message_format_id": "pos-binary-bitmap"})
     assert r.status_code == 400
     assert "declares encoding" in r.json()["detail"] and "keep one" in r.json()["detail"]
 
 
-def test_frame_preview_without_the_format_is_a_400_naming_the_de(svfe_format):
+def test_frame_preview_without_the_format_is_a_400_naming_the_de(pos_format):
     """The reproduced 500: DE 24 is not in the stock 1987 table."""
     with _client() as c:
         r = c.post("/connections/frame-preview", json={
-            "config": SVFE_CONFIG, "action": "send_message", "payload": SVFE_0200})
+            "config": POS_CONFIG, "action": "send_message", "payload": POS_0200})
     assert r.status_code == 400, r.text
     detail = r.json()["detail"]
     assert "DE24 not defined in the field table" in detail
@@ -317,12 +317,12 @@ def test_frame_preview_without_the_format_is_a_400_naming_the_de(svfe_format):
     assert "pass message_format_id" in detail
 
 
-def test_frame_preview_reports_length_and_charset_errors_with_the_format(svfe_format):
-    bad = {"mti": "0200", "values": {**SVFE_0200["values"], "4": "00000000020", "49": "98A"}}
+def test_frame_preview_reports_length_and_charset_errors_with_the_format(pos_format):
+    bad = {"mti": "0200", "values": {**POS_0200["values"], "4": "00000000020", "49": "98A"}}
     bad["values"]["4"] = "0000000002A"  # 11 chars: _coerce zero-fills only digits
     with _client() as c:
         r = c.post("/connections/frame-preview", json={
-            "config": SVFE_CONFIG, "action": "send_message", "payload": bad,
+            "config": POS_CONFIG, "action": "send_message", "payload": bad,
             "message_format_id": "iso8583-1987-ascii-copy-1"})
     assert r.status_code == 400
     detail = r.json()["detail"]
@@ -331,9 +331,9 @@ def test_frame_preview_reports_length_and_charset_errors_with_the_format(svfe_fo
     assert detail.endswith("(format 'iso8583-1987-ascii-copy-1')")
 
 
-def test_frame_preview_unknown_format_is_a_404(svfe_format):
+def test_frame_preview_unknown_format_is_a_404(pos_format):
     with _client() as c:
         r = c.post("/connections/frame-preview", json={
-            "config": SVFE_CONFIG, "action": "send_message", "payload": SVFE_0200,
+            "config": POS_CONFIG, "action": "send_message", "payload": POS_0200,
             "message_format_id": "nope"})
     assert r.status_code == 404 and "no message format 'nope'" in r.json()["detail"]

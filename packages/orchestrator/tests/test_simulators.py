@@ -811,10 +811,10 @@ def test_saved_simulator_secrets_are_encrypted_at_rest(tmp_path, monkeypatch):
 async def test_simulator_binds_a_formats_bitmap_encoding(monkeypatch):
     """``definition.bitmap_encoding`` reaches the responder as the bitmap axis
     of its wire encoding, everything else staying ASCII."""
-    _registry(monkeypatch, fmt={"id": "svfe", "protocol": "iso8583", "definition": {
+    _registry(monkeypatch, fmt={"id": "pos", "protocol": "iso8583", "definition": {
         "encoding": "ascii", "bitmap_encoding": "binary", "fields": {}}})
     monkeypatch.setattr(m, "_ISO8583_FORMAT_ENCODING", True)
     cfg = await m._resolve_simulator_config(
-        {"protocol": "iso8583", "port": 7014, "message_format_id": "svfe"})
+        {"protocol": "iso8583", "port": 7014, "message_format_id": "pos"})
     assert cfg["encoding"]["bitmap"] == "binary" and cfg["encoding"]["numeric"] == "ascii"
     assert m._responder_for(cfg).wire_encoding["bitmap"] == "binary"

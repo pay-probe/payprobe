@@ -1,5 +1,5 @@
 """``bitmap_encoding`` on a Message Format: a raw-binary bitmap under an
-otherwise-ASCII dialect (BPC SmartVista / SVFE POS host). MTI, fixed fields and
+otherwise-ASCII dialect (a POS-host dialect). MTI, fixed fields and
 LL/LLLVAR length indicators stay ASCII; only the bitmap bytes change."""
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ VALUES = {
     "48": "POSDATA",
     "49": "981",
 }
-SVFE = {"encoding": "ascii", "bitmap_encoding": "binary", "fields": FIELDS}
+POS_DIALECT = {"encoding": "ascii", "bitmap_encoding": "binary", "fields": FIELDS}
 EXPECTED_BITMAP = bytes.fromhex("72 30 05 80 20 C1 80 00".replace(" ", ""))
 
 #: The whole 0200, recorded from the codec on 2026-11-06 and checked by hand:
@@ -63,7 +63,7 @@ EXPECTED_HEX = (
 
 
 def test_definition_encoding_folds_bitmap_encoding_over_the_profile():
-    assert shared.definition_encoding(SVFE) == {
+    assert shared.definition_encoding(POS_DIALECT) == {
         "bitmap": "binary",
         "numeric": "ascii",
         "text": "ascii",
@@ -89,8 +89,8 @@ def test_definition_encoding_folds_bitmap_encoding_over_the_profile():
         shared.definition_encoding({"bitmap_encoding": "raw"})
 
 
-def test_svfe_0200_bitmap_is_raw_binary_while_everything_else_stays_ascii():
-    wire = shared.pack("0200", VALUES, FIELDS, shared.definition_encoding(SVFE))
+def test_pos_0200_bitmap_is_raw_binary_while_everything_else_stays_ascii():
+    wire = shared.pack("0200", VALUES, FIELDS, shared.definition_encoding(POS_DIALECT))
     assert wire[:4] == b"0200"  # MTI ASCII
     assert wire[4:12] == EXPECTED_BITMAP  # 72 30 05 80 20 C1 80 00
     assert wire[12:14] == b"16"  # DE 2 LLVAR length indicator ASCII
@@ -103,8 +103,8 @@ def test_svfe_0200_bitmap_is_raw_binary_while_everything_else_stays_ascii():
     assert ascii_wire[:4] + ascii_wire[20:] == wire[:4] + wire[12:]
 
 
-def test_svfe_0200_round_trips_and_a_secondary_bitmap_is_binary_too():
-    enc = shared.definition_encoding(SVFE)
+def test_pos_0200_round_trips_and_a_secondary_bitmap_is_binary_too():
+    enc = shared.definition_encoding(POS_DIALECT)
     parsed = shared.unpack(shared.pack("0200", VALUES, FIELDS, enc), FIELDS, enc)
     assert parsed["mti"] == "0200"
     assert parsed["de_list"] == [2, 3, 4, 7, 11, 12, 22, 24, 25, 35, 41, 42, 48, 49]

@@ -127,7 +127,7 @@ def definition_encoding(definition: dict | None) -> Any:
     ``definition.encoding`` is the profile (``"ascii"`` default, ``"binary"``,
     or an axis dict). ``definition.bitmap_encoding`` (``hex`` | ``binary`` |
     ``ebcdic``) is the one-axis shorthand hosts most often need on top of an
-    otherwise-ASCII dialect — e.g. BPC SmartVista's POS interface: an 8-byte
+    otherwise-ASCII dialect — e.g. a POS host interface: an 8-byte
     raw-binary bitmap while the MTI, fixed fields and LL/LLLVAR length
     indicators stay ASCII. When it is set the result is the full axis dict with
     the bitmap axis replaced; otherwise ``definition.encoding`` is returned as

@@ -8,8 +8,8 @@ A frame is ``length-prefix || (tpdu) || (header) || body``. The prefix is
   endian. Two bytes big-endian is the ISO 8583 norm.
 * ``ascii``: zero-padded decimal digits, one per prefix byte, so a 4-byte prefix
   reads ``0043``. Some hosts and older switches frame this way; byte order does
-  not apply. Vendor configuration screens call this ``CHARDEC`` (BPC SmartVista:
-  "standard header GENERIC4, header type CHARDEC, bytes length 4"), which is
+  not apply. Vendor configuration screens call this ``CHARDEC``
+  ("standard header GENERIC4, header type CHARDEC, bytes length 4"), which is
   accepted as an alias and folded to ``ascii``.
 * ``bcd``: zero-padded decimal digits packed two per byte, so a 2-byte prefix
   reads ``0x00 0x43`` for 43. Hosts that pack the body as BCD usually frame this
@@ -39,7 +39,7 @@ from dataclasses import dataclass, replace
 LENGTH_ENCODINGS = ("binary", "ascii", "bcd")
 
 #: Vendor / legacy spellings folded to the canonical name. ``chardec`` is the
-#: BPC SmartVista term for "characters, decimal" — an ASCII digit prefix.
+#: vendor term for "characters, decimal" — an ASCII digit prefix.
 LENGTH_ENCODING_ALIASES = {
     "chardec": "ascii",
     "char": "ascii",
