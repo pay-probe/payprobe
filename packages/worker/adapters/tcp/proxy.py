@@ -326,6 +326,7 @@ class TcpProxy(TcpResponder):
                 prefix_bytes=self.prefix_bytes,
                 byte_order=self.byte_order,
                 length_encoding=self.length_encoding,
+                frame_spec=self.frame_spec,
             )
         dst_writer.write(frame)
         await dst_writer.drain()
@@ -357,6 +358,7 @@ class TcpProxy(TcpResponder):
                 prefix_bytes=self.prefix_bytes,
                 byte_order=self.byte_order,
                 length_encoding=self.length_encoding,
+                frame_spec=self.frame_spec,
             )
         client_writer.write(frame)
         await client_writer.drain()

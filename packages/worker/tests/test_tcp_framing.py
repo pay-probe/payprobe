@@ -63,8 +63,10 @@ def test_normalise_defaults_to_binary_and_refuses_unknown():
     assert framing.normalise_length_encoding(None) == "binary"
     assert framing.normalise_length_encoding("ASCII") == "ascii"
     assert framing.normalise_length_encoding("bcd") == "bcd"
+    assert framing.normalise_length_encoding("hex") == "hex"
+    assert framing.normalise_length_encoding("CHARHEX") == "hex"
     with pytest.raises(ValueError):
-        framing.normalise_length_encoding("hex")
+        framing.normalise_length_encoding("octal")
 
 
 def test_chaos_bad_length_keeps_the_ascii_prefix_digits():

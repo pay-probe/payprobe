@@ -678,19 +678,19 @@ class TcpAdapter(BaseAdapter):
     async def _read_frame(self) -> tuple[bytes, bytes] | None:
         """One inbound frame as ``(prefix + fixed blocks, body)``; ``None`` on
         an empty frame."""
-        prefix = await self._reader.readexactly(self.frame_spec.prefix_bytes)
         try:
-            remaining = self.frame_spec.remaining_after_prefix(prefix)
+            frame = await self.frame_spec.read_frame(self._reader)
         except ValueError as exc:
-            self.journal.record("rx", prefix, f"unreadable length prefix: {exc}")
+            # unreadable length prefix / wrong trailer / bad LRC — a framing
+            # mismatch with the peer, journalled before the connection drops
+            self.journal.record("rx", b"", f"framing mismatch: {exc}")
             raise
-        if remaining <= 0:
-            self.journal.record("rx", prefix, "empty frame")
+        if frame is None:
+            self.journal.record("rx", b"", "empty frame")
             return None
-        data = await self._reader.readexactly(remaining)
-        fixed, body = self.frame_spec.strip_inbound(data)
-        self.journal.record("rx", prefix + data)
-        return prefix + fixed, body
+        envelope, body = frame
+        self.journal.record("rx", envelope + body)
+        return envelope, body
 
     def _dispatch(self, parsed: dict, raw: bytes = b"") -> None:
         key = self.protocol.correlation_key(parsed)

@@ -9,7 +9,7 @@ Tables and Message Format registries::
 
     {"card_pools":     {name: {description, cards: [...]}},
      "bin_ranges":     {name: {description, bin, length, brand}},
-     "terminal_pools": {name: {description, terminals: [...]}},
+     "terminal_pools": {name: {description, terminals: [id | {id, merchant, ...}]}},
      "keys":           {name: {description, type, value}}}
 
 Key material is **secret**: encrypted at rest via :class:`SecretBox` (same opt-in
@@ -112,8 +112,25 @@ class BinRange(BinRangeDraft):
 
 
 class TerminalPoolDraft(BaseModel):
+    #: A pool entry is either a bare terminal-id string or a structured
+    #: terminal record ``{id, merchant, currency, location, type,
+    #: pinblock_format, ...}`` — one "device" object per POS, the way terminal
+    #: test tools keep it, so a single transaction carries a self-consistent
+    #: terminal (DE 41 + its DE 42 / DE 49) via the worker's ``${terminal.*}``
+    #: generator namespace. Key material never goes in here: reference a key in
+    #: the key vault by name (``"tpk": "lane_tpk"``).
     description: str = ""
-    terminals: list[str] = Field(default_factory=list)
+    terminals: list[Union[str, dict[str, Any]]] = Field(default_factory=list)
+
+    @field_validator("terminals")
+    @classmethod
+    def _records_have_an_id(cls, v):
+        for i, t in enumerate(v):
+            if isinstance(t, dict) and not str(
+                t.get("id") or t.get("tid") or t.get("terminal_id") or ""
+            ).strip():
+                raise ValueError(f"terminals[{i}]: a terminal record needs an 'id'")
+        return v
 
 
 class TerminalPool(TerminalPoolDraft):

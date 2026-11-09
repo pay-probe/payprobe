@@ -441,7 +441,7 @@ async def test_length_encoding_mismatch_fails_loudly_not_silently():
     with pytest.raises(ValueError, match="not decimal digits"):
         framing.decode_length((43).to_bytes(2, "big"), "big", "ascii")
     with pytest.raises(ValueError, match="length_encoding"):
-        framing.normalise_length_encoding("hex")  # bcd is valid since ADR-0011
+        framing.normalise_length_encoding("octal")  # bcd (ADR-0011) and hex are valid
 
 
 # -- health-check modes, wire journal, dry run ------------------------------
@@ -712,9 +712,9 @@ def test_preview_frame_is_a_dry_run_that_needs_no_socket():
 
 def test_preview_frame_refuses_a_framing_typo_instead_of_binding_the_default():
     adapter = TcpAdapter(
-        {"host": "h", "port": 1, "framing": {"length_encoding": "hex"}, "sign_on": {}}
+        {"host": "h", "port": 1, "framing": {"length_encoding": "octal"}, "sign_on": {}}
     )
-    with pytest.raises(ValueError, match="length_encoding must be one of binary, ascii, bcd"):
+    with pytest.raises(ValueError, match="length_encoding must be one of binary, ascii, bcd, hex"):
         adapter.preview_frame("send_0200", {"amount": 1})
 
 

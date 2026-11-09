@@ -1,0 +1,17 @@
+{
+  "description": "Magnetic-stripe test cards (PAN + track 2 as the stripe carries it). Replace with cards your issuer test environment knows.",
+  "cards": [
+    {
+      "pan": "5413330089600010",
+      "expiry": "3003",
+      "track2": "5413330089600010=30032011000000000000",
+      "type": "mastercard"
+    },
+    {
+      "pan": "4761340000000019",
+      "expiry": "3003",
+      "track2": "4761340000000019=30032011000000000000",
+      "type": "visa"
+    }
+  ]
+}

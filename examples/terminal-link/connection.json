@@ -1,0 +1,59 @@
+{
+  "_comment": "A POS terminal's link to the host, as a PayProbe connection. The terminal is the CLIENT (mode outbound: the worker dials host:port). The wire framing is the preset 'ascii4' — a 4-character ASCII-decimal length counting only the body — which is what terminal test tools print as the link-level string 'CHARDEC:false:false:BIG:4:' (paste that into framing.link_level instead if you prefer). The dialect is bound ON THE CONNECTION (message_format_id): the reader decodes every reply on the socket with the format's field table and wire encoding, so a dialect with non-standard lengths (3-digit DE 39 here) must be bound here, not only on a step. Replace host/port with your processing host.",
+  "connections": {
+    "pos_terminal_link": {
+      "adapter": "tcp",
+      "protocol": "iso8583",
+      "host": "192.0.2.10",
+      "port": 52000,
+      "mode": "outbound",
+      "description": "POS terminal → host link (ASCII ISO 8583, 4-digit ASCII length prefix)",
+      "message_format_id": "pos-terminal-link-ascii-fields-binary-bitmap-1",
+      "framing": {
+        "preset": "ascii4"
+      },
+      "encoding": {
+        "bitmap": "binary",
+        "numeric": "ascii",
+        "text": "ascii",
+        "binary": "raw",
+        "length": "ascii"
+      },
+      "response_timeout_sec": 10,
+      "connect_timeout_sec": 10,
+      "correlation": {
+        "field": "11",
+        "match_mti": true
+      },
+      "sign_on": {
+        "enabled": false
+      },
+      "health_check": {
+        "mode": "connect"
+      },
+      "keepalive": {
+        "enabled": false
+      },
+      "reconnect": {
+        "enabled": true,
+        "backoff_initial_sec": 0.5,
+        "backoff_max_sec": 30
+      }
+    },
+    "pos_terminal_link_stx_etx": {
+      "extends": "pos_terminal_link",
+      "port": 52001,
+      "description": "Same dialect over a serial-style STX/ETX/LRC envelope (no length prefix)",
+      "framing": {
+        "preset": "stx_etx_lrc"
+      },
+      "encoding": {
+        "bitmap": "hex",
+        "numeric": "ascii",
+        "text": "ascii",
+        "binary": "hex",
+        "length": "ascii"
+      }
+    }
+  }
+}

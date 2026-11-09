@@ -27,6 +27,28 @@ meaningless. The supported tokens:
     ${pool.terminal}         -> next terminal id from the run's terminal pool
     ${pool.card}             -> next entry from the run's card pool
 
+A *terminal pool* entry may likewise be a bare terminal-id string or a structured
+record — the way terminal test tools keep one "device" object per POS and fill
+DE 41 / DE 42 / DE 49 from it instead of typing them into every message::
+
+    {"id": "POS20001", "merchant": "MERCH01", "currency": "981", "type": "POS",
+     "location": "Main St. 11", "pinblock_format": "01", "tpk": "<key name>", ...}
+
+The ``terminal`` namespace exposes one terminal *bound for the whole transaction*
+(a fresh one per transaction, round-robin), so the terminal id, merchant id and
+currency a message carries all describe the same device:
+
+    ${terminal.id}           -> the bound terminal's id (DE 41)
+    ${terminal.merchant}     -> its merchant / card-acceptor id (DE 42; "" if unset)
+    ${terminal.currency}     -> its currency code (DE 49; "" if unset)
+    ${terminal.location}     -> free-text address / name (DE 43)
+    ${terminal.type}         -> pos | epos | atm | ... (free text)
+    ${terminal.pinblock_format} -> the PIN block format this device uses
+    ${terminal.<any key>}    -> any other field of the record (e.g. a key *name*
+                                such as tpk / tak — keep key material in the key
+                                vault and reference it by name, never inline)
+    ${terminal.seq}          -> 1-based index of the terminal bound to this transaction
+
 A *card pool* entry may be a bare PAN string or a structured record::
 
     {"pan": "...", "expiry": "2812", "cvv": "123", "type": "visa", "track2": "..."}
@@ -61,7 +83,7 @@ from typing import Any
 #: Reserved leading tokens that route a ``${...}`` reference to a generator
 #: rather than to a prior step's output. A scenario step must not be named after
 #: one of these.
-GENERATOR_NAMESPACES = frozenset({"rand", "seq", "uuid", "now", "pool", "card"})
+GENERATOR_NAMESPACES = frozenset({"rand", "seq", "uuid", "now", "pool", "card", "terminal"})
 
 #: Default 16-hex DUKPT initial-key-id base for ``${seq.ksn}`` (TestPay's value).
 _DEFAULT_KSN_BASE = "3039505912345678"
@@ -131,7 +153,9 @@ class GeneratorContext:
     ) -> None:
         self._rng = random.Random(seed)
         self._seq: dict[str, int] = {}
-        self._terminals = [str(t) for t in (terminals or [])]
+        #: Terminal entries as given — bare id strings or structured records;
+        #: ``${pool.terminal}`` yields the id either way.
+        self._terminals = list(terminals or [])
         self._cards = list(cards or [])
         self._ti = 0
         self._ci = 0
@@ -142,6 +166,10 @@ class GeneratorContext:
         self._txn = 0
         self._current_card: Any = None
         self._current_card_seq = 0
+        #: same for the transaction-bound terminal (``${terminal.*}``)
+        self._terminal_i = 0
+        self._current_terminal: Any = None
+        self._current_terminal_seq = 0
 
     @staticmethod
     def is_generator(expr: str) -> bool:
@@ -169,6 +197,8 @@ class GeneratorContext:
             return self._pool(fname, expr)
         if ns == "card":
             return self._card(fname, expr)
+        if ns == "terminal":
+            return self._terminal(fname, expr)
         raise GeneratorError(expr)  # pragma: no cover - unreachable
 
     def new_transaction(self) -> None:
@@ -186,6 +216,13 @@ class GeneratorContext:
         else:
             self._current_card = None
             self._current_card_seq = 0
+        if self._terminals:
+            self._current_terminal = self._terminals[self._terminal_i % len(self._terminals)]
+            self._current_terminal_seq = self._terminal_i + 1
+            self._terminal_i += 1
+        else:
+            self._current_terminal = None
+            self._current_terminal_seq = 0
 
     # -- namespace handlers --------------------------------------------------
 
@@ -250,7 +287,7 @@ class GeneratorContext:
                 raise GeneratorError("pool.terminal: terminal pool is empty")
             v = self._terminals[self._ti % len(self._terminals)]
             self._ti += 1
-            return v
+            return self._terminal_record(v)["id"]
         if fname == "card":
             if not self._cards:
                 raise GeneratorError("pool.card: card pool is empty")
@@ -301,6 +338,59 @@ class GeneratorContext:
             # minimal Track 2: PAN, field separator 'D', expiry, service code 101
             track2 = f"{pan}D{expiry}101"
         return {"pan": pan, "expiry": expiry, "cvv": cvv, "brand": brand, "track2": track2}
+
+    def _terminal(self, fname: str, expr: str) -> Any:
+        """Resolve a field of the transaction-bound terminal (binds lazily to
+        the first entry when :meth:`new_transaction` was never called)."""
+        if self._current_terminal is None and self._txn == 0:
+            self.new_transaction()
+        if self._current_terminal is None:
+            raise GeneratorError("terminal.*: terminal pool is empty")
+        rec = self._terminal_record(self._current_terminal)
+        if fname in ("id", "tid", "terminal_id", ""):
+            return rec["id"]
+        if fname in ("merchant", "mid", "merchant_id"):
+            return rec["merchant"]
+        if fname == "seq":
+            return self._current_terminal_seq
+        if fname in rec:
+            return rec[fname]
+        raise GeneratorError(
+            f"{expr}: the bound terminal record has no field {fname!r} "
+            f"(it has: {', '.join(sorted(rec))})"
+        )
+
+    @staticmethod
+    def _terminal_record(terminal: Any) -> dict[str, Any]:
+        """Normalise a pool entry (id string *or* dict) into a record with at
+        least ``id``, ``merchant``, ``currency``, ``location``, ``type`` and
+        ``pinblock_format``; every other key of a dict entry is kept as given."""
+        if isinstance(terminal, dict):
+            rec = {str(k): v for k, v in terminal.items()}
+            tid = str(
+                rec.pop("id", None) or rec.pop("tid", None) or rec.pop("terminal_id", None) or ""
+            ).strip()
+            mid = str(
+                rec.pop("merchant", None)
+                or rec.pop("mid", None)
+                or rec.pop("merchant_id", None)
+                or ""
+            ).strip()
+        else:
+            rec, tid, mid = {}, str(terminal).strip(), ""
+        out: dict[str, Any] = {
+            "id": tid,
+            "merchant": mid,
+            "currency": str(rec.pop("currency", "") or ""),
+            "location": str(rec.pop("location", None) or rec.pop("address", None) or ""),
+            "type": str(rec.pop("type", "") or ""),
+            "pinblock_format": str(
+                rec.pop("pinblock_format", None) or rec.pop("pin_block_format", None) or ""
+            ),
+        }
+        for k, v in rec.items():
+            out[k] = v if isinstance(v, (dict, list)) else str(v)
+        return out
 
     # -- primitives ----------------------------------------------------------
 

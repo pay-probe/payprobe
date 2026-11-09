@@ -1,0 +1,268 @@
+{
+  "protocol": "iso8583",
+  "name": "POS terminal link — ASCII fields, binary bitmap",
+  "version": "1",
+  "group": "terminal",
+  "description": "ISO 8583:1987 as spoken on a classic POS-to-host link: ASCII MTI and data elements, raw binary bitmap, ASCII-decimal LL/LLL lengths, raw binary PIN/MAC fields, EMV data (DE 55) with a packed-BCD length, and a THREE-digit response code (000 = approved). DE 48 / DE 63 carry an ASCII tag-length-value structure (3-character tag, 3-digit length) — build their value as text, e.g. '0360010' is tag 036, length 001, value '0'. Generic reconstruction of a working POS test-tool profile; adjust lengths/types to your host's spec.",
+  "definition": {
+    "encoding": {
+      "bitmap": "binary",
+      "numeric": "ascii",
+      "text": "ascii",
+      "binary": "raw",
+      "length": "ascii"
+    },
+    "fields": {
+      "2": {
+        "name": "Primary Account Number",
+        "len_type": "llvar",
+        "length": 19,
+        "type": "n"
+      },
+      "3": {
+        "name": "Processing Code",
+        "len_type": "fixed",
+        "length": 6,
+        "type": "n"
+      },
+      "4": {
+        "name": "Amount, Transaction",
+        "len_type": "fixed",
+        "length": 12,
+        "type": "n"
+      },
+      "5": {
+        "name": "Amount, Settlement (sign + n12)",
+        "len_type": "fixed",
+        "length": 13,
+        "type": "ans"
+      },
+      "7": {
+        "name": "Transmission Date & Time (MMDDhhmmss, UTC)",
+        "len_type": "fixed",
+        "length": 10,
+        "type": "n"
+      },
+      "11": {
+        "name": "System Trace Audit Number",
+        "len_type": "fixed",
+        "length": 6,
+        "type": "n"
+      },
+      "12": {
+        "name": "Local Transaction Date & Time (YYMMDDhhmmss)",
+        "len_type": "fixed",
+        "length": 12,
+        "type": "n"
+      },
+      "14": {
+        "name": "Expiration Date (YYMM)",
+        "len_type": "fixed",
+        "length": 4,
+        "type": "n"
+      },
+      "15": {
+        "name": "Settlement Date (YYMMDD)",
+        "len_type": "fixed",
+        "length": 6,
+        "type": "n"
+      },
+      "22": {
+        "name": "Point of Service Entry Mode",
+        "len_type": "fixed",
+        "length": 3,
+        "type": "n"
+      },
+      "24": {
+        "name": "Function Code",
+        "len_type": "fixed",
+        "length": 3,
+        "type": "n"
+      },
+      "25": {
+        "name": "Point of Service Condition Code",
+        "len_type": "fixed",
+        "length": 2,
+        "type": "n"
+      },
+      "30": {
+        "name": "Amount, Original (sign + n12)",
+        "len_type": "fixed",
+        "length": 13,
+        "type": "ans"
+      },
+      "35": {
+        "name": "Track 2 Data",
+        "len_type": "llvar",
+        "length": 37,
+        "type": "z"
+      },
+      "37": {
+        "name": "Retrieval Reference Number",
+        "len_type": "fixed",
+        "length": 12,
+        "type": "an"
+      },
+      "38": {
+        "name": "Approval Code",
+        "len_type": "fixed",
+        "length": 6,
+        "type": "an"
+      },
+      "39": {
+        "name": "Response Code (3 digits in this dialect; 000 = approved)",
+        "len_type": "fixed",
+        "length": 3,
+        "type": "n"
+      },
+      "41": {
+        "name": "Card Acceptor Terminal Id",
+        "len_type": "fixed",
+        "length": 8,
+        "type": "ans"
+      },
+      "42": {
+        "name": "Card Acceptor (Merchant) Id",
+        "len_type": "fixed",
+        "length": 15,
+        "type": "ans"
+      },
+      "44": {
+        "name": "Additional Response Data",
+        "len_type": "llvar",
+        "length": 99,
+        "type": "ans"
+      },
+      "46": {
+        "name": "Amounts, Fees",
+        "len_type": "lllvar",
+        "length": 999,
+        "type": "ans"
+      },
+      "48": {
+        "name": "Additional Data — Private (ASCII TLV: 3-char tag + LLL length + value)",
+        "len_type": "lllvar",
+        "length": 999,
+        "type": "ans"
+      },
+      "49": {
+        "name": "Currency Code, Transaction",
+        "len_type": "fixed",
+        "length": 3,
+        "type": "n"
+      },
+      "52": {
+        "name": "PIN Data (8 raw bytes)",
+        "len_type": "fixed",
+        "length": 16,
+        "type": "b"
+      },
+      "53": {
+        "name": "Security Related Control Information",
+        "len_type": "llvar",
+        "length": 16,
+        "type": "b"
+      },
+      "54": {
+        "name": "Additional Amounts",
+        "len_type": "lllvar",
+        "length": 120,
+        "type": "ans"
+      },
+      "55": {
+        "name": "ICC Data (EMV, BER-TLV; BCD length)",
+        "len_type": "lllvar",
+        "length": 999,
+        "type": "b",
+        "encoding": {
+          "length": "bcd"
+        }
+      },
+      "62": {
+        "name": "Customer Defined Response",
+        "len_type": "lllvar",
+        "length": 999,
+        "type": "ans"
+      },
+      "63": {
+        "name": "Additional Amounts — Private (ASCII TLV)",
+        "len_type": "lllvar",
+        "length": 999,
+        "type": "ans"
+      },
+      "64": {
+        "name": "Primary MAC (8 raw bytes)",
+        "len_type": "fixed",
+        "length": 16,
+        "type": "b"
+      }
+    },
+    "presence": {
+      "0200": {
+        "mandatory": [
+          "2",
+          "3",
+          "4",
+          "7",
+          "11",
+          "12",
+          "22",
+          "24",
+          "25",
+          "41",
+          "42",
+          "49"
+        ],
+        "conditional": [
+          "35",
+          "48",
+          "52",
+          "55"
+        ]
+      },
+      "0210": {
+        "mandatory": [
+          "2",
+          "39",
+          "41",
+          "49"
+        ],
+        "conditional": [
+          "3",
+          "4",
+          "7",
+          "11",
+          "12",
+          "37",
+          "38"
+        ]
+      },
+      "0400": {
+        "mandatory": [
+          "2",
+          "3",
+          "4",
+          "7",
+          "11",
+          "12",
+          "24",
+          "41",
+          "42",
+          "49"
+        ]
+      },
+      "0800": {
+        "mandatory": [
+          "7",
+          "11",
+          "24"
+        ]
+      },
+      "default": {
+        "mandatory": [
+          "11"
+        ]
+      }
+    }
+  }
+}

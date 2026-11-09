@@ -884,6 +884,22 @@ export const ADAPTERS: AdapterSpec[] = [
         title: "Framing",
         keys: [
           {
+            key: "framing.preset",
+            type: "string",
+            desc: 'Generic framing preset, expanded into the keys below on save: "binary2" (ISO norm), "binary2_inclusive", "binary2_pad2", "binary4_pad14_inclusive", "bcd2", "ascii2"/"ascii4"/"ascii5"/"ascii6", "ascii4_trailer", "hex4", "stx_etx_lrc". Explicit keys set beside it win.',
+          },
+          {
+            key: "framing.link_level",
+            type: "string",
+            desc: 'Compact link-level string as terminal test tools and switch screens print it, "<length-encoding>:<counts-prefix>:<counts-header>:<byte-order>:<width>:<header-bytes>", e.g. "CHARDEC:false:false:BIG:4:" or "BCH:false:false:BIG:2:00.00". Parsed into the keys below on save.',
+          },
+          {
+            key: "framing.mode",
+            type: "string",
+            default: "length_prefix",
+            desc: '"length_prefix" (prefix || header || body || trailer) or "delimited" (start byte || body || end byte || checksum — the STX/ETX/LRC envelope; no length, so for text/hex-bitmap dialects only).',
+          },
+          {
             key: "framing.length_prefix_bytes",
             type: "int",
             default: "2",
@@ -893,7 +909,7 @@ export const ADAPTERS: AdapterSpec[] = [
             key: "framing.length_encoding",
             type: "string",
             default: "binary",
-            desc: '"binary" integer prefix, or "ascii" zero-padded digits, one per prefix byte (0043).',
+            desc: '"binary" integer prefix, "ascii" zero-padded decimal digits one per prefix byte (0043, a.k.a. CHARDEC), "bcd" packed digits, or "hex" hexadecimal digits (002B, a.k.a. CHARHEX).',
           },
           {
             key: "framing.length_byte_order",
@@ -923,6 +939,22 @@ export const ADAPTERS: AdapterSpec[] = [
             key: "framing.tpdu_outbound_hex",
             type: "string",
             desc: "Static TPDU prepended on send (hex).",
+          },
+          {
+            key: "framing.header_hex",
+            type: "string",
+            desc: 'Fixed message header after the length prefix, as hex (e.g. "0000"); framing.header is the ASCII-text form. length_includes_header says whether the length counts it.',
+          },
+          {
+            key: "framing.trailer_hex",
+            type: "string",
+            desc: 'Fixed trailer after the body, as hex (e.g. "03" = a mandatory ETX), appended on send and expected on receive; never counted by the length.',
+          },
+          {
+            key: "framing.start_hex / end_hex / checksum",
+            type: "string",
+            default: '"02" / "03" / "none"',
+            desc: 'Delimited mode only: start and end bytes and the checksum after the end byte ("lrc" = XOR of body + end byte, or "none").',
           },
           {
             key: "framing.encoding",

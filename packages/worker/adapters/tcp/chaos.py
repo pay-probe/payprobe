@@ -118,6 +118,7 @@ class ChaosEngine:
         length_encoding: str = "binary",
         mti_encoding: str = "ascii",
         header_bytes: int = 0,
+        frame_spec: framing.FrameSpec | None = None,
     ) -> bytes:
         """Return a deliberately broken version of a fully framed reply.
 
@@ -136,6 +137,8 @@ class ChaosEngine:
         """
         if not frame:
             return frame
+        if frame_spec is not None and frame_spec.delimited:
+            return self._corrupt_delimited(frame, mode, frame_spec, mti_encoding)
         prefix, rest = frame[:prefix_bytes], frame[prefix_bytes:]
 
         if mode == "bad_length":
@@ -170,6 +173,48 @@ class ChaosEngine:
         # default: garbage body, framing untouched
         garbage = bytes(self.rng.randrange(256) for _ in range(len(rest)))
         return prefix + garbage
+
+    def _corrupt_delimited(
+        self, frame: bytes, mode: str, spec: framing.FrameSpec, mti_encoding: str
+    ) -> bytes:
+        """The same corruption modes for a ``start || body || end || checksum``
+        frame. ``bad_length`` has no length to inflate, so it drops the end byte
+        and checksum instead — the client waits for an ETX that never comes, the
+        same stall a bogus length produces. The others keep the envelope valid
+        (end byte present, LRC recomputed) so the client receives a whole frame
+        it cannot make sense of."""
+        tail = len(spec.end) + len(spec.checksum_bytes(b""))
+        body = (
+            frame[len(spec.start) : len(frame) - tail]
+            if len(frame) > len(spec.start) + tail
+            else b""
+        )
+        if mode == "bad_length":
+            return spec.start + body
+        if mode == "bad_mti":
+            bogus = b"\x99\x99" if mti_encoding == "bcd" else b"9999"
+            if mti_encoding == "ebcdic":
+                bogus = "9999".encode("cp037")
+            new = (
+                bogus + body[len(bogus) :]
+                if len(body) >= len(bogus)
+                else (bogus * len(body))[: len(body)]
+            )
+        elif mode == "flip_bits":
+            buf = bytearray(body)
+            if buf:
+                for _ in range(max(1, len(buf) // 8)):
+                    i = self.rng.randrange(len(buf))
+                    buf[i] ^= 1 << self.rng.randrange(8)
+            new = bytes(buf)
+        else:  # garbage body that never contains the end byte
+            end = spec.end[0]
+            new = bytes(
+                (b if b != end else (b + 1) % 256)
+                for b in (self.rng.randrange(256) for _ in range(len(body)))
+            )
+        new = new.replace(spec.end, bytes([(spec.end[0] + 1) % 256]) * len(spec.end))
+        return spec.start + new + spec.end + spec.checksum_bytes(new)
 
     def partial_len(self, frame: bytes, spec: int | str | None) -> int:
         """How many bytes of ``frame`` to send before hanging up mid-message."""

@@ -17,6 +17,7 @@ import {
   KeyType,
   KeyView,
   TerminalPool,
+  TerminalRecord,
   TestDataService,
 } from "./test-data.service";
 import { PageHeaderComponent } from "../shared/ui/page-header.component";
@@ -160,7 +161,7 @@ export class TestDataComponent implements OnInit {
     this.termDraft.set({
       name: p.name,
       description: p.description,
-      text: p.terminals.join("\n"),
+      text: p.terminals.map((t) => this.terminalToLine(t)).join("\n"),
       isNew: false,
       original: p.name,
     });
@@ -169,7 +170,7 @@ export class TestDataComponent implements OnInit {
     const d = this.termDraft();
     if (!d) return;
     if (!d.name.trim()) return this.ui.toast("error", "Give the pool a name.");
-    const terminals = this.lines(d.text);
+    const terminals = this.parseTerminals(d.text);
     this.td
       .saveTerminalPool(
         { name: d.name, description: d.description, terminals },
@@ -354,6 +355,29 @@ export class TestDataComponent implements OnInit {
       )
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
+  }
+
+  /** One terminal entry per line: a bare id stays an id; a structured record
+   *  (merchant, currency, location, …) is shown as compact JSON. */
+  private terminalToLine(t: string | TerminalRecord): string {
+    if (typeof t === "string") return t;
+    const { id, ...rest } = t;
+    return Object.keys(rest).length === 0 && id ? id : JSON.stringify(t);
+  }
+
+  /** Parse the terminals textarea back: a ``{...}`` line is a JSON record,
+   *  anything else a bare terminal id. */
+  private parseTerminals(text: string): (string | TerminalRecord)[] {
+    return this.lines(text).map((line) => {
+      if (line.startsWith("{")) {
+        try {
+          return JSON.parse(line) as TerminalRecord;
+        } catch {
+          return line;
+        }
+      }
+      return line;
+    });
   }
 
   /** Render one pool entry as an editable line: a bare PAN stays a PAN; a

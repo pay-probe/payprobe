@@ -30,11 +30,25 @@ export interface BinRange {
   brand: string;
 }
 
-/** A named list of terminal IDs (feeds ${pool.terminal}). */
+/** A structured terminal record (feeds ${terminal.id}, ${terminal.merchant}, ...).
+ *  Any further keys are exposed as ${terminal.<key>}; keep key material in the
+ *  key vault and reference it by name. */
+export interface TerminalRecord {
+  id: string;
+  merchant?: string;
+  currency?: string;
+  location?: string;
+  type?: string;
+  pinblock_format?: string;
+  [extra: string]: unknown;
+}
+
+/** A named list of terminals (feeds ${pool.terminal} / ${terminal.*}). An entry
+ *  is either a bare terminal-id string or a structured {@link TerminalRecord}. */
 export interface TerminalPool {
   name: string;
   description: string;
-  terminals: string[];
+  terminals: (string | TerminalRecord)[];
 }
 
 /** Masked view of a stored key — material is never returned by the API. */
