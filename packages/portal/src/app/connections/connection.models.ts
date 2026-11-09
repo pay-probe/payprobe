@@ -89,9 +89,40 @@ function protoFilesFromConfig(raw: unknown): GrpcProtoFile[] {
 
 /** How the length prefix carries the length: a binary integer (the ISO 8583
  *  norm) or zero-padded ASCII digits, one per prefix byte (e.g. `0043`). */
-export type LengthEncoding = "binary" | "ascii";
+/** Length-prefix encodings the worker frames with (mirror of
+ *  `payprobe_common.link_framing.LENGTH_ENCODINGS`). */
+export type LengthEncoding = "binary" | "ascii" | "bcd" | "hex";
+/** How frames are delimited: a length prefix (default) or a start/end byte
+ *  envelope (STX … ETX LRC) with no length at all. */
+export type FramingMode = "length_prefix" | "delimited";
+/** Generic, structure-named framing presets (mirror of
+ *  `payprobe_common.link_framing.FRAMING_PRESETS`; a preset is a bundle of
+ *  defaults the backend expands into explicit keys on save). */
+export const FRAMING_PRESET_NAMES = [
+  "binary2",
+  "binary2_inclusive",
+  "binary2_pad2",
+  "binary4_pad14_inclusive",
+  "bcd2",
+  "ascii2",
+  "ascii4",
+  "ascii5",
+  "ascii6",
+  "ascii4_trailer",
+  "hex4",
+  "stx_etx_lrc",
+] as const;
+export type FramingPreset = (typeof FRAMING_PRESET_NAMES)[number];
 
 export interface FramingConfig {
+  /** Generic preset name ("" = none). The backend expands it into the explicit
+   *  keys below on save and keeps the label; explicit keys set beside it win. */
+  preset?: FramingPreset | "";
+  /** Compact link-level string copied off a terminal tool / switch screen,
+   *  `<enc>:<counts-prefix>:<counts-header>:<order>:<width>:<header-hex>`,
+   *  e.g. `CHARDEC:false:false:BIG:4:`. Parsed into explicit keys on save. */
+  linkLevel?: string;
+  mode?: FramingMode;
   lengthPrefixBytes: number;
   lengthEncoding: LengthEncoding;
   byteOrder: ByteOrder;
@@ -99,6 +130,14 @@ export interface FramingConfig {
   lengthIncludesHeader: boolean;
   tpduBytes: number;
   tpduOutboundHex: string;
+  /** Fixed message header after the length prefix, as hex ("" = none). */
+  headerHex?: string;
+  /** Fixed trailer after the body (e.g. "03" = mandatory ETX), never counted. */
+  trailerHex?: string;
+  /** Delimited mode only: start / end bytes (hex) and the checksum after the end. */
+  startHex?: string;
+  endHex?: string;
+  checksum?: "none" | "lrc";
   encoding: string;
 }
 
@@ -300,6 +339,9 @@ export const DEFAULT_NATS: NatsConfig = {
 };
 
 export const DEFAULT_FRAMING: FramingConfig = {
+  preset: "",
+  linkLevel: "",
+  mode: "length_prefix",
   lengthPrefixBytes: 2,
   lengthEncoding: "binary",
   byteOrder: "big",
@@ -307,6 +349,11 @@ export const DEFAULT_FRAMING: FramingConfig = {
   lengthIncludesHeader: true,
   tpduBytes: 0,
   tpduOutboundHex: "",
+  headerHex: "",
+  trailerHex: "",
+  startHex: "02",
+  endHex: "03",
+  checksum: "none",
   encoding: "ascii",
 };
 
@@ -318,6 +365,22 @@ export function framingToApi(
   full = false,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
+  if (f.preset) out["preset"] = f.preset;
+  if (f.linkLevel) out["link_level"] = f.linkLevel;
+  const delimited = f.mode === "delimited";
+  if (full || delimited) out["mode"] = f.mode ?? "length_prefix";
+  if (delimited) {
+    // a start/end envelope has no length prefix, header or trailer
+    if (full || (f.startHex && f.startHex !== DEFAULT_FRAMING.startHex))
+      out["start_hex"] = f.startHex || DEFAULT_FRAMING.startHex;
+    if (full || (f.endHex && f.endHex !== DEFAULT_FRAMING.endHex))
+      out["end_hex"] = f.endHex || DEFAULT_FRAMING.endHex;
+    if (full || (f.checksum && f.checksum !== "none"))
+      out["checksum"] = f.checksum ?? "none";
+    if (full || f.encoding !== DEFAULT_FRAMING.encoding)
+      out["encoding"] = f.encoding;
+    return out;
+  }
   if (full || f.lengthPrefixBytes !== DEFAULT_FRAMING.lengthPrefixBytes)
     out["length_prefix_bytes"] = f.lengthPrefixBytes;
   if (full || f.lengthEncoding !== DEFAULT_FRAMING.lengthEncoding)
@@ -331,6 +394,8 @@ export function framingToApi(
   if (full || f.tpduBytes) out["tpdu_bytes"] = f.tpduBytes || 0;
   if (full || f.tpduOutboundHex)
     out["tpdu_outbound_hex"] = f.tpduOutboundHex || "";
+  if (full || f.headerHex) out["header_hex"] = f.headerHex || "";
+  if (full || f.trailerHex) out["trailer_hex"] = f.trailerHex || "";
   if (full || f.encoding !== DEFAULT_FRAMING.encoding)
     out["encoding"] = f.encoding;
   return out;
@@ -342,6 +407,14 @@ export function framingFromApi(
 ): FramingConfig {
   const src = f ?? {};
   return {
+    preset: (src["preset"] ?? "") as FramingPreset | "",
+    linkLevel: src["link_level"] ?? "",
+    mode: (src["mode"] ?? DEFAULT_FRAMING.mode) as FramingMode,
+    headerHex: src["header_hex"] ?? "",
+    trailerHex: src["trailer_hex"] ?? "",
+    startHex: src["start_hex"] ?? DEFAULT_FRAMING.startHex,
+    endHex: src["end_hex"] ?? DEFAULT_FRAMING.endHex,
+    checksum: (src["checksum"] ?? "none") as "none" | "lrc",
     lengthPrefixBytes:
       src["length_prefix_bytes"] ?? DEFAULT_FRAMING.lengthPrefixBytes,
     lengthEncoding: (src["length_encoding"] ??

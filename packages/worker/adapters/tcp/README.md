@@ -123,6 +123,19 @@ in particular is logged as ignored (the message header is `framing.header` /
 | …plus a fixed header `CDb4` counted in the length | `{"length_prefix_bytes": 4, "length_encoding": "ascii", "header": "CDb4"}` → `0020CDb4` + 16 bytes |
 | …the same header **not** counted | add `"length_includes_header": false` → `0016CDb4` + 16 bytes |
 | 5-byte TPDU `60 00 00 00 00` in front of the body | `{"tpdu_outbound_hex": "6000000000", "tpdu_bytes": 5}` |
+| The connection sheet shows a compact link-level string, e.g. `CHARDEC:false:false:BIG:4:` (`<length encoding>:<counts prefix>:<counts header>:<byte order>:<width>:<header bytes>`) | `{"link_level": "CHARDEC:false:false:BIG:4:"}` — expanded to the explicit keys on save |
+| 2-byte binary length followed by two zero bytes it does not count | `{"preset": "binary2_pad2"}` (= `BCH:false:false:BIG:2:00.00`) |
+| 4-byte binary length counting itself and 14 zero bytes after it | `{"preset": "binary4_pad14_inclusive"}` |
+| 4-digit ASCII length, body, then a mandatory ETX | `{"preset": "ascii4_trailer"}` (= `trailer_hex: "03"`, never counted) |
+| 4-digit ASCII **hex** length (`002B`) | `{"length_prefix_bytes": 4, "length_encoding": "hex"}` or `{"preset": "hex4"}` |
+| No length at all: `STX body ETX LRC` (serial-style terminal link over TCP) | `{"preset": "stx_etx_lrc"}` (= `mode: delimited`, `start_hex: 02`, `end_hex: 03`, `checksum: lrc`); text / hex-bitmap dialects only — the body must never contain the end byte |
+
+Presets are generic, structure-named bundles (`binary2`, `binary2_inclusive`,
+`binary2_pad2`, `binary4_pad14_inclusive`, `bcd2`, `ascii2`/`ascii4`/`ascii5`/
+`ascii6`, `ascii4_trailer`, `hex4`, `stx_etx_lrc`); explicit keys set beside a
+preset win. The vocabulary lives once in `payprobe_common/link_framing.py` and
+is shared with the scenario-service registry. A worked POS example — connection,
+dialect, pools, scenario, host stand-in — is `examples/terminal-link/`.
 
 ### Health check modes
 

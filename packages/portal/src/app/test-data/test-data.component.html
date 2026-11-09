@@ -214,11 +214,16 @@
           <label>Description<input [(ngModel)]="d.description" /></label>
           <label
             >Terminals
-            <span class="muted">({{ countLines(d.text) }}) — one per line</span>
+            <span class="muted"
+              >({{ countLines(d.text) }}) — one per line. A bare terminal id, or
+              a JSON record for per-terminal data:
+              &#123;"id","merchant","currency","location","type"&#125;</span
+            >
             <textarea
               rows="10"
               [(ngModel)]="d.text"
-              placeholder="TERM0001"
+              placeholder='TERM0001
+{"id":"POS20001","merchant":"GCPOS13","currency":"981","location":"Lane 1"}'
             ></textarea>
           </label>
           <div class="actions">

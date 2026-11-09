@@ -189,3 +189,63 @@ def test_now_fmt_resolves_through_payload_interpolation():
 
     m = VAR_REF_RE.fullmatch("${now.fmt(%y%m%d%H%M%S,4)}")
     assert m and m.group("expr") == "now.fmt(%y%m%d%H%M%S,4)"
+
+
+# -- terminal namespace ------------------------------------------------------
+#
+# Borrowed from terminal test tools, which keep one "device" record per POS
+# (terminal id, merchant id, currency, keys-by-name, location) and fill the
+# matching DEs from it instead of typing them into every message.
+
+
+def test_terminal_binds_for_a_transaction_and_rotates():
+    pool = [
+        {"id": "POS20001", "merchant": "GCPOS13", "currency": "981", "location": "Lane 1"},
+        {"id": "POS60001", "merchant": "TMPOS01", "currency": "981"},
+    ]
+    g = GeneratorContext(seed=1, terminals=pool)
+    g.new_transaction()
+    assert g.resolve("terminal.id") == "POS20001"
+    assert g.resolve("terminal.merchant") == "GCPOS13"  # same device within the txn
+    assert g.resolve("terminal.currency") == "981"
+    assert g.resolve("terminal.location") == "Lane 1"
+    assert g.resolve("terminal.seq") == 1
+    g.new_transaction()
+    assert g.resolve("terminal.id") == "POS60001"
+    assert g.resolve("terminal.mid") == "TMPOS01"
+    assert g.resolve("terminal.location") == ""  # unset field -> empty, not an error
+    g.new_transaction()  # wraps
+    assert g.resolve("terminal.tid") == "POS20001"
+
+
+def test_terminal_record_extra_keys_are_exposed_by_name():
+    rec = {
+        "tid": "POS20001",
+        "mid": "M1",
+        "type": "pos",
+        "pinblock_format": "01",
+        "tpk": "lane_tpk",
+    }
+    g = GeneratorContext(seed=1, terminals=[rec])
+    assert g.resolve("terminal.id") == "POS20001" and g.resolve("terminal.merchant") == "M1"
+    assert g.resolve("terminal.type") == "pos"
+    assert g.resolve("terminal.pinblock_format") == "01"
+    assert g.resolve("terminal.tpk") == "lane_tpk"  # a key *name*, resolved by the vault
+    with pytest.raises(GeneratorError, match="no field 'tak'"):
+        g.resolve("terminal.tak")
+
+
+def test_terminal_string_entries_and_pool_terminal_stay_compatible():
+    g = GeneratorContext(seed=1, terminals=["T1", {"id": "T2", "merchant": "M2"}])
+    # ${pool.terminal} keeps yielding ids whatever the entry shape
+    assert [g.resolve("pool.terminal") for _ in range(3)] == ["T1", "T2", "T1"]
+    g.new_transaction()
+    assert g.resolve("terminal.id") == "T1" and g.resolve("terminal.merchant") == ""
+
+
+def test_terminal_binds_lazily_and_empty_pool_raises():
+    g = GeneratorContext(seed=1, terminals=["T1"])
+    assert g.resolve("terminal.id") == "T1" and g.resolve("terminal.id") == "T1"
+    with pytest.raises(GeneratorError, match="terminal pool is empty"):
+        GeneratorContext(seed=1).resolve("terminal.id")
+    assert GeneratorContext.is_generator("terminal.merchant")

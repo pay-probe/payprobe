@@ -1032,10 +1032,28 @@ class GraphExecutor:
             await self._emit(outcome, scenario_id, phase)
             return outcome
 
-        # normalise assertion rules to plain dicts for the adapter engine
+        # normalise assertion rules to plain dicts for the adapter engine, and
+        # resolve ``${...}`` in their expected values the way the payload was —
+        # with this step's own *resolved* request reachable as ``${request.*}``
+        # (``${request.values.2}`` = "the host must echo the PAN we sent"), the
+        # echo checks terminal test tools express as "<field> = <request field>".
         assertion_rules = [
-            a if isinstance(a, dict) else a.__dict__ for a in step.get("assertions", [])
+            dict(a) if isinstance(a, dict) else dict(a.__dict__) for a in step.get("assertions", [])
         ]
+        try:
+            assertion_rules = resolve_value(assertion_rules, {**context, "request": payload})
+        except UnresolvedReferenceError as exc:
+            outcome = StepOutcome(
+                step_id=step_id,
+                target=display_target,
+                action=action,
+                status=ERROR,
+                duration_ms=0,
+                error=f"unresolved reference in assertion: {exc}",
+                environment_override=override_env,
+            )
+            await self._emit(outcome, scenario_id, phase)
+            return outcome
 
         started_at_ms = int(time.time() * 1000)
         try:

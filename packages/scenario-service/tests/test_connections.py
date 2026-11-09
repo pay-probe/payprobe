@@ -253,13 +253,15 @@ def test_framing_length_encoding_is_validated():
     assert enc("ascii") == "ascii"
     assert enc("bcd") == "bcd"
     assert enc("CHARDEC") == "ascii"  # vendor name, canonicalised on save
-    with pytest.raises(ValueError, match="length_encoding must be one of binary, ascii, bcd"):
-        enc("hex")
+    assert enc("hex") == "hex"
+    assert enc("CHARHEX") == "hex"
+    with pytest.raises(ValueError, match="length_encoding must be one of binary, ascii, bcd, hex"):
+        enc("octal")
 
 
 def test_framing_length_encodings_match_the_worker():
-    """The store mirrors the worker's tuple by hand (the scenario-service image
-    does not ship the worker): fail here the day they drift."""
+    """The store and the worker read one shared vocabulary
+    (``payprobe_common.link_framing``): this pins that they are the same object."""
     pytest = __import__("pytest")
     worker_framing = pytest.importorskip("worker.adapters.tcp.framing")
     from api import connection_store as cs
@@ -284,3 +286,73 @@ def test_framing_message_header_keys_are_validated():
         )
     with pytest.raises(ValueError, match="header_hex must be hex"):
         ConnectionDraft.model_validate({**_draft(framing={"header_hex": "zz"}).model_dump()})
+
+
+def test_framing_preset_expands_to_explicit_keys_and_keeps_its_label():
+    """A generic preset name saves as the explicit keys the worker frames with
+    (so an editor that only knows the keys round-trips it) plus the label."""
+    from api.connection_store import ConnectionDraft
+
+    d = ConnectionDraft.model_validate({**_draft(framing={"preset": "ascii4"}).model_dump()})
+    assert d.model_extra["framing"] == {
+        "preset": "ascii4",
+        "length_prefix_bytes": 4,
+        "length_encoding": "ascii",
+        "length_includes_prefix": False,
+        "length_includes_header": True,
+    }
+    # explicit keys beside the preset win
+    d = ConnectionDraft.model_validate(
+        {**_draft(framing={"preset": "ascii4", "length_prefix_bytes": 6}).model_dump()}
+    )
+    assert d.model_extra["framing"]["length_prefix_bytes"] == 6
+    pytest = __import__("pytest")
+    with pytest.raises(ValueError, match="framing.preset must be one of"):
+        ConnectionDraft.model_validate({**_draft(framing={"preset": "visa"}).model_dump()})
+
+
+def test_framing_link_level_string_is_parsed_on_save():
+    """``CHARDEC:false:false:BIG:4:`` copied off a terminal tool's connection
+    screen becomes a 4-digit ASCII length that counts only the body."""
+    from api.connection_store import ConnectionDraft
+
+    d = ConnectionDraft.model_validate(
+        {**_draft(framing={"link_level": "CHARDEC:false:false:BIG:4:"}).model_dump()}
+    )
+    f = d.model_extra["framing"]
+    assert f["length_prefix_bytes"] == 4 and f["length_encoding"] == "ascii"
+    assert f["length_includes_prefix"] is False and f["length_includes_header"] is False
+    assert f["link_level"] == "CHARDEC:false:false:BIG:4:"
+    d = ConnectionDraft.model_validate(
+        {**_draft(framing={"link_level": "BCH:false:false:BIG:2:00.00"}).model_dump()}
+    )
+    assert d.model_extra["framing"]["header_hex"] == "0000"
+    pytest = __import__("pytest")
+    with pytest.raises(ValueError, match="delimited"):
+        ConnectionDraft.model_validate(
+            {**_draft(framing={"link_level": "BCH:false:true:BIG:0:"}).model_dump()}
+        )
+
+
+def test_framing_delimited_mode_and_trailer_are_validated():
+    from api.connection_store import ConnectionDraft
+
+    d = ConnectionDraft.model_validate({**_draft(framing={"preset": "stx_etx_lrc"}).model_dump()})
+    f = d.model_extra["framing"]
+    assert f["mode"] == "delimited" and f["checksum"] == "lrc"
+    assert f["start_hex"] == "02" and f["end_hex"] == "03"
+    d = ConnectionDraft.model_validate({**_draft(framing={"preset": "ascii4_trailer"}).model_dump()})
+    assert d.model_extra["framing"]["trailer_hex"] == "03"
+    pytest = __import__("pytest")
+    with pytest.raises(ValueError, match="does not apply in delimited mode"):
+        ConnectionDraft.model_validate(
+            {**_draft(framing={"mode": "delimited", "length_prefix_bytes": 4}).model_dump()}
+        )
+    with pytest.raises(ValueError, match="framing.mode must be one of"):
+        ConnectionDraft.model_validate({**_draft(framing={"mode": "magic"}).model_dump()})
+    with pytest.raises(ValueError, match="trailer_hex must be hex"):
+        ConnectionDraft.model_validate({**_draft(framing={"trailer_hex": "zz"}).model_dump()})
+    with pytest.raises(ValueError, match="framing.checksum must be one of"):
+        ConnectionDraft.model_validate(
+            {**_draft(framing={"mode": "delimited", "checksum": "crc"}).model_dump()}
+        )

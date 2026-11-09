@@ -194,7 +194,7 @@ def test_frame_preview_returns_the_exact_bytes_without_dialling():
 def test_frame_preview_rejects_a_bad_framing_key_with_400():
     with _client() as c:
         r = c.post("/connections/frame-preview", json={
-            "config": {"protocol": "iso8583", "framing": {"length_encoding": "hex"}},
+            "config": {"protocol": "iso8583", "framing": {"length_encoding": "octal"}},
             "action": "send_0200", "payload": {"amount": 1},
         })
         assert r.status_code == 400 and "length_encoding" in r.json()["detail"]

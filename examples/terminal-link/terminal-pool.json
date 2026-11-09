@@ -1,0 +1,25 @@
+{
+  "description": "One record per POS device — terminal id (8 chars) and merchant id (15 chars) exactly as the host registers them (fixed-width fields are not padded), currency and location; key names refer to the key vault.",
+  "terminals": [
+    {
+      "id": "TERM0001",
+      "merchant": "MERCH0000000001",
+      "currency": "981",
+      "type": "pos",
+      "location": "Lane 1, Head Office",
+      "pinblock_format": "01",
+      "tpk": "lane1_tpk",
+      "tak": "lane1_tak"
+    },
+    {
+      "id": "TERM0002",
+      "merchant": "MERCH0000000002",
+      "currency": "981",
+      "type": "pos",
+      "location": "Lane 2, Branch A",
+      "pinblock_format": "01",
+      "tpk": "lane2_tpk",
+      "tak": "lane2_tak"
+    }
+  ]
+}

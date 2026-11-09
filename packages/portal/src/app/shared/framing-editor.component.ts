@@ -89,15 +89,36 @@ export const FRAMING_PRESETS: FramingPreset[] = [
 ];
 
 /** One-line state of a framing, for a collapsed section or a list. */
+/** Length encodings whose prefix is text digits (one per byte), not an integer. */
+export function isDigitEncoding(enc: string | undefined): boolean {
+  return enc === "ascii" || enc === "hex";
+}
+
 export function framingSummary(f: FramingConfig): string {
+  if (f.mode === "delimited") {
+    const parts = [
+      `STX/ETX envelope (${f.startHex || "02"}…${f.endHex || "03"})`,
+    ];
+    if (f.checksum && f.checksum !== "none")
+      parts.push(f.checksum.toUpperCase());
+    if (f.encoding && f.encoding !== "ascii") parts.push(f.encoding);
+    return parts.join(" · ");
+  }
   const width =
     f.lengthEncoding === "ascii"
       ? `${f.lengthPrefixBytes}-digit ASCII`
-      : `${f.lengthPrefixBytes}-byte ${f.byteOrder}-endian`;
+      : f.lengthEncoding === "hex"
+        ? `${f.lengthPrefixBytes}-digit hex`
+        : f.lengthEncoding === "bcd"
+          ? `${f.lengthPrefixBytes}-byte BCD`
+          : `${f.lengthPrefixBytes}-byte ${f.byteOrder}-endian`;
   const parts = [width];
+  if (f.preset) parts.push(f.preset);
   if (f.lengthIncludesPrefix) parts.push("counts prefix");
-  if (!f.lengthIncludesHeader) parts.push("excludes TPDU");
+  if (!f.lengthIncludesHeader) parts.push("excludes TPDU/header");
   if (f.tpduBytes || f.tpduOutboundHex) parts.push("TPDU");
+  if (f.headerHex) parts.push("header");
+  if (f.trailerHex) parts.push("trailer");
   if (f.encoding && f.encoding !== "ascii") parts.push(f.encoding);
   return parts.join(" · ");
 }
@@ -125,6 +146,23 @@ export function framingPreview(f: FramingConfig): FramingPreview {
       char: c,
       hex: c.charCodeAt(0).toString(16).toUpperCase(),
     }));
+  } else if (f.lengthEncoding === "hex") {
+    overflow = counted > 16 ** n - 1;
+    const digits = Math.min(counted, 16 ** n - 1)
+      .toString(16)
+      .toUpperCase()
+      .padStart(n, "0");
+    prefix = [...digits].map((c) => ({
+      char: c,
+      hex: c.charCodeAt(0).toString(16).toUpperCase(),
+    }));
+  } else if (f.lengthEncoding === "bcd") {
+    overflow = counted > 10 ** (2 * n) - 1;
+    const digits = String(Math.min(counted, 10 ** (2 * n) - 1)).padStart(
+      2 * n,
+      "0",
+    );
+    prefix = (digits.match(/../g) ?? []).map((h) => ({ hex: h }));
   } else {
     overflow = counted > 256 ** n - 1;
     const bytes =
@@ -155,11 +193,36 @@ export function framingIssues(
   mode?: string | null,
 ): string[] {
   const out: string[] = [];
+  const hexOk = (v: string | undefined) =>
+    !v || (/^[0-9a-fA-F]*$/.test(v) && v.length % 2 === 0);
+  if (f.mode === "delimited") {
+    if (!hexOk(f.startHex) || !hexOk(f.endHex) || !f.startHex || !f.endHex)
+      out.push("Start and end bytes must each be at least one byte of hex.");
+    out.push(
+      "A start/end envelope has no length: the message must never contain the end byte, so use it with text / hex-bitmap dialects only.",
+    );
+    return out;
+  }
   const n = Number(f.lengthPrefixBytes);
-  if (!(n >= 1)) out.push("The length prefix needs at least one byte.");
+  if (!(n >= 1))
+    out.push(
+      "The length prefix needs at least one byte (for a length-less STX/ETX envelope switch the mode).",
+    );
   if (f.lengthEncoding === "ascii" && n >= 1 && n <= 2) {
     out.push(
       `A ${n}-digit ASCII prefix caps a message at ${10 ** n - 1} bytes.`,
+    );
+  }
+  if (f.lengthEncoding === "hex" && n >= 1 && n <= 2) {
+    out.push(`A ${n}-digit hex prefix caps a message at ${16 ** n - 1} bytes.`);
+  }
+  if (!hexOk(f.headerHex))
+    out.push("The message header must be an even number of hex digits.");
+  if (!hexOk(f.trailerHex))
+    out.push("The trailer must be an even number of hex digits (e.g. 03).");
+  if (f.linkLevel && f.linkLevel.split(":").length < 5) {
+    out.push(
+      "A link-level string has six colon-separated tokens: <length encoding>:<counts prefix>:<counts header>:<byte order>:<width>:<header bytes>.",
     );
   }
   const hex = (f.tpduOutboundHex || "").trim();
@@ -217,170 +280,290 @@ export function framingIssues(
         }
       </div>
 
-      @if (preview(); as w) {
-        <div class="wire" [class.wire--bad]="w.overflow">
-          <div class="wire__seg wire__seg--prefix">
-            <span class="wire__cap"
-              >length prefix · {{ w.n }}
-              {{ f.lengthEncoding === "ascii" ? "digit" : "byte"
-              }}{{ w.n === 1 ? "" : "s" }}</span
-            >
-            <span class="wire__bytes">
-              @for (c of w.prefix; track $index) {
-                <span class="wire__byte">
-                  @if (c.char) {
-                    <span class="wire__char">{{ c.char }}</span>
-                  }
-                  <span class="wire__hex">{{ c.hex }}</span>
-                </span>
-              }
-            </span>
-          </div>
-          @if (w.tpdu.length) {
-            <div
-              class="wire__seg wire__seg--tpdu"
-              [class.wire__seg--counted]="f.lengthIncludesHeader"
-            >
-              <span class="wire__cap">TPDU · {{ w.tpdu.length }} bytes</span>
-              <span class="wire__bytes">
-                @for (h of w.tpdu; track $index) {
-                  <span class="wire__byte"
-                    ><span class="wire__hex">{{ h }}</span></span
-                  >
-                }
-              </span>
-            </div>
-          }
-          <div class="wire__seg wire__seg--body wire__seg--counted">
-            <span class="wire__cap">message · {{ w.body }} bytes</span>
-            <span class="wire__bytes">
-              <span class="wire__byte"><span class="wire__hex">30</span></span>
-              <span class="wire__byte"><span class="wire__hex">32</span></span>
-              <span class="wire__byte"><span class="wire__hex">30</span></span>
-              <span class="wire__byte"><span class="wire__hex">30</span></span>
-              <span class="wire__more">… {{ w.body - 4 }} more</span>
-            </span>
-          </div>
-        </div>
-        <p class="wire__formula">
-          <span class="wire__k">length</span> = {{ w.formula }} =
-          <strong>{{ w.counted }}</strong>
-          @if (w.overflow) {
-            <span class="wire__warn">
-              does not fit a {{ w.n }}-{{
-                f.lengthEncoding === "ascii" ? "digit" : "byte"
-              }}
-              prefix
-            </span>
-          }
-          <span class="muted">· {{ w.total }} bytes on the wire</span>
-        </p>
-      }
-
-      <h4 class="fr__h">
-        <pp-icon name="package" [size]="13" /> Length prefix
-      </h4>
       <div class="grid2">
         <label class="fld">
           <span
-            >Width
-            <small class="muted">(bytes, or digits for ASCII)</small></span
+            >Envelope
+            <small class="muted">(how a frame is delimited)</small></span
           >
-          <input
-            type="number"
-            min="1"
-            max="8"
-            [(ngModel)]="f.lengthPrefixBytes"
-            (ngModelChange)="emit()"
-          />
-        </label>
-        <label class="fld">
-          <span
-            >Length encoding
-            <small class="muted">(how the number is written)</small></span
-          >
-          <select [(ngModel)]="f.lengthEncoding" (ngModelChange)="emit()">
-            <option value="binary">binary integer (00 2B)</option>
-            <option value="ascii">ASCII digits (0043)</option>
+          <select [(ngModel)]="f.mode" (ngModelChange)="emit()">
+            <option value="length_prefix">length prefix (default)</option>
+            <option value="delimited">
+              start/end bytes — STX … ETX LRC (no length)
+            </option>
           </select>
         </label>
         <label class="fld">
           <span
-            >Byte order
-            <small class="muted">{{
-              f.lengthEncoding === "ascii"
-                ? "(not used for ASCII digits)"
-                : "(binary integers only)"
-            }}</small></span
-          >
-          <select
-            [(ngModel)]="f.byteOrder"
-            (ngModelChange)="emit()"
-            [disabled]="f.lengthEncoding === 'ascii'"
-          >
-            <option value="big">big-endian (high byte first)</option>
-            <option value="little">little-endian (low byte first)</option>
-          </select>
-        </label>
-        <div class="fld fld--stack">
-          <span>What the length counts</span>
-          <label class="chkrow">
-            <input
-              type="checkbox"
-              [(ngModel)]="f.lengthIncludesHeader"
-              (ngModelChange)="emit()"
-            />
-            <span
-              >the TPDU header
-              <small class="muted">(when one is sent)</small></span
-            >
-          </label>
-          <label class="chkrow">
-            <input
-              type="checkbox"
-              [(ngModel)]="f.lengthIncludesPrefix"
-              (ngModelChange)="emit()"
-            />
-            <span
-              >its own prefix bytes <small class="muted">(rare)</small></span
-            >
-          </label>
-        </div>
-      </div>
-
-      <h4 class="fr__h">
-        <pp-icon name="layers" [size]="13" /> TPDU header
-        <small class="muted"
-          >(optional transport header before the message)</small
-        >
-      </h4>
-      <div class="grid2">
-        <label class="fld">
-          <span
-            >Outbound TPDU
-            <small class="muted">(hex, sent before every message)</small></span
+            >Link-level string
+            <small class="muted"
+              >(paste from a terminal tool / switch screen; expanded on
+              save)</small
+            ></span
           >
           <input
             type="text"
             class="mono"
-            [(ngModel)]="f.tpduOutboundHex"
+            [(ngModel)]="f.linkLevel"
             (ngModelChange)="emit()"
-            placeholder="6000000000"
-          />
-        </label>
-        <label class="fld">
-          <span
-            >Inbound TPDU bytes
-            <small class="muted">(stripped from every reply)</small></span
-          >
-          <input
-            type="number"
-            min="0"
-            [(ngModel)]="f.tpduBytes"
-            (ngModelChange)="emit()"
+            placeholder="CHARDEC:false:false:BIG:4:"
           />
         </label>
       </div>
+
+      @if (f.mode === "delimited") {
+        <h4 class="fr__h">
+          <pp-icon name="package" [size]="13" /> Start / end bytes
+        </h4>
+        <div class="grid2">
+          <label class="fld">
+            <span>Start byte <small class="muted">(hex)</small></span>
+            <input
+              type="text"
+              class="mono"
+              [(ngModel)]="f.startHex"
+              (ngModelChange)="emit()"
+              placeholder="02"
+            />
+          </label>
+          <label class="fld">
+            <span>End byte <small class="muted">(hex)</small></span>
+            <input
+              type="text"
+              class="mono"
+              [(ngModel)]="f.endHex"
+              (ngModelChange)="emit()"
+              placeholder="03"
+            />
+          </label>
+          <label class="fld">
+            <span
+              >Checksum <small class="muted">(after the end byte)</small></span
+            >
+            <select [(ngModel)]="f.checksum" (ngModelChange)="emit()">
+              <option value="none">none</option>
+              <option value="lrc">LRC (XOR of body + end byte)</option>
+            </select>
+          </label>
+        </div>
+      } @else {
+        @if (preview(); as w) {
+          <div class="wire" [class.wire--bad]="w.overflow">
+            <div class="wire__seg wire__seg--prefix">
+              <span class="wire__cap"
+                >length prefix · {{ w.n }}
+                {{ isDigits(f.lengthEncoding) ? "digit" : "byte"
+                }}{{ w.n === 1 ? "" : "s" }}</span
+              >
+              <span class="wire__bytes">
+                @for (c of w.prefix; track $index) {
+                  <span class="wire__byte">
+                    @if (c.char) {
+                      <span class="wire__char">{{ c.char }}</span>
+                    }
+                    <span class="wire__hex">{{ c.hex }}</span>
+                  </span>
+                }
+              </span>
+            </div>
+            @if (w.tpdu.length) {
+              <div
+                class="wire__seg wire__seg--tpdu"
+                [class.wire__seg--counted]="f.lengthIncludesHeader"
+              >
+                <span class="wire__cap">TPDU · {{ w.tpdu.length }} bytes</span>
+                <span class="wire__bytes">
+                  @for (h of w.tpdu; track $index) {
+                    <span class="wire__byte"
+                      ><span class="wire__hex">{{ h }}</span></span
+                    >
+                  }
+                </span>
+              </div>
+            }
+            <div class="wire__seg wire__seg--body wire__seg--counted">
+              <span class="wire__cap">message · {{ w.body }} bytes</span>
+              <span class="wire__bytes">
+                <span class="wire__byte"
+                  ><span class="wire__hex">30</span></span
+                >
+                <span class="wire__byte"
+                  ><span class="wire__hex">32</span></span
+                >
+                <span class="wire__byte"
+                  ><span class="wire__hex">30</span></span
+                >
+                <span class="wire__byte"
+                  ><span class="wire__hex">30</span></span
+                >
+                <span class="wire__more">… {{ w.body - 4 }} more</span>
+              </span>
+            </div>
+          </div>
+          <p class="wire__formula">
+            <span class="wire__k">length</span> = {{ w.formula }} =
+            <strong>{{ w.counted }}</strong>
+            @if (w.overflow) {
+              <span class="wire__warn">
+                does not fit a {{ w.n }}-{{
+                  isDigits(f.lengthEncoding) ? "digit" : "byte"
+                }}
+                prefix
+              </span>
+            }
+            <span class="muted">· {{ w.total }} bytes on the wire</span>
+          </p>
+        }
+
+        <h4 class="fr__h">
+          <pp-icon name="package" [size]="13" /> Length prefix
+        </h4>
+        <div class="grid2">
+          <label class="fld">
+            <span
+              >Width
+              <small class="muted">(bytes, or digits for ASCII)</small></span
+            >
+            <input
+              type="number"
+              min="1"
+              max="8"
+              [(ngModel)]="f.lengthPrefixBytes"
+              (ngModelChange)="emit()"
+            />
+          </label>
+          <label class="fld">
+            <span
+              >Length encoding
+              <small class="muted">(how the number is written)</small></span
+            >
+            <select [(ngModel)]="f.lengthEncoding" (ngModelChange)="emit()">
+              <option value="binary">binary integer (00 2B)</option>
+              <option value="ascii">ASCII decimal digits (0043)</option>
+              <option value="bcd">packed BCD digits (00 43)</option>
+              <option value="hex">ASCII hex digits (002B)</option>
+            </select>
+          </label>
+          <label class="fld">
+            <span
+              >Byte order
+              <small class="muted">{{
+                f.lengthEncoding === "binary"
+                  ? "(binary integers only)"
+                  : "(not used for digit prefixes)"
+              }}</small></span
+            >
+            <select
+              [(ngModel)]="f.byteOrder"
+              (ngModelChange)="emit()"
+              [disabled]="f.lengthEncoding !== 'binary'"
+            >
+              <option value="big">big-endian (high byte first)</option>
+              <option value="little">little-endian (low byte first)</option>
+            </select>
+          </label>
+          <div class="fld fld--stack">
+            <span>What the length counts</span>
+            <label class="chkrow">
+              <input
+                type="checkbox"
+                [(ngModel)]="f.lengthIncludesHeader"
+                (ngModelChange)="emit()"
+              />
+              <span
+                >the TPDU header
+                <small class="muted">(when one is sent)</small></span
+              >
+            </label>
+            <label class="chkrow">
+              <input
+                type="checkbox"
+                [(ngModel)]="f.lengthIncludesPrefix"
+                (ngModelChange)="emit()"
+              />
+              <span
+                >its own prefix bytes <small class="muted">(rare)</small></span
+              >
+            </label>
+          </div>
+        </div>
+
+        <h4 class="fr__h">
+          <pp-icon name="layers" [size]="13" /> TPDU header
+          <small class="muted"
+            >(optional transport header before the message)</small
+          >
+        </h4>
+        <div class="grid2">
+          <label class="fld">
+            <span
+              >Outbound TPDU
+              <small class="muted"
+                >(hex, sent before every message)</small
+              ></span
+            >
+            <input
+              type="text"
+              class="mono"
+              [(ngModel)]="f.tpduOutboundHex"
+              (ngModelChange)="emit()"
+              placeholder="6000000000"
+            />
+          </label>
+          <label class="fld">
+            <span
+              >Inbound TPDU bytes
+              <small class="muted">(stripped from every reply)</small></span
+            >
+            <input
+              type="number"
+              min="0"
+              [(ngModel)]="f.tpduBytes"
+              (ngModelChange)="emit()"
+            />
+          </label>
+        </div>
+
+        <h4 class="fr__h">
+          <pp-icon name="layers" [size]="13" /> Fixed header / trailer
+          <small class="muted"
+            >(bytes some hosts want around every message)</small
+          >
+        </h4>
+        <div class="grid2">
+          <label class="fld">
+            <span
+              >Message header
+              <small class="muted"
+                >(hex, after the length prefix; counted when "the TPDU header"
+                is ticked)</small
+              ></span
+            >
+            <input
+              type="text"
+              class="mono"
+              [(ngModel)]="f.headerHex"
+              (ngModelChange)="emit()"
+              placeholder="0000"
+            />
+          </label>
+          <label class="fld">
+            <span
+              >Trailer
+              <small class="muted"
+                >(hex, after the body; never counted — 03 = ETX)</small
+              ></span
+            >
+            <input
+              type="text"
+              class="mono"
+              [(ngModel)]="f.trailerHex"
+              (ngModelChange)="emit()"
+              placeholder="03"
+            />
+          </label>
+        </div>
+      }
 
       <h4 class="fr__h"><pp-icon name="format" [size]="13" /> Message body</h4>
       <div class="grid2">
@@ -442,6 +625,10 @@ export class FramingEditorComponent {
     return Object.entries(p.set).every(
       ([k, v]) => String(f[k] ?? "") === String(v),
     );
+  }
+
+  isDigits(enc: string | undefined): boolean {
+    return isDigitEncoding(enc);
   }
 
   preview(): FramingPreview {

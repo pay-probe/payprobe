@@ -212,6 +212,65 @@ async def test_pool_card_resolves_from_scenario_cards_in_normal_run():
 
 
 @pytest.mark.asyncio
+async def test_assertion_expected_resolves_request_echo_and_generators():
+    """``expected`` is resolved like the payload: ``${request.*}`` is this step's
+    own resolved request (an echo check — "the host must return the PAN / STAN
+    we sent"), and ``${terminal.*}`` / ``${card.*}`` describe the transaction's
+    bound records. An unresolvable reference is a clear step error, not a
+    silently-false assertion."""
+    env = {
+        "mode": "mock",
+        "adapters": {
+            "http": {
+                "mock": True,
+                "latency_ms": 0,
+                "responses": {
+                    "send_auth_request": {
+                        "response_code": "00",
+                        "pan": "4111111111111111",
+                        "terminal": "POS20001",
+                    }
+                },
+            },
+        },
+    }
+    scenario = {
+        "id": "sc-echo",
+        "name": "echo_check",
+        "test_class": "integration",
+        "cards": ["4111111111111111"],
+        "terminals": [{"id": "POS20001", "merchant": "M001"}],
+        "steps": [
+            {
+                "id": "s1",
+                "target": "http",
+                "action": "send_auth_request",
+                "payload": {"pan": "${card.pan}", "terminal": "${terminal.id}", "amount": 1},
+                "assertions": [
+                    {"field": "pan", "operator": "eq", "expected": "${request.pan}"},
+                    {"field": "terminal", "operator": "eq", "expected": "${terminal.id}"},
+                    {"field": "response_code", "operator": "eq", "expected": "00"},
+                ],
+            },
+        ],
+    }
+    engine = WorkerEngine(env, InMemorySink())
+    summary = await engine.run_scenario_batch([scenario], run_id="run-echo")
+    sc = summary["scenarios"][0]
+    assert sc["status"] == PASSED, sc
+    results = sc["steps"][0]["assertions"]
+    assert [a["expected"] for a in results] == ["4111111111111111", "POS20001", "00"]
+    assert all(a["passed"] for a in results)
+
+    scenario["steps"][0]["assertions"] = [
+        {"field": "pan", "operator": "eq", "expected": "${request.nope}"}
+    ]
+    summary = await engine.run_scenario_batch([scenario], run_id="run-echo-2")
+    step = summary["scenarios"][0]["steps"][0]
+    assert step["status"] == "error" and "unresolved reference in assertion" in step["error"]
+
+
+@pytest.mark.asyncio
 async def test_phase1_health_failure_blocks_dependent_scenario():
     env = {
         "mode": "mock",

@@ -1,0 +1,89 @@
+{
+  "id": "pos-purchase-magstripe",
+  "name": "POS purchase — magnetic stripe, approved",
+  "description": "A 0200 financial request from a POS terminal (magstripe read, no PIN) and the 0210 the host must return: approved (DE 39 = 000 in this three-digit dialect) and echoing the PAN, terminal id and currency we sent. Card and terminal come from pools and are bound for the whole transaction; the STAN and the transmission time stamp are generated per message, the local time stamp is the terminal's clock (UTC+4 here). Generic reconstruction of a working POS test-tool case.",
+  "tags": [
+    "example",
+    "pos",
+    "iso8583",
+    "terminal-link",
+    "purchase"
+  ],
+  "stop_on_failure": true,
+  "timeout_ms": 10000,
+  "test_class": "integration",
+  "card_pool": "pos_magstripe_cards",
+  "terminal_pool": "pos_lanes",
+  "steps": [
+    {
+      "id": "purchase",
+      "kind": "action",
+      "target": "pos_terminal_link",
+      "action": "send_0200",
+      "payload": {
+        "message_format_id": "pos-terminal-link-ascii-fields-binary-bitmap-1",
+        "mti": "0200",
+        "values": {
+          "2": "${card.pan}",
+          "3": "000000",
+          "4": "000000000200",
+          "12": "${now.fmt(%y%m%d%H%M%S,4)}",
+          "22": "020",
+          "24": "200",
+          "25": "00",
+          "35": "${card.track2}",
+          "41": "${terminal.id}",
+          "42": "${terminal.merchant}",
+          "48": "0360010",
+          "49": "${terminal.currency}"
+        }
+      },
+      "assertions": [
+        {
+          "field": "mti",
+          "operator": "eq",
+          "expected": "0210"
+        },
+        {
+          "field": "response_code",
+          "operator": "eq",
+          "expected": "000"
+        },
+        {
+          "field": "fields.2",
+          "operator": "eq",
+          "expected": "${request.values.2}"
+        },
+        {
+          "field": "fields.41",
+          "operator": "eq",
+          "expected": "${request.values.41}"
+        },
+        {
+          "field": "fields.49",
+          "operator": "eq",
+          "expected": "${request.values.49}"
+        },
+        {
+          "field": "fields.11",
+          "operator": "present"
+        },
+        {
+          "field": "fields.37",
+          "operator": "present"
+        },
+        {
+          "field": "fields.38",
+          "operator": "present"
+        }
+      ]
+    }
+  ],
+  "edges": [],
+  "layout": {
+    "purchase": {
+      "x": 120,
+      "y": 200
+    }
+  }
+}

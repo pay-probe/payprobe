@@ -142,8 +142,11 @@ bound Message Format's `definition.encoding`, flag `PAYPROBE_ISO8583_FORMAT_ENCO
 default on); otherwise the legacy `framing.encoding` text codec is folded
 (`ascii`/`utf-8`/`latin-1` → ascii profile, `cp037`/`ebcdic` → `text: ebcdic`);
 an unknown value or a disagreeing pair is refused before anything binds.
-`framing.length_encoding` (`binary` | `ascii` | `bcd`) is the *frame* length
-prefix and is separate from the body profile. Proof that a binary host
+`framing.length_encoding` (`binary` | `ascii` | `bcd` | `hex`) is the *frame*
+length prefix and is separate from the body profile; `framing.preset`
+(`ascii4`, `binary2_pad2`, `stx_etx_lrc`, …) and `framing.link_level`
+(`CHARDEC:false:false:BIG:4:`, the compact string terminal tools print) expand
+to the explicit keys — one vocabulary in `payprobe_common/link_framing.py`. Proof that a binary host
 interoperates over a live socket: `packages/worker/tests/test_iso8583_binary_wire.py`.
 Unknown-DE decodes stop with `truncated: true` + `error`; a structurally broken
 message raises `Iso8583DecodeError`.
@@ -301,6 +304,8 @@ transaction template variables for high-volume runs:
 | `${seq.ksn}` | a fresh DUKPT KSN per transaction (default base `3039505912345678`, 8-hex incrementing counter) |
 | `${seq.ksn(<base16hex>)}` | same with a custom initial-key-id base |
 | `${card.pan}` `.expiry` `.cvv` `.type`/`.brand` `.track2` `.seq` | fields of the card bound to the current transaction (rotates per transaction from the card pool) |
+| `${terminal.id}` `.merchant` `.currency` `.location` `.type` `.pinblock_format` `.<key>` `.seq` | fields of the terminal *record* bound to the current transaction (terminal pool entries may be `{id, merchant, …}` records; key *names*, never key material) |
+| `${request.values.2}` (in an assertion's `expected`) | the step's own resolved request — "the host must echo what we sent" |
 
 ---
 
@@ -440,11 +445,20 @@ Tests: `packages/worker/tests/test_cybersource_sim.py`.
   (`packages/worker/adapters/tcp/chaos.py`). Simulators (VISA, payShield) subclass it.
 - **Framing** = how message boundaries are marked on a TCP stream. Config keys
   (adapter and responder share them): `length_prefix_bytes` (≥1), `length_encoding`
-  (`binary` integer, or `ascii` zero-padded digits such as `0043`; added 2026-09-24,
-  `packages/worker/adapters/tcp/framing.py` is the one encode/decode), `length_byte_order`
-  (`big`/`little`, binary only), `length_includes_header`, `tpdu_bytes` (inbound TPDU
-  header to strip), `encoding`. A framing mismatch between two ends is the classic "hangs
-  forever / garbage decode" failure — see `payprobe-debugging-playbook`.
+  (`binary` integer, `ascii` zero-padded digits such as `0043`, `bcd`, or `hex` digits
+  such as `002B`; `packages/worker/adapters/tcp/framing.py` is the one encode/decode and
+  `FrameSpec.read_frame` the one read loop), `length_byte_order` (`big`/`little`, binary
+  only), `length_includes_prefix` / `length_includes_header`, `tpdu_bytes` (inbound TPDU
+  header to strip), `header_hex` (fixed bytes after the prefix), `trailer_hex` (fixed
+  bytes after the body, never counted — `03` = mandatory ETX), `mode: delimited` +
+  `start_hex` / `end_hex` / `checksum: lrc` (the STX…ETX LRC envelope, no length),
+  `encoding`. `preset` names a generic bundle (`binary2`, `binary2_inclusive`,
+  `binary2_pad2`, `binary4_pad14_inclusive`, `bcd2`, `ascii2/4/5/6`, `ascii4_trailer`,
+  `hex4`, `stx_etx_lrc`) and `link_level` accepts the compact six-token string terminal
+  test tools print; both expand on save (2026-11-09,
+  `docs/history/2026-11-09-terminal-test-tool-study.md`). A framing mismatch between two
+  ends is the classic "hangs forever / garbage decode" failure — see
+  `payprobe-debugging-playbook`.
 - **Protocol** = message content strategy on top of the transport
   (`packages/worker/adapters/tcp/protocols.py`): `iso8583` (correlate on STAN etc.)
   or `header_echo` (host echoes a leading header — HSM-style links).

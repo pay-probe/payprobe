@@ -42,6 +42,20 @@ def test_terminal_pool_round_trip():
     assert s.get_terminal_pool("lane_1").terminals == ["T0001", "T0002"]
 
 
+def test_terminal_pool_accepts_structured_records_and_requires_an_id():
+    """A terminal entry may be a full device record (id, merchant, currency,
+    location, key *names*) for ``${terminal.*}``; bare ids still work beside it."""
+    import pytest
+
+    rec = {"id": "POS20001", "merchant": "GCPOS13", "currency": "981",
+           "location": "Lane 1", "type": "pos", "pinblock_format": "01", "tpk": "lane_tpk"}
+    s = TestDataStore(":memory:")
+    s.upsert_terminal_pool("lanes", TerminalPoolDraft(terminals=["T0001", rec]))
+    assert s.get_terminal_pool("lanes").terminals == ["T0001", rec]
+    with pytest.raises(ValueError, match="needs an 'id'"):
+        TerminalPoolDraft(terminals=[{"merchant": "GCPOS13"}])
+
+
 def test_bin_range_generate_produces_luhn_valid_pans():
     s = TestDataStore(":memory:")
     s.upsert_bin_range("visa_test", BinRangeDraft(bin="411111", length=16, brand="visa"))

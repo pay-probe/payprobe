@@ -75,10 +75,11 @@ STEP_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 #: Reference prefixes that are runtime-injected, not prior steps — references
 #: into these must NOT be flagged as "does not resolve to any step". Kept in
 #: sync with the worker's generator namespaces (worker/engine/generators.py
-#: ``GENERATOR_NAMESPACES``) plus ``loop`` (loop body) and ``vars`` (scoped
-#: variables) and ``tables`` (table lookups).
+#: ``GENERATOR_NAMESPACES``) plus ``loop`` (loop body), ``vars`` (scoped
+#: variables), ``tables`` (table lookups) and ``request`` (the current step's
+#: own resolved payload, for echo assertions such as ``${request.values.2}``).
 NON_STEP_REF_PREFIXES = frozenset(
-    {"loop", "vars", "tables", "rand", "seq", "uuid", "now", "pool", "card"}
+    {"loop", "vars", "tables", "request", "rand", "seq", "uuid", "now", "pool", "card", "terminal"}
 )
 
 

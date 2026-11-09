@@ -30,13 +30,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .crypto import SecretBox, default_box, fingerprint, is_secret_key
 
+try:  # packages/ on the path (dev: PYTHONPATH=packages; container: /app)
+    from payprobe_common import link_framing as _lf
+except ModuleNotFoundError:  # pragma: no cover — running from the package dir
+    import sys
+    from pathlib import Path as _Path
+
+    _here = _Path(__file__).resolve()
+    for _cand in (_here.parents[1], _here.parents[2]):
+        if (_cand / "payprobe_common").is_dir():
+            sys.path.insert(0, str(_cand))
+            break
+    from payprobe_common import link_framing as _lf
+
 _ALLOWED_PROTOCOLS = {"iso8583", "header_echo"}
-# Length-prefix encodings the worker frames with (mirror of
-# ``worker.adapters.tcp.framing.LENGTH_ENCODINGS`` / ``LENGTH_ENCODING_ALIASES``;
-# the scenario-service image does not ship the worker package, so the two
-# tuples are kept in step by hand — test_connection_store checks the set).
-_LENGTH_ENCODINGS = ("binary", "ascii", "bcd")
-_LENGTH_ENCODING_ALIASES = {"chardec": "ascii", "char": "ascii", "decimal": "ascii", "bin": "binary"}
+# The framing vocabulary (length encodings, modes, presets, link-level strings)
+# is the worker's own, imported from ``payprobe_common.link_framing`` — the one
+# table both the registry and the wire share, so a record the registry accepts
+# is one the worker frames identically (no hand-mirrored copy to drift).
+_LENGTH_ENCODINGS = _lf.LENGTH_ENCODINGS
+_LENGTH_ENCODING_ALIASES = _lf.LENGTH_ENCODING_ALIASES
 # Adapter implementations a connection may target. The first two are the
 # original wire connections — "tcp" (universal ISO 8583 / header-echo) and
 # "grpc" (descriptor-driven). The rest are the other network endpoints the
@@ -149,41 +162,68 @@ class ConnectionDraft(BaseModel):
 
     @model_validator(mode="after")
     def _check_framing(self):
+        """Validate and **normalise** ``framing`` the way the worker reads it.
+
+        A ``preset`` (generic name, e.g. ``ascii4``) or a compact ``link_level``
+        string (``CHARDEC:false:false:BIG:4:``) is expanded into explicit keys
+        here, so the stored record always says exactly how the wire is framed
+        and a portal editor that only knows the explicit keys still round-trips
+        it; the label is kept beside them. Spellings are folded to canonical
+        ones. Anything the worker would refuse is refused here, at save time,
+        with the same message (the vocabulary is one shared module)."""
         framing = (self.model_extra or {}).get("framing")
-        if isinstance(framing, dict) and "length_prefix_bytes" in framing:
-            try:
-                lpb = int(framing["length_prefix_bytes"])
-            except (TypeError, ValueError):
-                raise ValueError("framing.length_prefix_bytes must be an integer")
-            if lpb < 1:
-                raise ValueError("framing.length_prefix_bytes must be >= 1")
-        if isinstance(framing, dict) and framing.get("length_encoding") is not None:
-            # Same set the worker's FrameSpec honours
-            # (worker/adapters/tcp/framing.py); vendor spellings are folded so
-            # the stored record carries one canonical name.
-            enc = _LENGTH_ENCODING_ALIASES.get(
-                str(framing["length_encoding"]).lower(), str(framing["length_encoding"]).lower()
-            )
-            if enc not in _LENGTH_ENCODINGS:
-                raise ValueError(
-                    "framing.length_encoding must be one of "
-                    + ", ".join(_LENGTH_ENCODINGS)
-                    + " (aliases: "
-                    + ", ".join(sorted(_LENGTH_ENCODING_ALIASES))
-                    + ")"
-                )
-            framing["length_encoding"] = enc
-        header_keys = [k for k in ("header", "header_hex", "mhdr") if (framing or {}).get(k)]
-        if isinstance(framing, dict) and len(header_keys) > 1:
+        if framing is None:
+            return self
+        if not isinstance(framing, dict):
+            raise ValueError("framing must be an object")
+        try:
+            expanded = _lf.expand_framing(framing)
+        except _lf.LinkFramingError as exc:
+            raise ValueError(str(exc)) from exc
+        if expanded.get("mode") == "length_prefix":
+            expanded.pop("mode", None)  # the default; keep records sparse
+            if "length_prefix_bytes" in expanded:
+                try:
+                    lpb = int(expanded["length_prefix_bytes"])
+                except (TypeError, ValueError):
+                    raise ValueError("framing.length_prefix_bytes must be an integer")
+                if lpb < 1:
+                    raise ValueError(
+                        "framing.length_prefix_bytes must be >= 1 (for a length-less "
+                        "STX/ETX envelope use framing.mode 'delimited')"
+                    )
+            for key in ("start_hex", "end_hex"):
+                expanded.pop(key, None)
+        else:
+            for key in ("length_prefix_bytes", "length_encoding", "length_byte_order",
+                        "length_includes_prefix", "length_includes_header",
+                        "tpdu_bytes", "tpdu_outbound_hex", "trailer_hex", "trailer_bytes",
+                        "header", "header_hex", "header_bytes", "mhdr"):
+                if key in expanded:
+                    raise ValueError(
+                        f"framing.{key} does not apply in delimited mode (start/end byte "
+                        "envelope); remove it or use mode 'length_prefix'"
+                    )
+        header_keys = [k for k in ("header", "header_hex", "mhdr") if expanded.get(k)]
+        if len(header_keys) > 1:
             raise ValueError(
                 "framing: set the message header once — framing.header (text) "
                 "or framing.header_hex (hex), not both"
             )
-        if isinstance(framing, dict) and framing.get("header_hex"):
-            try:
-                bytes.fromhex(str(framing["header_hex"]).replace(" ", ""))
-            except ValueError:
-                raise ValueError("framing.header_hex must be hex digits")
+        for key in ("header_hex", "trailer_hex", "tpdu_outbound_hex", "start_hex", "end_hex"):
+            if expanded.get(key):
+                try:
+                    bytes.fromhex(str(expanded[key]).replace(" ", "").replace(".", ""))
+                except ValueError:
+                    raise ValueError(f"framing.{key} must be hex digits")
+        for key in ("trailer_bytes", "header_bytes", "tpdu_bytes"):
+            if expanded.get(key) is not None:
+                try:
+                    if int(expanded[key]) < 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    raise ValueError(f"framing.{key} must be an integer >= 0")
+        self.model_extra["framing"] = expanded
         return self
 
 

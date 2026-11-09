@@ -352,6 +352,7 @@ class TcpResponder:
                         length_encoding=self.length_encoding,
                         mti_encoding=self.mti_encoding,
                         header_bytes=len(self.frame_spec.fixed_out),
+                        frame_spec=self.frame_spec,
                     )
 
                 if outcome.partial:
@@ -383,14 +384,12 @@ class TcpResponder:
 
     async def _read_frame(self, reader: asyncio.StreamReader) -> bytes | None:
         try:
-            prefix = await reader.readexactly(self.frame_spec.prefix_bytes)
+            frame = await self.frame_spec.read_frame(reader)
         except asyncio.IncompleteReadError:
             return None
-        remaining = self.frame_spec.remaining_after_prefix(prefix)
-        if remaining <= 0:
+        if frame is None:
             return b""
-        data = await reader.readexactly(remaining)
-        return self.frame_spec.strip_inbound(data)[1]
+        return frame[1]
 
     # -- protocol decode / encode -------------------------------------------
 
@@ -475,7 +474,11 @@ class TcpResponder:
         for de, gen_spec in (action.get("generate") or {}).items():
             if str(de) not in values or not values[str(de)]:
                 if gen_spec == "random_rrn":
-                    values[str(de)] = f"{random.randint(100000, 999999):06d}"
+                    # sized to the bound table (DE 37 is an12 in every ISO 8583
+                    # dialect): a short fixed field is not padded by the codec
+                    # and would desync the whole reply after it
+                    width = int((self.fields.get(str(de)) or {}).get("length") or 12)
+                    values[str(de)] = "".join(str(random.randint(0, 9)) for _ in range(width))
                 elif isinstance(gen_spec, str):
                     values[str(de)] = gen_spec
         values.setdefault("39", "00")

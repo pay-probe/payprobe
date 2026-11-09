@@ -124,9 +124,17 @@ def save_connection(name: str, draft: dict) -> dict:
     just the field you're changing — fetch it with :func:`get_connection` first,
     edit, then save). Common keys: ``adapter``, ``protocol``, ``host``, ``port``,
     ``mode``, ``response_timeout_sec``, ``connect_timeout_sec``,
-    ``keepalive``, ``environment_overrides``. Use this to tune a connection —
-    e.g. lower an HSM's ``response_timeout_sec`` so failover trips fast on a
-    dead member instead of stalling on its timeout."""
+    ``keepalive``, ``environment_overrides``, ``message_format_id`` (binds
+    the dialect the socket decodes with). Wire framing goes under ``framing``:
+    either explicit keys (``length_prefix_bytes``, ``length_encoding`` binary |
+    ascii | bcd | hex, ``length_includes_prefix`` / ``_header``, ``header_hex``,
+    ``trailer_hex``, ``mode`` length_prefix | delimited …), a generic
+    ``preset`` (``ascii4``, ``binary2``, ``binary2_pad2``, ``stx_etx_lrc`` …) or
+    a ``link_level`` string copied off a terminal tool's connection screen
+    (``CHARDEC:false:false:BIG:4:``) — the registry expands the last two into
+    explicit keys on save. Use this to tune a connection — e.g. lower an HSM's
+    ``response_timeout_sec`` so failover trips fast on a dead member instead
+    of stalling on its timeout."""
     return _request("PUT", f"{SCENARIO_API}/connections/{name}", draft)
 
 

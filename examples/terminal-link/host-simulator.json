@@ -1,0 +1,78 @@
+{
+  "_comment": "A stand-in for the processing host: a PayProbe responder bound to the same Message Format (field table, wire encoding and presence rules land on it from message_format_id) over the same framing, so the scenario runs end to end before the real host is reachable. Save it as a saved simulator (POST /simulator-configs {label, config}), start it, point the connection at it.",
+  "description": "POS host stand-in — approves everything (DE 39 = 000), echoes PAN / STAN / terminal / currency, issues an RRN and approval code; declines prefix 400000 with 116 (insufficient funds).",
+  "host": "0.0.0.0",
+  "port": 52000,
+  "protocol": "iso8583",
+  "message_format_id": "pos-terminal-link-ascii-fields-binary-bitmap-1",
+  "framing": {
+    "preset": "ascii4"
+  },
+  "validate": {
+    "mode": "warn",
+    "on_error": {
+      "39": "904"
+    }
+  },
+  "rules": [
+    {
+      "when": {
+        "mti": "0200",
+        "de": {
+          "2": {
+            "prefix": "400000"
+          }
+        }
+      },
+      "respond": {
+        "echo": [
+          "2",
+          "3",
+          "4",
+          "7",
+          "11",
+          "12",
+          "41",
+          "49"
+        ],
+        "set": {
+          "39": "116"
+        }
+      }
+    },
+    {
+      "when": {
+        "mti": "0800"
+      },
+      "respond": {
+        "echo": [
+          "7",
+          "11",
+          "24"
+        ],
+        "set": {
+          "39": "000"
+        }
+      }
+    }
+  ],
+  "default": {
+    "echo": [
+      "2",
+      "3",
+      "4",
+      "7",
+      "11",
+      "12",
+      "41",
+      "49"
+    ],
+    "generate": {
+      "37": "random_rrn"
+    },
+    "set": {
+      "39": "000",
+      "38": "A00001"
+    }
+  }
+}
