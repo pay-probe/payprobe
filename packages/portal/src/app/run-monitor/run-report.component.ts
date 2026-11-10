@@ -16,6 +16,7 @@ import {
   RunStatus,
   ScenarioReport,
   StepOutcome,
+  phaseOneProblems,
 } from "./run.models";
 import { AssistantApiService } from "../assistant/assistant-api.service";
 import { AssistantService } from "../assistant/assistant.service";
@@ -361,6 +362,57 @@ import { AgentVerdictsComponent } from "../agents/agent-verdicts.component";
                       <span class="muted">{{ p.blocked }}⊘</span>
                     }
                   </div>
+                  @if (p.key === "phase_1") {
+                    @let why = problems(p);
+                    @if (why.unhealthy.length) {
+                      <div class="phase__why">
+                        <span class="phase__whylabel"
+                          >Health check failed:</span
+                        >
+                        @for (t of why.unhealthy; track t) {
+                          <span class="phase__chip phase__chip--bad">{{
+                            t
+                          }}</span>
+                        }
+                      </div>
+                    }
+                    @if (why.fixtures.length) {
+                      <div class="phase__why">
+                        <span class="phase__whylabel"
+                          >Before fixture failed:</span
+                        >
+                        @for (t of why.fixtures; track t) {
+                          <span class="phase__chip phase__chip--bad">{{
+                            t
+                          }}</span>
+                        }
+                      </div>
+                    }
+                    @if (why.recovered.length) {
+                      <div class="phase__why">
+                        <span class="phase__whylabel">Healthy on retry:</span>
+                        @for (t of why.recovered; track t) {
+                          <span class="phase__chip">{{ t }}</span>
+                        }
+                      </div>
+                    }
+                    @if (why.unhealthy.length || why.fixtures.length) {
+                      <p class="phase__note">
+                        The run is failed because of
+                        {{
+                          why.unhealthy.length
+                            ? "these components"
+                            : "this fixture"
+                        }}, even where every test case passed. Test cases that
+                        use an unhealthy component are blocked; the others ran
+                        and keep their own result. Check the component's
+                        connection and its
+                        <a routerLink="/connections">health check mode</a>
+                        (a host that never answers the 0800 probe needs
+                        <em>connect</em>).
+                      </p>
+                    }
+                  }
                 </div>
               }
             </section>
@@ -913,6 +965,35 @@ import { AgentVerdictsComponent } from "../agents/agent-verdicts.component";
         font-size: 0.85rem;
         margin-top: 0.4rem;
       }
+      .phase__why {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.3rem;
+        margin-top: 0.45rem;
+        font-size: 0.8rem;
+      }
+      .phase__whylabel {
+        color: var(--color-muted);
+      }
+      .phase__chip {
+        font-family: var(--font-mono, ui-monospace, monospace);
+        font-size: 0.75rem;
+        padding: 0.05rem 0.45rem;
+        border-radius: 999px;
+        border: 1px solid var(--color-border);
+      }
+      .phase__chip--bad {
+        color: var(--color-fail);
+        border-color: color-mix(in srgb, var(--color-fail) 45%, transparent);
+        background: color-mix(in srgb, var(--color-fail) 8%, transparent);
+      }
+      .phase__note {
+        margin: 0.5rem 0 0;
+        font-size: 0.78rem;
+        line-height: 1.45;
+        color: var(--color-muted);
+      }
       .rr__h2 {
         font-size: 1.1rem;
         margin: 0 0 0.6rem;
@@ -1254,6 +1335,11 @@ export class RunReportComponent implements OnInit {
       new Date(d.completed_at).getTime() - new Date(d.started_at).getTime()
     );
   });
+
+  /** Phase 1's failed components, fixtures and retry recoveries, by name. */
+  problems(p: unknown): ReturnType<typeof phaseOneProblems> {
+    return phaseOneProblems(p as Parameters<typeof phaseOneProblems>[0]);
+  }
 
   readonly phases = computed(() => {
     const labels: Record<string, string> = {

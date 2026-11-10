@@ -59,9 +59,13 @@ export interface PhaseUpdate {
   status: RunStatus;
   total?: number;
   passed?: number;
-  failed?: number;
+  /** Phases 2 and 3: a count. Phase 1: the names of the components that
+   *  failed the health check (see {@link phaseOneProblems}). */
+  failed?: number | string[];
   blocked?: number;
   components?: number;
+  recovered?: string[];
+  fixture_failed?: string[];
 }
 
 export interface StepResult {
@@ -186,10 +190,34 @@ export interface PhaseSummary {
   status: RunStatus;
   total?: number;
   passed?: number;
-  failed?: number;
+  /** Phases 2 and 3: a count. Phase 1: the names of the components that
+   *  failed the health check (see {@link phaseOneProblems}). */
+  failed?: number | string[];
   blocked?: number;
   components?: number;
   failed_targets?: string[];
+  /** Phase 1: components healthy only on the retry. */
+  recovered?: string[];
+  /** Phase 1: "before" fixtures that did not pass. */
+  fixture_failed?: string[];
+}
+
+/** Why phase 1 (component health checks) failed, by name: the engine writes
+ *  the unhealthy components under ``failed`` (a list, unlike phases 2 and 3,
+ *  where it is a count), plus ``fixture_failed`` and ``recovered``. A run is
+ *  failed when phase 1 is, even if every test case that ran passed. */
+export function phaseOneProblems(p: Partial<PhaseSummary> | null | undefined): {
+  unhealthy: string[];
+  fixtures: string[];
+  recovered: string[];
+} {
+  const list = (v: unknown): string[] =>
+    Array.isArray(v) ? v.map((x) => String(x)) : [];
+  return {
+    unhealthy: list(p?.failed),
+    fixtures: list(p?.fixture_failed),
+    recovered: list(p?.recovered),
+  };
 }
 
 export interface RunSummary {

@@ -17,6 +17,7 @@ import {
   PhaseUpdate,
   RunStatus,
   StepResult,
+  phaseOneProblems,
 } from "./run.models";
 import { ScenarioApiService } from "../constructor/scenario-api.service";
 import { UiService } from "../shared/ui.service";
@@ -157,6 +158,22 @@ const PHASE_LABELS: Record<number, string> = {
                     <span class="phase__state">{{ p.status }}</span>
                   }
                 </div>
+                @if (p.n === 1) {
+                  @let why = problems(p.counts);
+                  @if (why.unhealthy.length || why.fixtures.length) {
+                    <div
+                      class="phase__why"
+                      title="The run is failed because of these, even where every test case passes. Test cases that use an unhealthy component are blocked."
+                    >
+                      @for (t of why.unhealthy; track t) {
+                        <span class="phase__chip">{{ t }} unhealthy</span>
+                      }
+                      @for (t of why.fixtures; track t) {
+                        <span class="phase__chip">fixture {{ t }} failed</span>
+                      }
+                    </div>
+                  }
+                }
               </div>
             </div>
           }
@@ -642,6 +659,21 @@ const PHASE_LABELS: Record<number, string> = {
         color: var(--text-muted);
         flex: 0 0 auto;
       }
+      .phase__why {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 4px;
+      }
+      .phase__chip {
+        font-family: var(--font-mono, ui-monospace, monospace);
+        font-size: 11px;
+        padding: 1px 7px;
+        border-radius: 999px;
+        color: var(--color-fail);
+        border: 1px solid color-mix(in srgb, var(--color-fail) 45%, transparent);
+        background: color-mix(in srgb, var(--color-fail) 8%, transparent);
+      }
       .phase--passed {
         border-color: color-mix(
           in srgb,
@@ -1054,6 +1086,11 @@ export class RunMonitorComponent implements OnInit, OnDestroy {
     if (status === "all") return steps;
     return steps.filter((s) => s.status === status);
   });
+  /** Phase 1's failed components and fixtures, by name. */
+  problems(p: PhaseUpdate | null): ReturnType<typeof phaseOneProblems> {
+    return phaseOneProblems(p);
+  }
+
   readonly phaseCards = computed<PhaseCard[]>(() => {
     const ph = this.phases();
     return [1, 2, 3].map((n) => ({

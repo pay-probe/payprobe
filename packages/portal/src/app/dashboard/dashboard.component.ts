@@ -347,8 +347,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private updateLiveProgress(): void {
     const phases = Object.values(this.livePhases);
     const total = phases.reduce((a, p) => a + (p.total ?? 0), 0);
+    // phase 1 carries `failed` as a list of component names, not a count:
+    // only numbers are progress (adding the list turned the sum into text)
+    const num = (v: unknown): number => (typeof v === "number" ? v : 0);
     const done = phases.reduce(
-      (a, p) => a + (p.passed ?? 0) + (p.failed ?? 0) + (p.blocked ?? 0),
+      (a, p) => a + num(p.passed) + num(p.failed) + num(p.blocked),
       0,
     );
     const pct = total > 0 ? Math.min((done / total) * 100, 100) : 0;
