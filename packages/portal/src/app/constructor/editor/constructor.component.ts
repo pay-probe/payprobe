@@ -11,6 +11,8 @@ import {
   ChangeDetectionStrategy,
 } from "@angular/core";
 import { FormsModule } from "@angular/forms";
+import { DeValuesEditorComponent } from "./de-values-editor.component";
+import { DeTable, GENERATOR_REFS, activeTable } from "./de-values.model";
 import { ActivatedRoute, Router, RouterLink } from "@angular/router";
 
 import { CodeEditorComponent } from "../../shared/code-editor.component";
@@ -284,37 +286,6 @@ const FLOW_TEMPLATES: FlowTemplate[] = [
   },
 ];
 
-/** Per-transaction value generators the worker resolves in-process (mirror of
- *  `worker/engine/generators.py`): offered by the payload autocomplete so an
- *  author finds them without a Code step. `${seq.NAME(width)}` is a padded
- *  counter, unique across the load fleet; the rest are random / time / pool
- *  values. */
-const GENERATOR_REFS = [
-  "${seq.stan(6)}",
-  "${seq.stan}",
-  "${seq.ksn}",
-  "${uuid}",
-  "${now.rrn}",
-  "${now.epoch}",
-  "${now.iso}",
-  "${now.fmt(%m%d%H%M%S)}",
-  "${now.fmt(%H%M%S,4)}",
-  "${rand.int(1,100)}",
-  "${rand.amount(100,5000)}",
-  "${rand.digits(4)}",
-  "${rand.hex(8)}",
-  "${rand.pan(411111)}",
-  "${pool.terminal}",
-  "${pool.card}",
-  "${card.pan}",
-  "${card.expiry}",
-  "${card.cvv}",
-  "${card.track2}",
-  "${terminal.id}",
-  "${terminal.merchant}",
-  "${terminal.currency}",
-];
-
 @Component({
   selector: "app-constructor",
   standalone: true,
@@ -326,6 +297,7 @@ const GENERATOR_REFS = [
     CodeEditorComponent,
     RefAutocompleteDirective,
     IconComponent,
+    DeValuesEditorComponent,
   ],
   templateUrl: "./constructor.component.html",
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -799,6 +771,68 @@ export class ConstructorComponent implements OnInit {
     this.updateStep(step.id, { payload });
     this.payloadText.set(JSON.stringify(payload, null, 2));
     this.payloadError.set(null);
+  }
+
+  /** True for the ISO 8583 field-values map of a message step (a `values`
+   *  json param on an action that also picks an MTI): it gets the DE table
+   *  editor instead of a one-line JSON box. Detected by shape, not by a new
+   *  param type, so catalog entries already stored in the registry get it. */
+  isDeValuesParam(p: ParamSpec): boolean {
+    return (
+      p.type === "json" &&
+      p.name === "values" &&
+      this.selectedParams().some((q) => q.name === "mti")
+    );
+  }
+
+  /** The DE table the selected step packs with: its own `fields` snapshot
+   *  (written when a dialect is bound; the wire uses it), else the bound
+   *  dialect's, else the stock ISO 8583:1987 builtin. */
+  readonly deTable = computed<{ table: DeTable; label: string }>(() => {
+    const payload = this.payloadObj(this.selectedStep());
+    const dialect = this.selectedDialect();
+    const dialectFields = (
+      dialect?.definition as Record<string, unknown> | undefined
+    )?.["fields"];
+    const stock = this.messageFormats().find((f) => f.id === "iso8583-1987");
+    const stockFields = (
+      stock?.definition as Record<string, unknown> | undefined
+    )?.["fields"];
+    const { table, source } = activeTable(
+      payload["fields"],
+      dialectFields,
+      stockFields,
+    );
+    const label =
+      source === "step"
+        ? dialect
+          ? `${dialect.name} (the step's DE table)`
+          : "the step's DE table override"
+        : source === "dialect"
+          ? (dialect?.name ?? "the dialect")
+          : source === "stock"
+            ? "ISO 8583:1987 (stock table)"
+            : "";
+    return { table, label };
+  });
+
+  /** Write an object-valued param (the DE editor's map) straight into the
+   *  payload: `setParam` would stringify it. Keeps the raw payload view in
+   *  sync the same way. */
+  setParamObject(p: ParamSpec, value: Record<string, unknown>): void {
+    const step = this.selectedStep();
+    if (!step) return;
+    const payload: Record<string, unknown> = { ...this.payloadObj(step) };
+    payload[p.name] = value;
+    this.updateStep(step.id, { payload });
+    this.payloadText.set(JSON.stringify(payload, null, 2));
+    this.payloadError.set(null);
+  }
+
+  /** The raw stored value of a param (object or string), for editors that
+   *  read the structure rather than its text. */
+  paramRaw(name: string): unknown {
+    return this.payloadObj(this.selectedStep())[name];
   }
 
   ngOnInit(): void {

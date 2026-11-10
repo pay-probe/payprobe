@@ -527,6 +527,16 @@ interface DocCard {
                   palette.
                 </li>
                 <li>
+                  Fill the message under <strong>Field values</strong>: add each
+                  data element from the list (type a number or a name such as
+                  <em>amount</em>). Every row shows the DE's name and format
+                  from the bound dialect, counts its length and turns red when
+                  the value would not pack. The lightning chips insert a value
+                  that changes per transaction, for example the STAN counter
+                  <code>&#36;&#123;seq.stan(6)&#125;</code> on DE 11. Use the
+                  <strong>JSON</strong> view to paste a whole map at once.
+                </li>
+                <li>
                   Add an assertion on <code>response_code = 00</code> in the
                   step inspector.
                 </li>

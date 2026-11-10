@@ -1988,14 +1988,24 @@
                       />
                     }
                     @case ("json") {
-                      <textarea
-                        class="mono param__control"
-                        rows="2"
-                        [placeholder]="p.placeholder || '{}'"
-                        [appRefAutocomplete]="allRefs()"
-                        [ngModel]="paramStr(p.name)"
-                        (ngModelChange)="setParam(p, $event)"
-                      ></textarea>
+                      @if (isDeValuesParam(p)) {
+                        <app-de-values-editor
+                          [value]="paramRaw(p.name)"
+                          [table]="deTable().table"
+                          [tableLabel]="deTable().label"
+                          [refs]="allRefs()"
+                          (valueChange)="setParamObject(p, $event)"
+                        />
+                      } @else {
+                        <textarea
+                          class="mono param__control"
+                          rows="2"
+                          [placeholder]="p.placeholder || '{}'"
+                          [appRefAutocomplete]="allRefs()"
+                          [ngModel]="paramStr(p.name)"
+                          (ngModelChange)="setParam(p, $event)"
+                        ></textarea>
+                      }
                     }
                     @default {
                       <input

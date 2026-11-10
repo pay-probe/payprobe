@@ -1,0 +1,188 @@
+<div class="dev" [class.dev--issues]="hasIssues()">
+  <div class="dev__head">
+    <span class="dev__summary">
+      <pp-icon name="list" [size]="13" />
+      {{ summary() }}
+    </span>
+    <span class="dev__seg" role="tablist" aria-label="Editor view">
+      <button
+        type="button"
+        role="tab"
+        class="dev__segbtn"
+        [class.active]="mode() === 'table'"
+        [attr.aria-selected]="mode() === 'table'"
+        (click)="setMode('table')"
+      >
+        Fields
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="dev__segbtn"
+        [class.active]="mode() === 'json'"
+        [attr.aria-selected]="mode() === 'json'"
+        (click)="setMode('json')"
+        title="Edit or paste the whole map as JSON"
+      >
+        JSON
+      </button>
+    </span>
+  </div>
+  @if (tableLabel()) {
+    <div class="dev__src muted">
+      Checked against <strong>{{ tableLabel() }}</strong>
+    </div>
+  }
+
+  @if (mode() === "table") {
+    <ul class="dev__rows">
+      @for (r of rows(); track r.key) {
+        <li
+          class="dev__row"
+          [class.dev__row--bad]="!!issue(r) || unknown(r)"
+          [class.dev__row--ref]="isRef(r)"
+        >
+          <div class="dev__line">
+            <span class="dev__de mono" [title]="'Data element ' + r.de">{{
+              r.de
+            }}</span>
+            <span class="dev__name" [title]="name(r)">
+              @if (name(r)) {
+                {{ name(r) }}
+              } @else {
+                <span class="dev__warn">Not in the DE table</span>
+              }
+            </span>
+            @if (hint(r)) {
+              <span class="dev__hint mono">{{ hint(r) }}</span>
+            }
+            <button
+              type="button"
+              class="dev__x"
+              (click)="remove(r)"
+              [attr.aria-label]="'Remove DE ' + r.de"
+              title="Remove this field"
+            >
+              <pp-icon name="x" [size]="13" />
+            </button>
+          </div>
+          <div class="dev__line">
+            <input
+              class="mono dev__input"
+              [attr.aria-label]="'Value of DE ' + r.de"
+              [appRefAutocomplete]="refs()"
+              [ngModel]="r.value"
+              (ngModelChange)="onValue(r, $event)"
+              spellcheck="false"
+            />
+            @if (isRef(r)) {
+              <span
+                class="dev__chip dev__chip--ref"
+                title="Resolved per transaction"
+                ><pp-icon name="zap" [size]="11" /> per txn</span
+              >
+            } @else if (counter(r)) {
+              <span class="dev__count mono" [class.bad]="!!issue(r)">{{
+                counter(r)
+              }}</span>
+            }
+          </div>
+          @if (issue(r); as msg) {
+            <div class="dev__msg dev__msg--bad">{{ msg }}</div>
+          } @else if (unknown(r)) {
+            <div class="dev__msg dev__msg--bad">
+              DE{{ r.de }} is not defined in this DE table: the message will not
+              pack. Bind a dialect that has it, or remove it.
+            </div>
+          } @else if (note(r); as n) {
+            <div class="dev__msg dev__msg--warn">{{ n }}</div>
+          }
+          @if (suggestions(r).length) {
+            <div class="dev__sugs">
+              @for (s of suggestions(r); track s.value) {
+                <button
+                  type="button"
+                  class="dev__sug"
+                  (click)="useSuggestion(r, s.value)"
+                  [title]="'Use ' + s.value"
+                >
+                  <pp-icon name="zap" [size]="11" /> {{ s.label }}
+                  <code>{{ s.value }}</code>
+                </button>
+              }
+            </div>
+          }
+        </li>
+      } @empty {
+        <li class="dev__empty muted">
+          No fields yet. Add the data elements this message carries, starting
+          with DE 2 (PAN), 3 (processing code) and 4 (amount).
+        </li>
+      }
+    </ul>
+
+    <div class="dev__add">
+      <pp-icon name="plus" [size]="13" />
+      <input
+        class="dev__addinput"
+        placeholder="Add a DE: type a number or a name (pan, amount, terminal…)"
+        aria-label="Add a data element"
+        [ngModel]="addQuery()"
+        (ngModelChange)="addQuery.set($event); addOpen.set(true)"
+        (focus)="addOpen.set(true)"
+        (blur)="closeAddSoon()"
+        (keydown.enter)="addFromQuery()"
+        (keydown.escape)="addOpen.set(false)"
+      />
+      @if (addOpen() && addMatches().length) {
+        <ul class="dev__menu" role="listbox">
+          @for (m of addMatches(); track m.de) {
+            <li>
+              <button
+                type="button"
+                class="dev__opt"
+                role="option"
+                (mousedown)="$event.preventDefault()"
+                (click)="add(m.de)"
+              >
+                <span class="dev__de mono">{{ m.de }}</span>
+                <span class="dev__optname">{{ m.spec.name }}</span>
+                <span class="dev__hint mono">{{
+                  hint({ de: m.de, value: "" })
+                }}</span>
+              </button>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+
+    @if (autoMissing().length) {
+      <p class="dev__foot muted">
+        <pp-icon name="info" [size]="12" />
+        Left out: <span class="mono">{{ autoMissingText() }}</span
+        >. The connection fills them when its auto fields (DE 7, 12, 13) and
+        STAN generation (DE 11) are on. For load, set DE 11 to the counter so
+        workers never repeat a STAN.
+      </p>
+    }
+  } @else {
+    <textarea
+      class="mono dev__json"
+      [rows]="jsonRows()"
+      [appRefAutocomplete]="refs()"
+      [ngModel]="jsonDraft()"
+      (ngModelChange)="onJson($event)"
+      spellcheck="false"
+      placeholder='{ "2": "${card.pan}", "3": "000000", "4": "000000010000", "11": "${seq.stan(6)}" }'
+      aria-label="Field values as JSON"
+    ></textarea>
+    @if (jsonError(); as e) {
+      <div class="dev__msg dev__msg--bad">{{ e }}</div>
+    } @else {
+      <div class="dev__msg muted">
+        Applied as you type. Switch back to Fields to see each DE checked.
+      </div>
+    }
+  }
+</div>
