@@ -9,6 +9,8 @@ meaningless. The supported tokens:
     ${uuid}                  -> a random 32-hex id
     ${seq.stan}              -> 1, 2, 3, ...            (a named monotonic counter)
     ${seq.stan(6)}           -> "000001", "000002", ... (zero-padded, wraps mod 10**6)
+                                Unique across a load fleet: worker i of n draws
+                                i+1, i+1+n, i+1+2n, ... (see ``shard``).
     ${seq.ksn}               -> "303950591234567800000000", ... (per-txn DUKPT KSN:
                                 a counter in the low 8 hex of a 24-hex KSN; mirrors TestPay)
     ${seq.ksn(<base16hex>)}  -> ... with a custom 16-hex initial-key-id base
@@ -142,6 +144,13 @@ class GeneratorContext:
 
     Seed it for reproducibility; leave ``seed=None`` for a fresh random stream.
     ``terminals`` / ``cards`` feed the ``${pool.*}`` round-robins.
+
+    ``shard=(index, count)`` interleaves every ``${seq.*}`` counter across a
+    load fleet: worker ``index`` of ``count`` draws ``index+1``, ``index+1+count``,
+    ``index+1+2*count``, ... so no two workers of one run ever send the same
+    STAN / KSN counter (before 2026-11-10 every worker started at 1, so a
+    5-worker run sent each STAN five times). The default ``(0, 1)`` is the
+    plain 1, 2, 3, ... of a functional run.
     """
 
     def __init__(
@@ -150,9 +159,15 @@ class GeneratorContext:
         *,
         terminals: list[Any] | None = None,
         cards: list[Any] | None = None,
+        shard: tuple[int, int] | None = None,
     ) -> None:
         self._rng = random.Random(seed)
         self._seq: dict[str, int] = {}
+        index, count = shard or (0, 1)
+        if count < 1 or not 0 <= index < count:
+            raise ValueError(f"shard must be (index, count) with 0 <= index < count, got {shard!r}")
+        self._shard_index = int(index)
+        self._shard_count = int(count)
         #: Terminal entries as given — bare id strings or structured records;
         #: ``${pool.terminal}`` yields the id either way.
         self._terminals = list(terminals or [])
@@ -226,11 +241,17 @@ class GeneratorContext:
 
     # -- namespace handlers --------------------------------------------------
 
+    def _advance(self, key: str) -> int:
+        """The next 0-based value of counter ``key`` on this shard: the k-th
+        draw is ``index + k * count`` (k = 0, 1, 2, ...)."""
+        k = self._seq.get(key, 0)
+        self._seq[key] = k + 1
+        return self._shard_index + k * self._shard_count
+
     def _seq_next(self, name: str, args: list[str]) -> Any:
         if name == "ksn":
             return self._ksn(args)
-        self._seq[name] = self._seq.get(name, 0) + 1
-        n = self._seq[name]
+        n = self._advance(name) + 1  # 1-based, like a STAN
         if args:
             width = int(args[0])
             return str(n % (10**width)).zfill(width)
@@ -240,9 +261,7 @@ class GeneratorContext:
         """A 24-hex DUKPT KSN: 16-hex initial-key-id base + an 8-hex counter
         that advances per call (0-based, like TestPay's ``%08X`` of the index)."""
         base = (args[0] if args else _DEFAULT_KSN_BASE).strip().upper()
-        key = f"ksn:{base}"
-        n = self._seq.get(key, 0)
-        self._seq[key] = n + 1
+        n = self._advance(f"ksn:{base}")
         return f"{base}{n:08X}"
 
     def _rand(self, fname: str, args: list[str], expr: str) -> Any:

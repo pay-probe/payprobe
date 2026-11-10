@@ -284,6 +284,37 @@ const FLOW_TEMPLATES: FlowTemplate[] = [
   },
 ];
 
+/** Per-transaction value generators the worker resolves in-process (mirror of
+ *  `worker/engine/generators.py`): offered by the payload autocomplete so an
+ *  author finds them without a Code step. `${seq.NAME(width)}` is a padded
+ *  counter, unique across the load fleet; the rest are random / time / pool
+ *  values. */
+const GENERATOR_REFS = [
+  "${seq.stan(6)}",
+  "${seq.stan}",
+  "${seq.ksn}",
+  "${uuid}",
+  "${now.rrn}",
+  "${now.epoch}",
+  "${now.iso}",
+  "${now.fmt(%m%d%H%M%S)}",
+  "${now.fmt(%H%M%S,4)}",
+  "${rand.int(1,100)}",
+  "${rand.amount(100,5000)}",
+  "${rand.digits(4)}",
+  "${rand.hex(8)}",
+  "${rand.pan(411111)}",
+  "${pool.terminal}",
+  "${pool.card}",
+  "${card.pan}",
+  "${card.expiry}",
+  "${card.cvv}",
+  "${card.track2}",
+  "${terminal.id}",
+  "${terminal.merchant}",
+  "${terminal.currency}",
+];
+
 @Component({
   selector: "app-constructor",
   standalone: true,
@@ -530,6 +561,7 @@ export class ConstructorComponent implements OnInit {
     for (const name of Object.keys(this.tablesRuntime())) {
       refs.push(`\${tables.${name}}`);
     }
+    refs.push(...GENERATOR_REFS);
     return refs;
   });
 

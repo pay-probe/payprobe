@@ -321,6 +321,9 @@ async def run_worker(
             seed=f"{run_id}:{shard.worker_index}",
             terminals=primary.get("terminals"),
             cards=primary.get("cards"),
+            # ${seq.*} interleaved across the fleet: no two workers send the
+            # same STAN / KSN counter in one run.
+            shard=(shard.worker_index, shard.worker_count),
         )
         driver = LoadDriver(
             shard,

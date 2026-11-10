@@ -93,7 +93,24 @@ inline as `scenarios: [ ... ]`.
 
 Generator tokens available anywhere in a payload: `${uuid}`, `${seq.NAME}` / `${seq.NAME(width)}`,
 `${rand.int(a,b)}`, `${rand.amount(a,b)}`, `${rand.digits(n)}`, `${rand.hex(n)}`,
-`${rand.pan(bin[,len])}`, `${now.rrn|epoch|iso}`, `${pool.terminal|card}`.
+`${rand.pan(bin[,len])}`, `${now.rrn|epoch|iso}`, `${now.fmt(<strftime>[,utc_offset_hours])}`,
+`${pool.terminal|card}`, `${card.pan|expiry|cvv|track2|seq}`, `${terminal.seq}`.
+
+**An incrementing DE 11 (STAN) under load needs no Code step.** In an ISO 8583
+step put `"11": "${seq.stan(6)}"` in `values`: 000001, 000002, ... zero-padded,
+wrapping after 999999, resolved in-process (a Code step forks a Python process
+per transaction, about 25 ms, and falls over around 30 to 50 TPS). Since
+2026-11-10 `${seq.*}` is interleaved across the fleet: worker *i* of *n* draws
+*i*+1, *i*+1+*n*, ... so no two workers of one run send the same STAN (before,
+every worker started at 1). Uniqueness holds for the worker count at run start:
+a worker added by Fleet scale-up strides by the new count while the original
+workers keep the old one, so values can repeat after a mid-run scale. The
+sequence restarts at 1 on every run (no persisted offset yet). Leaving DE 11
+out also works, the TCP adapter's `correlation.auto_generate` stamps one, but that
+counter is per worker process, so a 5-worker run sends each STAN five times; under
+load prefer the generator. DE 7 / DE 12 (and 13) are stamped by the adapter's
+`auto_fields` (default on) when the DE table lists them; `${now.fmt(%H%M%S,4)}`
+gives a local-time value for a dialect that wants one.
 Crypto ops: `dukpt_ipek`, `dukpt_derive_key` (variant `pin|mac_req|mac_resp|data_req`),
 `dukpt_pin_block`, `pvv`.
 
@@ -212,7 +229,8 @@ away.
 
 To force the true distributed path (never fall back to in-process workers), also set
 `PAYPROBE_LOAD_EXTERNAL_WORKERS=1`. Each worker seeds its generators from `run_id:worker_index`,
-so the fleet produces independent-but-reproducible card data.
+so the fleet produces independent-but-reproducible card data, and interleaves its `${seq.*}`
+counters by `(worker_index, worker_count)` so sequence values are unique fleet-wide.
 
 ---
 

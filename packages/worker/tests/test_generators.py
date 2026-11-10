@@ -249,3 +249,28 @@ def test_terminal_binds_lazily_and_empty_pool_raises():
     with pytest.raises(GeneratorError, match="terminal pool is empty"):
         GeneratorContext(seed=1).resolve("terminal.id")
     assert GeneratorContext.is_generator("terminal.merchant")
+
+
+def test_seq_is_interleaved_across_load_workers():
+    """Worker i of n draws i+1, i+1+n, ...: a 3-worker fleet never repeats a
+    STAN, and the padded form keeps the width."""
+    workers = [GeneratorContext(seed=f"run:{i}", shard=(i, 3)) for i in range(3)]
+    drawn = [[g.resolve("seq.stan") for _ in range(4)] for g in workers]
+    assert drawn == [[1, 4, 7, 10], [2, 5, 8, 11], [3, 6, 9, 12]]
+    assert len({n for row in drawn for n in row}) == 12
+    assert workers[1].resolve("seq.stan(6)") == "000014"
+    # KSN counters interleave the same way (0-based)
+    assert [g.resolve("seq.ksn")[-8:] for g in workers] == ["00000000", "00000001", "00000002"]
+    assert workers[0].resolve("seq.ksn")[-8:] == "00000003"
+
+
+def test_seq_default_shard_is_the_plain_counter():
+    g = GeneratorContext(seed=1, shard=(0, 1))
+    assert [g.resolve("seq.stan") for _ in range(3)] == [1, 2, 3]
+
+
+def test_seq_shard_is_validated():
+    with pytest.raises(ValueError):
+        GeneratorContext(seed=1, shard=(3, 3))
+    with pytest.raises(ValueError):
+        GeneratorContext(seed=1, shard=(0, 0))

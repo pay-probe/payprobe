@@ -174,7 +174,15 @@ def validate_scenario(scenario: dict) -> dict:
 
 def create_scenario(scenario: dict, project_id: str | None = None,
                     comment: str = "created via MCP") -> dict:
-    """Persist a new scenario. ``scenario`` is a ScenarioDraft (name, steps, …)."""
+    """Persist a new scenario. ``scenario`` is a ScenarioDraft (name, steps, …).
+
+    Per-transaction values need no Code step: any payload string may carry a
+    generator the worker resolves in-process — ``${seq.NAME(width)}`` a
+    zero-padded counter unique across the load fleet (``"11": "${seq.stan(6)}"``
+    for an incrementing STAN), ``${seq.ksn}``, ``${uuid}``, ``${now.rrn}``,
+    ``${now.fmt(<strftime>[,utc_offset_hours])}``, ``${rand.int(a,b)}``,
+    ``${rand.amount(a,b)}``, ``${rand.digits(n)}``, ``${rand.pan(bin)}``,
+    ``${pool.terminal|card}``, ``${card.pan|expiry|track2}``, ``${terminal.id}``."""
     return _request("POST", f"{SCENARIO_API}/scenarios",
                     {"scenario": scenario, "comment": comment, "project_id": project_id})
 
@@ -184,7 +192,9 @@ def update_scenario(scenario_id: str, scenario: dict,
                     base_version: int | None = None) -> dict:
     """Update an existing scenario. ``scenario`` is a ScenarioDraft. Pass
     ``base_version`` (the version you edited) to get optimistic-locking: a stale
-    save is rejected with 409 instead of silently clobbering newer edits."""
+    save is rejected with 409 instead of silently clobbering newer edits.
+    Generator tokens (``${seq.stan(6)}``, ``${rand.pan(bin)}``, …) are listed
+    on :func:`create_scenario`."""
     body: dict = {"scenario": scenario, "comment": comment}
     if base_version is not None:
         body["base_version"] = base_version

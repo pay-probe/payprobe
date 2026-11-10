@@ -176,6 +176,12 @@ for and re-emits it on save.
 }
 ```
 
+`auto_generate` counts per adapter instance, i.e. per worker process: a
+5-worker load run sends STAN 000001 five times. For load, set DE 11 in the
+step instead, `"11": "${seq.stan(6)}"`, which the generator interleaves across
+the fleet (worker *i* of *n* draws *i*+1, *i*+1+*n*, …), see
+`docs/operations/load-test-runbook.md`.
+
 Actions: `send_message` (universal — `mti` + `values`), `send_0100/0200/0220`,
 `send_0400/0420`, `send_0800`. Convenience payload keys (`amount`, `pan`,
 `pos_entry_mode`, `currency`, `rrn`, …) are mapped to DEs and width-formatted;
