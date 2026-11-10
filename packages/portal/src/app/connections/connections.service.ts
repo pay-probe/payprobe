@@ -52,13 +52,15 @@ export class ConnectionsService {
   }
 
   /** Upsert a connection. A rename drops the old record, then PUTs the new.
-   *  The body is the worker-shaped adapter config (the canonical stored form)
-   *  plus ``environment_overrides`` metadata (per-environment parameter
-   *  overrides, kept out of the adapter config itself so the base never carries
-   *  them — the orchestrator merges the active environment's override at run
-   *  time). */
+   *  The body is the worker-shaped adapter config (the canonical stored form,
+   *  which carries every stored key the form has no field for, see
+   *  {@link Connection.extra} — the PUT replaces the whole record, so anything
+   *  left out here is gone) plus ``environment_overrides`` metadata
+   *  (per-environment parameter overrides, kept out of the adapter config
+   *  itself so the base never carries them — the orchestrator merges the
+   *  active environment's override at run time). */
   save(conn: Connection, originalName?: string): Observable<StoredConnection> {
-    const body = {
+    const body: Record<string, unknown> = {
       ...toAdapterConfig(conn),
       environment_overrides: conn.environmentOverrides ?? {},
       // One port for both directions: `port` (emitted by toAdapterConfig) is the
@@ -68,6 +70,7 @@ export class ConnectionsService {
       disabled: conn.disabled === true,
       default: conn.default === true,
     };
+    if (conn.description?.trim()) body["description"] = conn.description.trim();
     const put = () =>
       this.http.put<StoredConnection>(
         `${this.base}/connections/${encodeURIComponent(conn.name)}`,

@@ -17,7 +17,9 @@ npm install
 npm start          # dev server on http://localhost:4200
 npm run build      # production build
 npm run lint       # ESLint + Prettier check
-npm test           # Karma unit tests
+npm test           # Karma unit tests (runner not installed: no jasmine/karma in package.json;
+                   # the one spec, connections/connection.models.spec.ts, was verified 2026-11-10
+                   # by compiling it with tsc and running it under a scratch jasmine shim)
 ```
 
 ## Tech Stack

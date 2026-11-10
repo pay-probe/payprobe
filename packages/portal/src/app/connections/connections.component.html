@@ -162,6 +162,15 @@
               />
             </label>
             <label class="fld">
+              <span>Description <small class="muted">(optional)</small></span>
+              <input
+                type="text"
+                [(ngModel)]="d.description"
+                (ngModelChange)="markDirty()"
+                placeholder="What this connection reaches"
+              />
+            </label>
+            <label class="fld">
               <span>Adapter</span>
               <select
                 [(ngModel)]="d.adapter"
@@ -420,6 +429,32 @@
                   [placeholder]="d.mode === 'inbound' ? '0' : ''"
                 />
               </label>
+              @if (d.protocol === "iso8583") {
+                <label class="fld">
+                  <span
+                    >Dialect (Message Format)
+                    <small class="muted"
+                      >(the DE table replies are decoded with)</small
+                    ></span
+                  >
+                  <select
+                    [(ngModel)]="d.messageFormatId"
+                    (ngModelChange)="markDirty()"
+                  >
+                    <option value="">— stock ISO 8583:1987 table —</option>
+                    @for (f of formats(); track f.id) {
+                      <option [value]="f.id">
+                        {{ f.name }} {{ f.version }} ({{ f.id }})
+                      </option>
+                    }
+                    @if (d.messageFormatId && !formatKnown(d.messageFormatId)) {
+                      <option [value]="d.messageFormatId">
+                        {{ d.messageFormatId }} (not in the registry)
+                      </option>
+                    }
+                  </select>
+                </label>
+              }
             </div>
 
             <details class="sect sect--framing">
@@ -626,7 +661,84 @@
                     (ngModelChange)="markDirty()"
                   />
                 </label>
+                @if (d.mode !== "inbound") {
+                  <label class="fld">
+                    <span
+                      >Health check
+                      <small class="muted"
+                        >(what Test connection / diagnostics send)</small
+                      ></span
+                    >
+                    <select
+                      [(ngModel)]="d.healthCheck.mode"
+                      (ngModelChange)="markDirty()"
+                    >
+                      <option value="probe">
+                        probe — send the sign-on / default 0800
+                      </option>
+                      <option value="connect">
+                        connect — send nothing, socket must stay open
+                      </option>
+                      <option value="message">
+                        message — send a message of my own
+                      </option>
+                    </select>
+                  </label>
+                  @if (d.healthCheck.mode === "connect") {
+                    <label class="fld">
+                      <span
+                        >Settle time
+                        <small class="muted"
+                          >(ms the socket must stay open; default 200)</small
+                        ></span
+                      >
+                      <input
+                        type="number"
+                        min="1"
+                        [(ngModel)]="d.healthCheck.settleMs"
+                        (ngModelChange)="markDirty()"
+                        placeholder="200"
+                      />
+                    </label>
+                  }
+                  @if (d.healthCheck.mode === "message") {
+                    <label class="fld">
+                      <span
+                        >Action
+                        <small class="muted"
+                          >(optional; e.g. send_message)</small
+                        ></span
+                      >
+                      <input
+                        type="text"
+                        class="mono"
+                        [(ngModel)]="d.healthCheck.action"
+                        (ngModelChange)="markDirty()"
+                        placeholder="send_message"
+                      />
+                    </label>
+                    <label class="fld fld--wide">
+                      <span
+                        >Health-check message
+                        <small class="muted">(JSON payload)</small></span
+                      >
+                      <textarea
+                        rows="4"
+                        class="mono"
+                        [(ngModel)]="d.healthCheck.payloadJson"
+                        (ngModelChange)="markDirty()"
+                        placeholder='&#123; "mti": "0800", "values": &#123; "70": "001" &#125; &#125;'
+                      ></textarea>
+                    </label>
+                  }
+                }
               </div>
+              @if (d.mode !== "inbound") {
+                <p class="hint">
+                  <pp-icon name="activity" [size]="13" />
+                  {{ healthCheckExplain(d) }}
+                </p>
+              }
             </details>
           }
 
@@ -1454,6 +1566,34 @@ service Echo &#123; rpc Say (Msg) returns (Msg); &#125;'
               override matrix. See docs/adapters/db-probe.md.
             </p>
           }
+
+          <details class="sect" [open]="!!extraJson()">
+            <summary>
+              <pp-icon name="terminal" [size]="14" /> Other keys
+              <span class="sect__info">{{ extraSummary(d) }}</span>
+            </summary>
+            <p class="muted">
+              Keys this form has no field for, exactly as the API or the
+              assistant’s <code>save_connection</code> stored them
+              (<code>mac</code>, <code>emv</code>, <code>tls</code>,
+              <code>fields</code>, a vendor <code>mhdr</code>, a sign-on
+              payload, …). They are saved back unchanged; edit the JSON to
+              change or remove one. A key the form does have a field for is
+              taken from that field, not from here.
+            </p>
+            <textarea
+              rows="6"
+              class="mono"
+              [ngModel]="extraJson()"
+              (ngModelChange)="onExtraJsonChange($event, d)"
+              placeholder="&#123; &#125;"
+            ></textarea>
+            @if (extraJsonError()) {
+              <p class="hint hint--error">
+                <pp-icon name="info" [size]="13" /> {{ extraJsonError() }}
+              </p>
+            }
+          </details>
 
           <div class="actions actions--sticky">
             <button

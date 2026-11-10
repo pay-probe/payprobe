@@ -20,7 +20,11 @@ import {
 
 import {
   Connection,
+  HEALTH_CHECK_MODES,
   blankConnection,
+  extraKeyNames,
+  healthCheckToApi,
+  parseJsonObject,
   toAdapterConfig,
 } from "./connection.models";
 import {
@@ -42,6 +46,8 @@ function hasAddress(d: Connection): boolean {
 }
 import { ConnectionsService } from "./connections.service";
 import { EnvironmentsService } from "../environments/environments.service";
+import { ScenarioApiService } from "../constructor/scenario-api.service";
+import { MessageFormat } from "../constructor/scenario.models";
 import { PageHeaderComponent } from "../shared/ui/page-header.component";
 
 /**
@@ -68,11 +74,97 @@ export class ConnectionsComponent implements OnInit {
   readonly theme = inject(ThemeService);
   readonly store = inject(ConnectionsService);
   readonly envs = inject(EnvironmentsService);
+  private readonly scenarioApi = inject(ScenarioApiService);
   private readonly ui = inject(UiService);
+
+  /** ISO 8583 Message Formats a TCP connection can bind as its dialect. */
+  readonly formats = signal<MessageFormat[]>([]);
+  readonly healthModes = HEALTH_CHECK_MODES;
+
+  /** The draft's `extra` keys as editable JSON text (see
+   *  {@link Connection.extra}); parsed into the draft on every keystroke that
+   *  yields valid JSON, so the environment preview follows the edit. */
+  readonly extraJson = signal("");
+  readonly extraJsonError = signal("");
 
   ngOnInit(): void {
     this.store.reload();
     this.envs.reload();
+    this.scenarioApi.formats("iso8583").subscribe({
+      next: (list) => this.formats.set(list),
+      error: () => this.formats.set([]),
+    });
+  }
+
+  /** True when the bound Message Format id is in the registry (a missing one
+   *  is still shown, so an id written through the API is never lost). */
+  formatKnown(id: string): boolean {
+    return this.formats().some((f) => f.id === id);
+  }
+
+  private initExtraJson(conn: Connection): void {
+    const extra = conn.extra ?? {};
+    this.extraJson.set(
+      Object.keys(extra).length ? JSON.stringify(extra, null, 2) : "",
+    );
+    this.extraJsonError.set("");
+  }
+
+  onExtraJsonChange(text: string, d: Connection): void {
+    this.extraJson.set(text);
+    this.markDirty();
+    try {
+      const parsed = text.trim() ? parseJsonObject(text) : {};
+      if (parsed === null) {
+        this.extraJsonError.set("Other keys must be a JSON object ({ … }).");
+        return;
+      }
+      d.extra = parsed;
+      this.extraJsonError.set("");
+    } catch (e) {
+      this.extraJsonError.set(
+        `Other keys is not valid JSON: ${(e as Error).message}`,
+      );
+    }
+  }
+
+  /** Summary for the "Other keys" section: the keys re-emitted on save. */
+  extraSummary(d: Connection): string {
+    const names = extraKeyNames(d.extra ?? {});
+    if (!names.length) return "none";
+    const shown = names.slice(0, 4).join(", ");
+    return names.length > 4 ? `${shown} +${names.length - 4}` : shown;
+  }
+
+  /** What *Test connection* / diagnostics send, in one sentence. */
+  healthCheckExplain(d: Connection): string {
+    const h = d.healthCheck;
+    switch (h.mode) {
+      case "connect":
+        return `Nothing is sent: healthy when the socket is still open after ${h.settleMs || 200} ms. For a host that hangs up on an unwelcome client, or whose sign-on you do not want to fake.`;
+      case "message":
+        return "Sends the message below and judges the reply like a probe. Use the host's real sign-on, e.g. 0800 with DE 70 = 001.";
+      default:
+        return d.signOn
+          ? "Sends the sign-on message (0800) and is healthy when the host answers it."
+          : "Sends the protocol's default probe (0800, DE 70 = 301) and is healthy when the host answers. A host that does not echo 0800 fails after the response timeout.";
+    }
+  }
+
+  /** The detail string of an API error, or the fallback. */
+  private apiError(err: unknown, fallback: string): string {
+    const detail = (err as { error?: { detail?: unknown } })?.error?.detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
+    if (Array.isArray(detail) && detail.length) {
+      const first = detail[0] as { msg?: string; loc?: unknown[] };
+      if (first?.msg) {
+        const loc = Array.isArray(first.loc)
+          ? first.loc.filter((x) => x !== "body").join(".")
+          : "";
+        return loc ? `${loc}: ${first.msg}` : first.msg;
+      }
+    }
+    return fallback;
   }
 
   /** Available environments to override params for (name + label). */
@@ -382,6 +474,8 @@ export class ConnectionsComponent implements OnInit {
         : "no keep-alive",
     );
     parts.push(`timeout ${d.responseTimeoutSec} s`);
+    if (d.healthCheck?.mode && d.healthCheck.mode !== "probe")
+      parts.push(`health: ${d.healthCheck.mode}`);
     return parts.join(" · ");
   }
   overridesSummary(): string {
@@ -466,6 +560,18 @@ export class ConnectionsComponent implements OnInit {
               text: "No keep-alive: an idle link is not probed.",
             },
       );
+    }
+    if (!inbound) {
+      const h = d.healthCheck;
+      steps.push({
+        icon: "activity",
+        text:
+          h.mode === "connect"
+            ? `Test connection / diagnostics send nothing and call the link healthy when the socket is still open after ${h.settleMs || 200} ms.`
+            : h.mode === "message"
+              ? "Test connection / diagnostics send the configured health-check message and expect the host to answer it."
+              : `Test connection / diagnostics send ${d.signOn ? "the sign-on" : "a default 0800 echo"} and expect the host to answer it.`,
+      });
     }
     steps.push({
       icon: "clock",
@@ -693,6 +799,7 @@ export class ConnectionsComponent implements OnInit {
     copy.name = name;
     this.draft.set(copy);
     this.initOverrideRows(copy);
+    this.initExtraJson(copy);
     this.originalName.set(null); // unsaved -> save() will create
     this.dirty.set(true);
     this.testResult.set(null);
@@ -702,6 +809,7 @@ export class ConnectionsComponent implements OnInit {
     const blank = blankConnection();
     this.draft.set(blank);
     this.initOverrideRows(blank);
+    this.initExtraJson(blank);
     this.originalName.set(null);
     this.dirty.set(false);
   }
@@ -710,6 +818,7 @@ export class ConnectionsComponent implements OnInit {
     const copy = structuredClone(i);
     this.draft.set(copy);
     this.initOverrideRows(copy);
+    this.initExtraJson(copy);
     this.originalName.set(i.name);
     this.dirty.set(false);
   }
@@ -766,6 +875,38 @@ export class ConnectionsComponent implements OnInit {
         return;
       }
     }
+    if (this.extraJsonError()) {
+      this.ui.toast("error", this.extraJsonError());
+      return;
+    }
+    if (d.adapter === "tcp") {
+      // The same checks the worker makes at connect (worker/adapters/tcp), so
+      // the error shows here, not as "health check failed" on Test connection.
+      let hc: Record<string, unknown>;
+      try {
+        hc = healthCheckToApi(d.healthCheck);
+      } catch (e) {
+        this.ui.toast(
+          "error",
+          `health_check.payload is not valid JSON: ${(e as Error).message}`,
+        );
+        return;
+      }
+      if (
+        d.healthCheck.payloadJson.trim() &&
+        parseJsonObject(d.healthCheck.payloadJson) === null
+      ) {
+        this.ui.toast("error", "health_check.payload must be a JSON object.");
+        return;
+      }
+      if (d.healthCheck.mode === "message" && !hc["payload"] && !hc["action"]) {
+        this.ui.toast(
+          "error",
+          "health_check.mode 'message' needs the message to send: health_check.payload (and/or action).",
+        );
+        return;
+      }
+    }
     d.name = name;
     d.environmentOverrides = this.serializeOverrides();
     this.store.save(d, this.originalName() ?? undefined).subscribe({
@@ -774,8 +915,11 @@ export class ConnectionsComponent implements OnInit {
         this.dirty.set(false);
         this.ui.toast("success", `Saved connection “${name}”`);
       },
-      error: () =>
-        this.ui.toast("error", "Save failed — is the service running?"),
+      error: (err) =>
+        this.ui.toast(
+          "error",
+          this.apiError(err, "Save failed — is the service running?"),
+        ),
     });
   }
 

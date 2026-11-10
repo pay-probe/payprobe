@@ -227,9 +227,30 @@ export interface NatsConfig {
   jetstreamDurable: string;
 }
 
+/** What *Test connection* / diagnostics put on the wire (mirror of
+ *  `worker.adapters.tcp.HEALTH_MODES`). */
+export type HealthCheckMode = "probe" | "connect" | "message";
+export const HEALTH_CHECK_MODES: readonly HealthCheckMode[] = [
+  "probe",
+  "connect",
+  "message",
+];
+
+/** The `health_check` section of a TCP connection. `payloadJson` is the
+ *  message to send in `message` mode, edited as JSON text. */
+export interface HealthCheckConfig {
+  mode: HealthCheckMode;
+  action: string;
+  payloadJson: string;
+  /** `connect` mode: ms the socket must stay open (worker default 200). */
+  settleMs: number | null;
+}
+
 export interface Connection {
   name: string;
   adapter: AdapterImpl;
+  /** Free text shown in lists and returned by the API; not adapter config. */
+  description: string;
   protocol: TcpProtocol;
   host: string;
   port: number;
@@ -259,6 +280,18 @@ export interface Connection {
   headerEcho: HeaderEchoConfig; // used when protocol = header_echo
   signOn: boolean;
   keepalive: KeepaliveConfig;
+  /** TCP: the health check mode and message (`health_check`). */
+  healthCheck: HealthCheckConfig;
+  /** TCP / ISO 8583: the Message Format the socket decodes with
+   *  (`message_format_id`; "" = the stock ISO 8583:1987 table). */
+  messageFormatId: string;
+  /** Every stored key this form has no field for (`mac`, `emv`, `tls`,
+   *  `fields`, `external`, a vendor `mhdr`, …), top-level and, under the
+   *  section's name, the unmodelled sub-keys of a modelled section
+   *  (`sign_on.payload`, `framing.header`, …). Re-emitted untouched by
+   *  {@link toAdapterConfig} so a save from this form never drops what the
+   *  API or MCP `save_connection` wrote. Editable as JSON on the page. */
+  extra: Record<string, unknown>;
   grpc: GrpcConfig; // used when adapter = "grpc"
   rest: RestConfig; // used when adapter = "http"
   nats: NatsConfig; // used when adapter = "nats"
@@ -293,6 +326,13 @@ export const DEFAULT_REST: RestConfig = {
 export const DEFAULT_PAYSHIELD: PayShieldConfig = {
   header: "",
   responseTimeoutSec: 5,
+};
+
+export const DEFAULT_HEALTH_CHECK: HealthCheckConfig = {
+  mode: "probe",
+  action: "",
+  payloadJson: "",
+  settleMs: null,
 };
 
 export const DEFAULT_DB: DbConfig = {
@@ -453,12 +493,230 @@ export function blankConnection(name = ""): Connection {
     },
     signOn: true,
     keepalive: { enabled: true, intervalSec: 30 },
+    healthCheck: { ...DEFAULT_HEALTH_CHECK },
+    messageFormatId: "",
+    description: "",
+    extra: {},
     grpc: structuredClone(DEFAULT_GRPC),
     rest: { ...DEFAULT_REST },
     nats: { ...DEFAULT_NATS },
     payshield: { ...DEFAULT_PAYSHIELD },
     db: { ...DEFAULT_DB },
   };
+}
+
+// -- passthrough of keys the form does not model -----------------------------
+//
+// A stored connection may carry keys this form has no field for: written by the
+// API / MCP `save_connection`, by a provider pack, or by an older portal. The
+// backend PUT replaces the whole record, so a save that only re-emits the form's
+// own fields drops them (that is how a `health_check` and a `message_format_id`
+// vanished from a live connection on 2026-11-09). Every branch below therefore
+// keeps the complement of its *modelled* keys in `extra` and spreads it back
+// first on save; the modelled keys win. "Modelled" means the form has a field
+// for the key, not that it is emitted: a modelled key reset to its default is
+// omitted on save and must never be resurrected from `extra`.
+
+/** Keys the service body / backend own (never adapter config, never extra). */
+const META_KEYS = [
+  "name",
+  "type",
+  "adapter",
+  "extends",
+  "listen_port",
+  "mode",
+  "disabled",
+  "default",
+  "environment_overrides",
+  "description",
+];
+const TCP_KEYS = [
+  "protocol",
+  "host",
+  "port",
+  "framing",
+  "correlation",
+  "header_echo",
+  "sign_on",
+  "keepalive",
+  "health_check",
+  "message_format_id",
+  "response_timeout_sec",
+  "connect_timeout_sec",
+  "pool_size",
+];
+const TCP_SECTIONS: Record<string, string[]> = {
+  framing: [
+    "preset",
+    "link_level",
+    "mode",
+    "start_hex",
+    "end_hex",
+    "checksum",
+    "length_prefix_bytes",
+    "length_encoding",
+    "length_byte_order",
+    "length_includes_prefix",
+    "length_includes_header",
+    "tpdu_bytes",
+    "tpdu_outbound_hex",
+    "header_hex",
+    "trailer_hex",
+    "encoding",
+  ],
+  correlation: ["field", "auto_generate", "match_mti"],
+  header_echo: [
+    "header_bytes",
+    "response_command_bytes",
+    "error_field_bytes",
+    "diagnostic_command",
+  ],
+  sign_on: ["enabled"],
+  keepalive: ["enabled", "interval_sec"],
+  health_check: ["mode", "action", "payload", "settle_ms"],
+};
+const GRPC_KEYS = [
+  "host",
+  "port",
+  "target",
+  "reflection",
+  "proto_inline",
+  "proto_paths",
+  "proto_include_dirs",
+  "descriptor_set_b64",
+  "descriptor_set_path",
+  "tls",
+  "metadata",
+  "actions",
+  "timeout_sec",
+];
+const GRPC_SECTIONS: Record<string, string[]> = {
+  tls: ["enabled", "root_certs_path"],
+};
+const HTTP_KEYS = [
+  "base_url",
+  "api_key",
+  "auth_type",
+  "username",
+  "password",
+  "timeout_ms",
+];
+const NATS_KEYS = [
+  "host",
+  "port",
+  "servers",
+  "subject",
+  "subjects",
+  "queue_group",
+  "codec",
+  "request_timeout_sec",
+  "auth",
+  "jetstream",
+];
+const NATS_SECTIONS: Record<string, string[]> = {
+  auth: ["token", "nkey_seed", "creds"],
+  jetstream: ["stream", "subjects", "durable"],
+};
+const PAYSHIELD_KEYS = ["host", "port", "header", "response_timeout_sec"];
+const DB_KEYS = [
+  "host",
+  "port",
+  "engine",
+  "dbname",
+  "user",
+  "password",
+  "dsn",
+  "writes",
+  "max_rows",
+  "statement_timeout_ms",
+  "load_ok",
+  "queries",
+  "init_sql",
+];
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+/** The entries of `src` not in `modelled`. Nulls are skipped (the API returns
+ *  every response-model field, `listen_port: null` included), and so is the
+ *  backend default `external: false`, so a record never grows noise. */
+function restOf(
+  src: Record<string, unknown> | undefined | null,
+  modelled: readonly string[],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(src ?? {})) {
+    if (v === null || v === undefined) continue;
+    if (modelled.includes(k)) continue;
+    if (k === "external" && v === false) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** Build `extra` for a stored config: top-level keys outside `modelled` (and
+ *  outside the backend's own metadata), plus, per modelled section, the
+ *  sub-keys the form does not edit. */
+export function extraOf(
+  cfg: Record<string, unknown>,
+  modelled: readonly string[],
+  sections: Record<string, string[]> = {},
+): Record<string, unknown> {
+  const extra = restOf(cfg, [...META_KEYS, ...modelled]);
+  for (const [name, sub] of Object.entries(sections)) {
+    const own = cfg[name];
+    if (!isPlainObject(own)) continue;
+    const rest = restOf(own, sub);
+    if (Object.keys(rest).length) extra[name] = rest;
+  }
+  return extra;
+}
+
+/** `cfg` (the form's own emission) over `extra`: unknown top-level keys are
+ *  restored, and a section's unmodelled sub-keys are merged back under the
+ *  section's emitted keys (the emitted ones win). The adapter stays first. */
+function withExtra(
+  cfg: Record<string, unknown>,
+  extra: Record<string, unknown> | undefined,
+  sections: Record<string, string[]> = {},
+): Record<string, unknown> {
+  const x = extra ?? {};
+  const out: Record<string, unknown> = { adapter: cfg["adapter"] };
+  for (const [k, v] of Object.entries(x)) {
+    if (k in sections) continue;
+    if (META_KEYS.includes(k)) continue;
+    out[k] = v;
+  }
+  Object.assign(out, cfg);
+  for (const name of Object.keys(sections)) {
+    const rest = x[name];
+    if (!isPlainObject(rest) || !Object.keys(rest).length) continue;
+    const own = cfg[name];
+    out[name] = { ...rest, ...(isPlainObject(own) ? own : {}) };
+  }
+  return out;
+}
+
+/** Parse JSON text that must be an object; null when empty or not an object.
+ *  Throws on malformed JSON so the caller can name the field. */
+export function parseJsonObject(text: string): Record<string, unknown> | null {
+  const t = (text ?? "").trim();
+  if (!t) return null;
+  const v = JSON.parse(t);
+  return isPlainObject(v) ? v : null;
+}
+
+/** The names of the keys {@link toAdapterConfig} re-emits from `extra`
+ *  (dotted for section sub-keys), for a summary line. */
+export function extraKeyNames(extra: Record<string, unknown>): string[] {
+  const names: string[] = [];
+  for (const [k, v] of Object.entries(extra ?? {})) {
+    if (isPlainObject(v) && k in TCP_SECTIONS)
+      names.push(...Object.keys(v).map((sub) => `${k}.${sub}`));
+    else names.push(k);
+  }
+  return names.sort();
 }
 
 /** Emit the worker-shaped gRPC config object (defaults omitted). */
@@ -518,7 +776,7 @@ function grpcToAdapterConfig(i: Connection): Record<string, unknown> {
 
   if (g.timeoutSec !== DEFAULT_GRPC.timeoutSec)
     cfg["timeout_sec"] = g.timeoutSec;
-  return cfg;
+  return withExtra(cfg, i.extra, GRPC_SECTIONS);
 }
 
 /** Emit the worker-shaped REST/http config (defaults omitted). */
@@ -532,7 +790,7 @@ function restToAdapterConfig(i: Connection): Record<string, unknown> {
   if (r.username.trim()) cfg["username"] = r.username.trim();
   if (r.password) cfg["password"] = r.password;
   if (r.timeoutMs !== DEFAULT_REST.timeoutMs) cfg["timeout_ms"] = r.timeoutMs;
-  return cfg;
+  return withExtra(cfg, i.extra);
 }
 
 /** Emit the worker-shaped NATS config (ADR-0006; defaults omitted). */
@@ -567,7 +825,7 @@ function natsToAdapterConfig(i: Connection): Record<string, unknown> {
     if (n.jetstreamDurable.trim()) js["durable"] = n.jetstreamDurable.trim();
     cfg["jetstream"] = js;
   }
-  return cfg;
+  return withExtra(cfg, i.extra, NATS_SECTIONS);
 }
 
 /** Emit the worker-shaped payShield-client config (defaults omitted). */
@@ -580,7 +838,7 @@ function payshieldToAdapterConfig(i: Connection): Record<string, unknown> {
   if (p.header.trim()) cfg["header"] = p.header.trim();
   if (p.responseTimeoutSec !== DEFAULT_PAYSHIELD.responseTimeoutSec)
     cfg["response_timeout_sec"] = p.responseTimeoutSec;
-  return cfg;
+  return withExtra(cfg, i.extra);
 }
 
 /** Emit the worker-shaped DB-probe config (defaults omitted). */
@@ -612,7 +870,7 @@ function dbToAdapterConfig(i: Connection): Record<string, unknown> {
     .map((l) => l.trim())
     .filter(Boolean);
   if (db.engine === "sqlite" && init.length) cfg["init_sql"] = init;
-  return cfg;
+  return withExtra(cfg, i.extra);
 }
 
 /** Emit the worker-shaped config object for one connection (defaults omitted). */
@@ -664,7 +922,49 @@ export function toAdapterConfig(i: Connection): Record<string, unknown> {
     cfg["connect_timeout_sec"] = i.connectTimeoutSec;
   if (i.poolSize) cfg["pool_size"] = i.poolSize;
 
-  return cfg;
+  const hc = healthCheckToApi(i.healthCheck);
+  if (Object.keys(hc).length) cfg["health_check"] = hc;
+  if (i.messageFormatId.trim())
+    cfg["message_format_id"] = i.messageFormatId.trim();
+
+  return withExtra(cfg, i.extra, TCP_SECTIONS);
+}
+
+/** The `health_check` section from the form (sparse: `probe` with nothing
+ *  else is the worker default and emits nothing). Malformed payload JSON
+ *  throws; {@link ConnectionsComponent.save} validates first. */
+export function healthCheckToApi(
+  h: HealthCheckConfig,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (h.mode && h.mode !== "probe") out["mode"] = h.mode;
+  if (h.action.trim()) out["action"] = h.action.trim();
+  const payload = parseJsonObject(h.payloadJson);
+  if (payload) out["payload"] = payload;
+  if (h.settleMs !== null && h.settleMs !== undefined && h.settleMs > 0)
+    out["settle_ms"] = h.settleMs;
+  return out;
+}
+
+/** The form's health-check model from a stored `health_check` section. */
+export function healthCheckFromApi(
+  raw: Record<string, any> | undefined | null,
+): HealthCheckConfig {
+  const hc = raw ?? {};
+  const mode = String(hc["mode"] ?? "probe").toLowerCase();
+  return {
+    mode: (HEALTH_CHECK_MODES as readonly string[]).includes(mode)
+      ? (mode as HealthCheckMode)
+      : "probe",
+    action: hc["action"] ?? "",
+    payloadJson: isPlainObject(hc["payload"])
+      ? JSON.stringify(hc["payload"], null, 2)
+      : "",
+    settleMs:
+      hc["settle_ms"] === undefined || hc["settle_ms"] === null
+        ? null
+        : Number(hc["settle_ms"]),
+  };
 }
 
 /** Parse a stored worker-shaped config back into the editable form model
@@ -682,6 +982,8 @@ export function fromAdapterConfig(
     return {
       ...base,
       name,
+      description: cfg["description"] ?? "",
+      extra: extraOf(cfg, GRPC_KEYS, GRPC_SECTIONS),
       adapter: "grpc",
       mode: cfg["mode"] ?? "outbound",
       disabled: cfg["disabled"] === true,
@@ -723,6 +1025,8 @@ export function fromAdapterConfig(
     return {
       ...base,
       name,
+      description: cfg["description"] ?? "",
+      extra: extraOf(cfg, HTTP_KEYS),
       adapter: "http",
       mode: cfg["mode"] ?? "outbound",
       disabled: cfg["disabled"] === true,
@@ -747,6 +1051,8 @@ export function fromAdapterConfig(
     return {
       ...base,
       name,
+      description: cfg["description"] ?? "",
+      extra: extraOf(cfg, NATS_KEYS, NATS_SECTIONS),
       adapter: "nats",
       mode: cfg["mode"] ?? "outbound",
       disabled: cfg["disabled"] === true,
@@ -776,6 +1082,8 @@ export function fromAdapterConfig(
     return {
       ...base,
       name,
+      description: cfg["description"] ?? "",
+      extra: extraOf(cfg, PAYSHIELD_KEYS),
       adapter: "payshield",
       mode: cfg["mode"] ?? "outbound",
       disabled: cfg["disabled"] === true,
@@ -795,6 +1103,8 @@ export function fromAdapterConfig(
     return {
       ...base,
       name,
+      description: cfg["description"] ?? "",
+      extra: extraOf(cfg, DB_KEYS),
       adapter: impl,
       mode: cfg["mode"] ?? "outbound",
       disabled: cfg["disabled"] === true,
@@ -837,6 +1147,10 @@ export function fromAdapterConfig(
   return {
     name,
     adapter: "tcp",
+    description: cfg["description"] ?? "",
+    extra: extraOf(cfg, TCP_KEYS, TCP_SECTIONS),
+    healthCheck: healthCheckFromApi(cfg["health_check"]),
+    messageFormatId: cfg["message_format_id"] ?? "",
     protocol: (cfg["protocol"] ?? "iso8583") as TcpProtocol,
     host: cfg["host"] ?? "",
     // fold legacy listen_port into the single port (inbound bind = same port)

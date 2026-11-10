@@ -436,7 +436,15 @@
   }
 }
 
+/* a field spanning the whole two-column grid */
+.fld--wide {
+  grid-column: 1 / -1;
+}
+
 /* inline hint under a section (framing example) */
+.hint--error {
+  color: var(--color-danger, #c0392b);
+}
 .hint {
   display: flex;
   align-items: center;

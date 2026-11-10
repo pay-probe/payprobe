@@ -64,10 +64,16 @@ but health check failed" after a 30 s wait.
 
 ## Owed
 
-- Portal: the connection form does not model `framing.header` /
-  `health_check` (and drops them on save) — a host `npm run build` is needed
-  for any portal change, so this is left for a follow-up; until then save such
-  connections through the API / MCP `save_connection`.
+- ~~Portal: the connection form does not model `framing.header` /
+  `health_check` (and drops them on save).~~ Done 2026-11-10: the form keeps
+  every stored key it has no field for (top-level and inside `framing`,
+  `sign_on`, `keepalive`, `correlation`, `header_echo`, `health_check`, and
+  the gRPC `tls` / NATS `auth`, `jetstream` sections) in a passthrough that a
+  save re-emits unchanged, shows them in an "Other keys" JSON section, and
+  gained fields for `health_check` (mode / settle / message) and
+  `message_format_id` (Dialect). Trigger: on 2026-11-09 a portal save of the
+  POS host connection dropped both, so the default `0800` probe went unanswered
+  and replies were decoded with the stock table (`"94"` instead of `"000"`).
 - The real-host run against the POS host's port with
   `{"length_prefix_bytes": 4, "length_encoding": "ascii"}` + the host's own
   sign-on as `health_check.mode: message` — the dry run and journal exist to

@@ -155,6 +155,10 @@ layer call `health_check()`. What it sends is `health_check.mode`:
 - **`message`**: send `health_check.action` / `payload` (e.g. the host's real
   sign-on, `0800` with DE 70 = `001`) and judge the reply like a probe.
 
+The portal sets the mode under Connections → Session → *Health check* (since
+2026-11-10); the same page keeps any `health_check` sub-key it has no field
+for and re-emits it on save.
+
 ### `iso8583` protocol
 
 ```jsonc
