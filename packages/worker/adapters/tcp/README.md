@@ -41,8 +41,15 @@ adapter instead.)
   millisecond timing, and logged on `worker.adapters.tcp.wire` (DEBUG;
   `PAYPROBE_TCP_WIRE_LOG=1` promotes it to INFO). `adapter.preview_frame()` /
   `POST /connections/frame-preview` is the dry run: the exact frame a config
-  would send, without a socket. Both carry whatever the message carries (PANs
-  included), exactly like `StepResult.raw_log` already does.
+  would send, without a socket. `POST /scenarios/step-frame-preview`
+  (`{scenario, step_id, environment_name}`, the portal's *Preview wire bytes*
+  on a message step) does the same for one scenario step resolved the way a
+  run resolves it: scoped variables, card / terminal pools, generators (fixed
+  seed, so the values are samples), and the step's connection under the
+  environment. It refuses a reference to an earlier step's response (only a
+  run knows it) and any value that resolves to a secret variable (never
+  printed). Both carry whatever the message carries (PANs included), exactly
+  like `StepResult.raw_log` already does.
 
 ## Config
 
@@ -181,6 +188,17 @@ for and re-emits it on save.
 step instead, `"11": "${seq.stan(6)}"`, which the generator interleaves across
 the fleet (worker *i* of *n* draws *i*+1, *i*+1+*n*, …), see
 `docs/operations/load-test-runbook.md`.
+
+**Fixed-length fields are filled to their declared width** (since
+2026-11-10, in the shared codec, so the client, the responder, the proxy and
+the NATS codec all do it): a short `n` value is zero-filled on the left
+(DE 4 `10000` → `000000010000`), a short text value (`a`, `an`, `ans`) is
+space-filled on the right (DE 42 fixed 15 `SHOP1` → `SHOP1` + 10 spaces). The
+width and class come from the bound DE table (the step's dialect, else the
+connection's). A value that breaks its class (`0000000002A` in an `n` field),
+a value that is too long, and `b` / `z` fields are not padded and are refused
+with the reason. Before, a short fixed value was written short and every later
+field shifted.
 
 Actions: `send_message` (universal — `mti` + `values`), `send_0100/0200/0220`,
 `send_0400/0420`, `send_0800`. Convenience payload keys (`amount`, `pan`,

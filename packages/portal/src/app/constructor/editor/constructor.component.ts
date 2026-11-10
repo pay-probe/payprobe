@@ -11,8 +11,16 @@ import {
   ChangeDetectionStrategy,
 } from "@angular/core";
 import { FormsModule } from "@angular/forms";
+import { DeTableEditorComponent } from "./de-table-editor.component";
+import { FramePreviewComponent } from "./frame-preview.component";
+import { StepFramePreview } from "./frame-preview.model";
 import { DeValuesEditorComponent } from "./de-values-editor.component";
-import { DeTable, GENERATOR_REFS, activeTable } from "./de-values.model";
+import {
+  DeTable,
+  GENERATOR_REFS,
+  activeTable,
+  rowsFromValue,
+} from "./de-values.model";
 import { ActivatedRoute, Router, RouterLink } from "@angular/router";
 
 import { CodeEditorComponent } from "../../shared/code-editor.component";
@@ -298,6 +306,8 @@ const FLOW_TEMPLATES: FlowTemplate[] = [
     RefAutocompleteDirective,
     IconComponent,
     DeValuesEditorComponent,
+    DeTableEditorComponent,
+    FramePreviewComponent,
   ],
   templateUrl: "./constructor.component.html",
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -816,6 +826,110 @@ export class ConstructorComponent implements OnInit {
     return { table, label };
   });
 
+  /** An ISO 8583 message step (its action picks an MTI): it can show the
+   *  exact frame it would send. */
+  readonly isIsoMessageStep = computed(() =>
+    this.selectedParams().some((q) => q.name === "mti"),
+  );
+
+  readonly framePreview = signal<StepFramePreview | null>(null);
+  readonly framePreviewError = signal<string | null>(null);
+  readonly framePreviewLoading = signal(false);
+  /** Step id the open preview belongs to; another step closes it. */
+  readonly framePreviewFor = signal<string | null>(null);
+
+  /** Build the selected step's frame on the server, resolved like a run under
+   *  the environment picked for Execute. */
+  previewFrame(): void {
+    const step = this.selectedStep();
+    if (!step) return;
+    const draft = this.buildDraft();
+    this.framePreviewFor.set(step.id);
+    this.framePreviewLoading.set(true);
+    this.framePreviewError.set(null);
+    this.runApi
+      .stepFramePreview({
+        scenario: {
+          ...draft,
+          tables: this.tablesRuntime(),
+          ...(this.scenarioId ? { id: this.scenarioId } : {}),
+        } as unknown as Record<string, unknown>,
+        step_id: step.id,
+        environment_name: this.selectedEnv(),
+      })
+      .subscribe({
+        next: (res) => {
+          this.framePreview.set(res);
+          this.framePreviewLoading.set(false);
+        },
+        error: (err) => {
+          const detail = err?.error?.detail;
+          this.framePreview.set(null);
+          this.framePreviewError.set(
+            typeof detail === "string"
+              ? detail
+              : "Preview failed: is the orchestrator running?",
+          );
+          this.framePreviewLoading.set(false);
+        },
+      });
+  }
+
+  closeFramePreview(): void {
+    this.framePreviewFor.set(null);
+    this.framePreview.set(null);
+    this.framePreviewError.set(null);
+  }
+
+  /** True for the per-step DE table override of a message step (the `fields`
+   *  json param beside an MTI): it gets the DE table editor. */
+  isDeTableParam(p: ParamSpec): boolean {
+    return (
+      p.type === "json" &&
+      p.name === "fields" &&
+      this.selectedParams().some((q) => q.name === "mti")
+    );
+  }
+
+  /** What the step's DE table override is compared with: the bound dialect's
+   *  table, else the stock ISO 8583:1987 one. */
+  readonly deBaseline = computed<{
+    table: DeTable;
+    label: string;
+    dialect: boolean;
+  }>(() => {
+    const dialect = this.selectedDialect();
+    const dialectFields = (
+      dialect?.definition as Record<string, unknown> | undefined
+    )?.["fields"];
+    const stock = this.messageFormats().find((f) => f.id === "iso8583-1987");
+    const stockFields = (
+      stock?.definition as Record<string, unknown> | undefined
+    )?.["fields"];
+    const { table, source } = activeTable(
+      undefined,
+      dialectFields,
+      stockFields,
+    );
+    return {
+      table,
+      label:
+        source === "dialect"
+          ? (dialect?.name ?? "the dialect")
+          : source === "stock"
+            ? "ISO 8583:1987 (stock table)"
+            : "",
+      dialect: !!dialect,
+    };
+  });
+
+  /** DE numbers the selected step's field values carry. */
+  readonly usedDes = computed<string[]>(() =>
+    (rowsFromValue(this.payloadObj(this.selectedStep())["values"]) ?? []).map(
+      (r) => r.de,
+    ),
+  );
+
   /** Write an object-valued param (the DE editor's map) straight into the
    *  payload: `setParam` would stringify it. Keeps the raw payload view in
    *  sync the same way. */
@@ -823,7 +937,10 @@ export class ConstructorComponent implements OnInit {
     const step = this.selectedStep();
     if (!step) return;
     const payload: Record<string, unknown> = { ...this.payloadObj(step) };
-    payload[p.name] = value;
+    // an empty map is "not set": the run then fills it (a bound dialect's
+    // table) or the connection's defaults apply
+    if (!Object.keys(value).length && !p.required) delete payload[p.name];
+    else payload[p.name] = value;
     this.updateStep(step.id, { payload });
     this.payloadText.set(JSON.stringify(payload, null, 2));
     this.payloadError.set(null);

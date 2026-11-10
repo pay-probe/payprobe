@@ -206,6 +206,11 @@
   &--warn {
     color: var(--color-warn);
   }
+
+  &--info {
+    color: var(--color-info);
+    white-space: pre-wrap;
+  }
 }
 
 .dev__sugs {
@@ -341,4 +346,74 @@
 .dev > .dev__msg {
   padding: 0 8px 8px;
   margin-top: 0;
+}
+
+/* -- DE table editor (shares this sheet) ---------------------------------- */
+
+.dev__tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-muted);
+}
+
+.dev__toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.dev__row--changed {
+  border-left-color: color-mix(in srgb, var(--color-warn) 70%, transparent);
+}
+
+.dev__chip--changed {
+  color: var(--color-warn);
+  background: color-mix(in srgb, var(--color-warn) 14%, transparent);
+}
+
+.dev__input--name {
+  font-size: 12px;
+}
+
+.dev__input--sel {
+  flex: 1 1 0;
+  padding: 4px 6px;
+  font-size: 11.5px;
+}
+
+.dev__input--num {
+  flex: 0 0 64px;
+  width: 64px;
+}
+
+.dev__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.dev__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    border-color: var(--color-primary);
+  }
 }

@@ -8,6 +8,7 @@ this package each of them carried its own copy and the copies had drifted.
     unpack(data, fields, encoding=None, *, strict=True) -> dict
     validate_message(mti, fields, de_values, de_list=None, presence=None) -> list[str]
     validate_field(value, spec) -> str | None
+    pad_fixed(value, spec) -> str                 # fill a short fixed field (n: zeros, text: spaces)
     resolve_encoding(encoding) -> dict            # profile name or axis dict -> options
     wire_encoding_from_config(config) -> encoding # folds the legacy framing.encoding key
 
@@ -41,7 +42,13 @@ from .codec import (
 )
 from .fields import BUILTIN_TABLES, ISO8583_1987, ISO8583_1993, VISA_BASE_I
 from .tlv import EMV_TAGS, build_tlv, parse_tlv, tag_map
-from .validate import charset_error, length_error, validate_field, validate_message
+from .validate import (
+    charset_error,
+    length_error,
+    pad_fixed,
+    validate_field,
+    validate_message,
+)
 
 #: The table used when nothing binds a dialect (worker codec, Inspector).
 DEFAULT_FIELDS = ISO8583_1987
@@ -126,6 +133,7 @@ __all__ = [
     "length_error",
     "mti_encoding",
     "pack",
+    "pad_fixed",
     "parse_tlv",
     "resolve_encoding",
     "tag_map",

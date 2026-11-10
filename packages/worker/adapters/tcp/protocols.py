@@ -278,7 +278,12 @@ class Iso8583Protocol(TcpProtocol):
         if isinstance(explicit, dict):
             for de, v in explicit.items():
                 values[str(de)] = str(v)
-        return values
+        # fill short fixed fields here, not only in pack(): the correlation
+        # key is read from these values, and a STAN "102" must match the
+        # host's "000102" echo
+        return {
+            de: iso8583.pad_fixed(v, fields[de]) if de in fields else v for de, v in values.items()
+        }
 
     def _coerce(self, de: str, value: Any, fields: dict | None = None) -> str:
         spec = (fields if fields is not None else self.fields).get(de, {})

@@ -337,3 +337,93 @@ def test_frame_preview_unknown_format_is_a_404(pos_format):
             "config": POS_CONFIG, "action": "send_message", "payload": POS_0200,
             "message_format_id": "nope"})
     assert r.status_code == 404 and "no message format 'nope'" in r.json()["detail"]
+
+
+# -- step frame preview: a scenario step resolved the way a run resolves it ---
+
+PREVIEW_CONN = {"name": "pos_host", **POS_CONFIG}
+
+
+def _step_scenario(values, *, sid="sc-preview", fmt="iso8583-1987-ascii-copy-1"):
+    return {
+        "id": sid,
+        "name": "purchase",
+        "variables": {"pan_test": "4111111111111111"},
+        "steps": [{
+            "id": "send", "kind": "action", "target": "tcp_iso8583", "action": "send_message",
+            "config": {"connection": "pos_host"},
+            "payload": {"message_format_id": fmt, "mti": "0200", "values": values},
+        }],
+    }
+
+
+@pytest.fixture()
+def step_preview(monkeypatch, pos_format):
+    """The POS dialect fake plus a connection list and a scoped-variable reply
+    that marks ``secret_pin`` as a secret."""
+    fmt_get = m._http_get_json
+
+    async def fake_get(url):
+        if url.endswith("/connections"):
+            return [PREVIEW_CONN]
+        if url.endswith("/variables"):
+            return {"effective": {"merchant": "SHOP1", "secret_pin": "9911"},
+                    "secret_values": ["9911"]}
+        if "/environments/" in url:
+            return {"name": "staging", "adapters": {}}
+        return await fmt_get(url)
+
+    async def fake_env(environment, environment_name):
+        return {"adapters": {}}
+
+    monkeypatch.setattr(m, "_http_get_json", fake_get)
+    monkeypatch.setattr(m, "_resolve_run_env", fake_env)
+
+
+def test_step_preview_resolves_vars_and_generators_and_pads(step_preview):
+    values = {"2": "${vars.pan_test}", "3": "000000", "4": "200", "11": "${seq.stan(6)}",
+              "41": "POS20001", "42": "${vars.merchant}", "49": "981"}
+    with _client() as c:
+        r = c.post("/scenarios/step-frame-preview",
+                   json={"scenario": _step_scenario(values), "step_id": "send"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    sent = body["request"]["values"]
+    assert sent["2"] == "4111111111111111"
+    assert sent["4"] == "000000000200"  # zero-filled to n 12
+    assert sent["11"] == "000001"  # a stable sample from the generator
+    assert sent["42"] == "SHOP1          "  # space-filled to ans 15
+    assert body["connection"] == "pos_host"
+    assert bytes.fromhex(body["hex"])[4:8] == b"0200"
+
+
+def test_step_preview_names_every_reference_only_a_run_knows(step_preview):
+    values = {"11": "${auth.response.stan}", "37": "${auth.response.rrn}", "3": "000000"}
+    with _client() as c:
+        r = c.post("/scenarios/step-frame-preview",
+                   json={"scenario": _step_scenario(values), "step_id": "send"})
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    assert "values.11 = ${auth.response.stan}" in detail
+    assert "values.37 = ${auth.response.rrn}" in detail
+    assert "earlier step" in detail
+
+
+def test_step_preview_never_prints_a_secret(step_preview):
+    values = {"3": "000000", "52": "${vars.secret_pin}"}
+    with _client() as c:
+        r = c.post("/scenarios/step-frame-preview",
+                   json={"scenario": _step_scenario(values), "step_id": "send"})
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    assert "values.52" in detail and "secret" in detail
+    assert "9911" not in detail and "hex" not in r.json()
+
+
+def test_step_preview_without_a_connection_says_what_to_do(step_preview):
+    sc = _step_scenario({"3": "000000"})
+    sc["steps"][0]["config"] = {}
+    with _client() as c:
+        r = c.post("/scenarios/step-frame-preview", json={"scenario": sc, "step_id": "send"})
+    assert r.status_code == 400
+    assert "select a TCP connection" in r.json()["detail"]

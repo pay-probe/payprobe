@@ -1923,6 +1923,28 @@
               </span>
             </span>
 
+            @if (isIsoMessageStep()) {
+              @if (framePreviewFor() === step.id) {
+                <app-frame-preview
+                  [result]="framePreview()"
+                  [error]="framePreviewError()"
+                  [loading]="framePreviewLoading()"
+                  [table]="deTable().table"
+                  (refresh)="previewFrame()"
+                  (closed)="closeFramePreview()"
+                />
+              } @else {
+                <button
+                  type="button"
+                  class="btn btn--sm wire-btn"
+                  (click)="previewFrame()"
+                  title="Show the exact bytes this step would send, under the environment picked for Execute. Nothing is sent."
+                >
+                  <pp-icon name="terminal" [size]="13" /> Preview wire bytes
+                </button>
+              }
+            }
+
             @if (!rawPayload()) {
               @if (selectedParams().length === 0) {
                 <span class="muted">No parameters for this action.</span>
@@ -1994,6 +2016,15 @@
                           [table]="deTable().table"
                           [tableLabel]="deTable().label"
                           [refs]="allRefs()"
+                          (valueChange)="setParamObject(p, $event)"
+                        />
+                      } @else if (isDeTableParam(p)) {
+                        <app-de-table-editor
+                          [value]="paramRaw(p.name)"
+                          [baseline]="deBaseline().table"
+                          [baselineLabel]="deBaseline().label"
+                          [dialectBound]="deBaseline().dialect"
+                          [usedDes]="usedDes()"
                           (valueChange)="setParamObject(p, $event)"
                         />
                       } @else {

@@ -21,6 +21,7 @@ import {
   isReference,
   isStaticStan,
   isStaticTime,
+  paddingNote,
   rowsFromValue,
   searchDes,
   sortRows,
@@ -156,6 +157,10 @@ export class DeValuesEditorComponent {
     const spec = this.spec(r);
     if (!spec?.length || isReference(r.value)) return "";
     return `${r.value.length}/${spec.length}`;
+  }
+
+  padding(r: DeRow): string | null {
+    return paddingNote(r, this.spec(r));
   }
 
   note(r: DeRow): string | null {

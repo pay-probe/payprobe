@@ -94,6 +94,8 @@
               DE{{ r.de }} is not defined in this DE table: the message will not
               pack. Bind a dialect that has it, or remove it.
             </div>
+          } @else if (padding(r); as pad) {
+            <div class="dev__msg dev__msg--info mono">{{ pad }}</div>
           } @else if (note(r); as n) {
             <div class="dev__msg dev__msg--warn">{{ n }}</div>
           }

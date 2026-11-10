@@ -369,10 +369,16 @@ def pack(mti: str, values: dict, fields: dict[str, dict], encoding: Any = None) 
     """Pack ``mti`` + ``{DE: logical value}`` into wire bytes under ``encoding``.
 
     A DE missing from ``fields`` raises ``KeyError`` (the table is the contract);
-    a value that cannot be encoded raises ``ValueError`` naming the DE.
+    a value that cannot be encoded raises ``ValueError`` naming the DE. A short
+    value in a ``fixed`` field is filled to its length first (zeros on the left
+    for ``n``, spaces on the right for text classes, see
+    :func:`~payprobe_common.iso8583.validate.pad_fixed`).
     """
+    from .validate import pad_fixed
+
     opts = resolve_encoding(encoding)
     values = {str(k): str(v) for k, v in values.items()}
+    values = {k: pad_fixed(v, fields[k]) if k in fields else v for k, v in values.items()}
     des = sorted(int(d) for d in values)
     has_secondary = any(d > 64 for d in des)
     primary = {d for d in des if d <= 64}

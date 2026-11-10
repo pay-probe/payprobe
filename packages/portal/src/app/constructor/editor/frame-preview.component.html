@@ -1,0 +1,93 @@
+<section class="fp" aria-label="Frame preview">
+  <div class="fp__head">
+    <span class="fp__title">
+      <pp-icon name="terminal" [size]="13" /> Wire preview
+    </span>
+    <span class="fp__acts">
+      <button
+        type="button"
+        class="fp__btn"
+        (click)="refresh.emit()"
+        [disabled]="loading()"
+        title="Build the frame again from the current step"
+      >
+        <pp-icon name="undo" [size]="12" />
+        {{ loading() ? "Building…" : "Refresh" }}
+      </button>
+      @if (result()) {
+        <button type="button" class="fp__btn" (click)="copyHex()">
+          <pp-icon name="copy" [size]="12" />
+          {{ copied() ? "Copied" : "Copy hex" }}
+        </button>
+      }
+      <button
+        type="button"
+        class="fp__btn fp__btn--icon"
+        (click)="closed.emit()"
+        aria-label="Close the preview"
+      >
+        <pp-icon name="x" [size]="12" />
+      </button>
+    </span>
+  </div>
+
+  @if (error(); as e) {
+    <p class="fp__err">{{ e }}</p>
+  } @else if (result(); as r) {
+    <div class="fp__meta">
+      <span
+        ><strong>{{ r.connection }}</strong>
+        @if (r.environment) {
+          · {{ r.environment }}
+        }
+      </span>
+      <span class="mono">{{ r.framing }}</span>
+      <span
+        >{{ r.total_bytes }} bytes
+        @if (r.declared_length !== undefined) {
+          · length field says {{ r.declared_length }}
+        }
+      </span>
+    </div>
+
+    <div class="fp__blocks">
+      @for (b of blocks(); track b.kind) {
+        <div class="fp__block" [class]="'fp__block fp__block--' + b.kind">
+          <span class="fp__blabel">{{ b.label }} · {{ b.bytes }} B</span>
+          <code class="fp__hex">{{ spaced(b.hex) }}</code>
+        </div>
+      }
+    </div>
+
+    <div class="fp__sub">
+      Message as text
+      <span class="muted">(· is a space, . a non-printable byte)</span>
+    </div>
+    <code class="fp__text">{{ bodyText() }}</code>
+
+    <div class="fp__sub">
+      Fields as sent
+      <span class="muted">(after padding; generated values are samples)</span>
+    </div>
+    <table class="fp__table">
+      <tbody>
+        @if (r.request?.mti) {
+          <tr>
+            <td class="fp__de mono">MTI</td>
+            <td class="fp__name"></td>
+            <td class="mono">{{ r.request?.mti }}</td>
+          </tr>
+        }
+        @for (row of rows(); track row.de) {
+          <tr>
+            <td class="fp__de mono">{{ row.de }}</td>
+            <td class="fp__name" [title]="name(row.de)">{{ name(row.de) }}</td>
+            <td class="mono fp__val">{{ visible(row.value) }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  } @else {
+    <p class="fp__muted">Building the frame…</p>
+  }
+</section>

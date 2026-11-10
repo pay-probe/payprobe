@@ -1,0 +1,275 @@
+<div
+  class="dev"
+  [class.dev--issues]="issueCount() > 0 || missingUsed().length > 0"
+>
+  <div class="dev__head">
+    <span class="dev__summary">
+      <pp-icon name="table" [size]="13" />
+      {{ summary() }}
+    </span>
+    <span class="dev__seg" role="tablist" aria-label="Editor view">
+      <button
+        type="button"
+        role="tab"
+        class="dev__segbtn"
+        [class.active]="mode() === 'table'"
+        [attr.aria-selected]="mode() === 'table'"
+        (click)="setMode('table')"
+      >
+        Fields
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="dev__segbtn"
+        [class.active]="mode() === 'json'"
+        [attr.aria-selected]="mode() === 'json'"
+        (click)="setMode('json')"
+        title="Edit or paste the whole table as JSON"
+      >
+        JSON
+      </button>
+    </span>
+  </div>
+  @if (baselineLabel()) {
+    <div class="dev__src muted">
+      Compared with <strong>{{ baselineLabel() }}</strong>
+    </div>
+  }
+
+  @if (mode() === "table") {
+    @if (!rows().length) {
+      <div class="dev__empty muted">
+        No override.
+        @if (dialectBound()) {
+          The message packs with the dialect's DE table as it is when the run
+          starts.
+        } @else {
+          The message packs with the connection's DE table (or the stock ISO
+          8583:1987 one).
+        }
+        Add a DE below to change its format for this step only, or start from a
+        copy of the whole table.
+        @if (baselineLabel()) {
+          <div class="dev__actions">
+            <button
+              type="button"
+              class="dev__btn"
+              (click)="startFromBaseline()"
+            >
+              <pp-icon name="copy" [size]="12" /> Copy {{ baselineLabel() }}
+            </button>
+          </div>
+        }
+      </div>
+    } @else {
+      <div class="dev__tools">
+        <pp-icon name="search" [size]="12" />
+        <input
+          class="dev__addinput"
+          placeholder="Filter by DE or name"
+          aria-label="Filter DEs"
+          [ngModel]="query()"
+          (ngModelChange)="query.set($event)"
+        />
+        <label class="dev__toggle">
+          <input
+            type="checkbox"
+            [ngModel]="changedOnly()"
+            (ngModelChange)="changedOnly.set($event)"
+          />
+          Differences only
+        </label>
+      </div>
+
+      <ul class="dev__rows">
+        @for (r of shown(); track r.key) {
+          <li
+            class="dev__row"
+            [class.dev__row--bad]="!!issue(r)"
+            [class.dev__row--changed]="state(r) !== 'same'"
+          >
+            <div class="dev__line">
+              <span class="dev__de mono">{{ r.de }}</span>
+              <input
+                class="dev__input dev__input--name"
+                [attr.aria-label]="'Name of DE ' + r.de"
+                placeholder="Field name"
+                [ngModel]="r.spec.name ?? ''"
+                (ngModelChange)="setKey(r, 'name', $event)"
+              />
+              @if (state(r) === "changed") {
+                <span class="dev__chip dev__chip--changed">changed</span>
+                <button
+                  type="button"
+                  class="dev__x"
+                  (click)="revert(r)"
+                  [attr.aria-label]="'Revert DE ' + r.de"
+                  title="Back to the baseline definition"
+                >
+                  <pp-icon name="undo" [size]="13" />
+                </button>
+              } @else if (state(r) === "added") {
+                <span class="dev__chip dev__chip--changed">added</span>
+              }
+              <button
+                type="button"
+                class="dev__x"
+                (click)="remove(r)"
+                [attr.aria-label]="'Remove DE ' + r.de"
+                title="Remove from this table: a message carrying it will not pack"
+              >
+                <pp-icon name="x" [size]="13" />
+              </button>
+            </div>
+            <div class="dev__line">
+              <select
+                class="dev__input dev__input--sel"
+                [attr.aria-label]="'Length type of DE ' + r.de"
+                [ngModel]="r.spec.len_type ?? 'fixed'"
+                (ngModelChange)="setKey(r, 'len_type', $event)"
+              >
+                @for (lt of lenTypes; track lt) {
+                  <option [value]="lt">{{ lt }}</option>
+                }
+                @if (!isKnownLenType(r.spec.len_type)) {
+                  <option [value]="r.spec.len_type">
+                    {{ r.spec.len_type }} (unknown)
+                  </option>
+                }
+              </select>
+              <input
+                class="mono dev__input dev__input--num"
+                type="number"
+                min="0"
+                [attr.aria-label]="'Length of DE ' + r.de"
+                [title]="
+                  (r.spec.len_type ?? 'fixed') === 'fixed'
+                    ? 'Exact length'
+                    : 'Maximum length'
+                "
+                [ngModel]="r.spec.length"
+                (ngModelChange)="setKey(r, 'length', $event)"
+              />
+              <select
+                class="dev__input dev__input--sel"
+                [attr.aria-label]="'Type of DE ' + r.de"
+                [ngModel]="r.spec.type ?? ''"
+                (ngModelChange)="setKey(r, 'type', $event)"
+              >
+                @for (t of fieldTypes; track t.value) {
+                  <option [value]="t.value">{{ t.label }}</option>
+                }
+                @if (!isKnownType(r.spec.type)) {
+                  <option [value]="r.spec.type ?? ''">
+                    {{ r.spec.type || "none" }}
+                  </option>
+                }
+              </select>
+            </div>
+            @if (issue(r); as msg) {
+              <div class="dev__msg dev__msg--bad">{{ msg }}</div>
+            } @else if (state(r) === "changed" && was(r)) {
+              <div class="dev__msg muted">
+                Was <span class="mono">{{ was(r) }}</span> in
+                {{ baselineLabel() || "the baseline" }}.
+              </div>
+            }
+          </li>
+        } @empty {
+          <li class="dev__empty muted">
+            @if (changedOnly() && !query()) {
+              Every DE matches {{ baselineLabel() || "the baseline" }}. Untick
+              "Differences only" to see all {{ rows().length }}.
+            } @else {
+              No DE matches the filter.
+            }
+          </li>
+        }
+      </ul>
+    }
+
+    <div class="dev__add">
+      <pp-icon name="plus" [size]="13" />
+      <input
+        class="dev__addinput"
+        placeholder="Add or override a DE: number or name"
+        aria-label="Add a data element to the table"
+        [ngModel]="addQuery()"
+        (ngModelChange)="addQuery.set($event); addOpen.set(true)"
+        (focus)="addOpen.set(true)"
+        (blur)="closeAddSoon()"
+        (keydown.enter)="addFromQuery()"
+        (keydown.escape)="addOpen.set(false)"
+      />
+      @if (addOpen() && addMatches().length) {
+        <ul class="dev__menu" role="listbox">
+          @for (m of addMatches(); track m.de) {
+            <li>
+              <button
+                type="button"
+                class="dev__opt"
+                role="option"
+                (mousedown)="$event.preventDefault()"
+                (click)="add(m.de)"
+              >
+                <span class="dev__de mono">{{ m.de }}</span>
+                <span class="dev__optname">{{ m.spec.name }}</span>
+                <span class="dev__hint mono">{{ hintFor(m.de) }}</span>
+              </button>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+
+    @if (missingUsed().length) {
+      <p class="dev__foot dev__msg--bad">
+        <pp-icon name="info" [size]="12" />
+        The field values use
+        <span class="mono">DE {{ missingUsed().join(", DE ") }}</span
+        >, which this table does not define: the message will not pack.
+      </p>
+    }
+    @if (rows().length) {
+      <div class="dev__foot muted">
+        <pp-icon name="info" [size]="12" />
+        <span>
+          This table replaces the whole DE table for this step.
+          @if (droppedCount()) {
+            {{ droppedCount() }} DEs of {{ baselineLabel() || "the baseline" }}
+            are not in it.
+          }
+          Picking another dialect overwrites it.
+          <span class="dev__actions">
+            @if (droppedCount()) {
+              <button type="button" class="dev__btn" (click)="restoreDropped()">
+                <pp-icon name="plus" [size]="12" /> Restore missing DEs
+              </button>
+            }
+            <button type="button" class="dev__btn" (click)="clear()">
+              <pp-icon name="x" [size]="12" /> Remove override
+            </button>
+          </span>
+        </span>
+      </div>
+    }
+  } @else {
+    <textarea
+      class="mono dev__json"
+      [rows]="jsonRows()"
+      [ngModel]="jsonDraft()"
+      (ngModelChange)="onJson($event)"
+      spellcheck="false"
+      placeholder='{ "48": { "name": "Additional Data", "len_type": "lllvar", "length": 999, "type": "ans" } }'
+      aria-label="DE table as JSON"
+    ></textarea>
+    @if (jsonError(); as e) {
+      <div class="dev__msg dev__msg--bad">{{ e }}</div>
+    } @else {
+      <div class="dev__msg muted">
+        Applied as you type. Switch back to Fields to see what differs.
+      </div>
+    }
+  }
+</div>

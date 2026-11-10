@@ -531,10 +531,27 @@ interface DocCard {
                   data element from the list (type a number or a name such as
                   <em>amount</em>). Every row shows the DE's name and format
                   from the bound dialect, counts its length and turns red when
-                  the value would not pack. The lightning chips insert a value
-                  that changes per transaction, for example the STAN counter
+                  the value would not pack. A short value in a fixed field is
+                  filled for you when it is sent: zeros on the left for numbers,
+                  spaces on the right for text (DE 42 fixed 15
+                  <code>SHOP1</code> goes out with 10 spaces), and the row shows
+                  what will be sent. The lightning chips insert a value that
+                  changes per transaction, for example the STAN counter
                   <code>&#36;&#123;seq.stan(6)&#125;</code> on DE 11. Use the
-                  <strong>JSON</strong> view to paste a whole map at once.
+                  <strong>JSON</strong> view to paste a whole map at once. To
+                  change how one DE is framed for this step only (say a longer
+                  DE 48), use <strong>DE table override</strong>: it lists only
+                  what differs from the dialect, marks each change with what it
+                  was, and reverts it in one click.
+                </li>
+                <li>
+                  Press <strong>Preview wire bytes</strong> to see the exact
+                  frame the step would send under the environment picked for
+                  Execute: length prefix, header and message as hex, the message
+                  as text with spaces shown as dots, and every field after
+                  padding. Nothing is sent. A value taken from an earlier step's
+                  response, or from a secret variable, is not previewed: put a
+                  sample literal in the field instead.
                 </li>
                 <li>
                   Add an assertion on <code>response_code = 00</code> in the

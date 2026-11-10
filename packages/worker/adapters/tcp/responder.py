@@ -475,8 +475,8 @@ class TcpResponder:
             if str(de) not in values or not values[str(de)]:
                 if gen_spec == "random_rrn":
                     # sized to the bound table (DE 37 is an12 in every ISO 8583
-                    # dialect): a short fixed field is not padded by the codec
-                    # and would desync the whole reply after it
+                    # dialect); the codec would zero-fill a short one, but a
+                    # random value should use every digit
                     width = int((self.fields.get(str(de)) or {}).get("length") or 12)
                     values[str(de)] = "".join(str(random.randint(0, 9)) for _ in range(width))
                 elif isinstance(gen_spec, str):

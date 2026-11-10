@@ -1645,3 +1645,11 @@
     justify-content: space-between;
   }
 }
+
+/* "Preview wire bytes" above a message step's parameters */
+.wire-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 2px 0 8px;
+}

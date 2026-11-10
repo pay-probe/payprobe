@@ -1,5 +1,7 @@
 import {
   DeTable,
+  padFixed,
+  paddingNote,
   activeTable,
   formatHint,
   isStaticStan,
@@ -76,7 +78,7 @@ describe("de-values model", () => {
   });
 
   it("validates literals with the codec's wording and skips references", () => {
-    expect(validateRow({ de: "4", value: "00000001000" }, TABLE["4"])).toBe(
+    expect(validateRow({ de: "4", value: "0000000002A" }, TABLE["4"])).toBe(
       "DE4 expected 12 chars, got 11",
     );
     expect(validateRow({ de: "4", value: "000000010000" }, TABLE["4"])).toBe(
@@ -143,5 +145,28 @@ describe("de-values model", () => {
       table: {},
       source: "none",
     });
+  });
+
+  it("pads short fixed literals like the codec, and says so", () => {
+    const ans15 = { len_type: "fixed", length: 15, type: "ans" };
+    expect(padFixed("10000", TABLE["4"])).toBe("000000010000");
+    expect(padFixed("MERCH01", ans15)).toBe("MERCH01        ");
+    expect(padFixed("0000000002A", TABLE["4"])).toBe("0000000002A");
+    expect(padFixed("${rand.amount(1,9)}", TABLE["4"])).toBe(
+      "${rand.amount(1,9)}",
+    );
+    expect(padFixed("4111", TABLE["2"])).toBe("4111"); // llvar
+    expect(padFixed("ABCD", TABLE["52"])).toBe("ABCD"); // b: no fill
+    expect(validateRow({ de: "4", value: "10000" }, TABLE["4"])).toBe(null);
+    expect(validateRow({ de: "42", value: "MERCH01" }, ans15)).toBe(null);
+    expect(paddingNote({ de: "4", value: "10000" }, TABLE["4"])).toBe(
+      "Sent as 000000010000: 7 zeros added on the left.",
+    );
+    expect(paddingNote({ de: "42", value: "MERCH01" }, ans15)).toBe(
+      'Sent as "MERCH01        ": 8 spaces added on the right.',
+    );
+    expect(paddingNote({ de: "4", value: "000000010000" }, TABLE["4"])).toBe(
+      null,
+    );
   });
 });

@@ -2,6 +2,7 @@ import { HttpClient } from "@angular/common/http";
 import { Injectable, inject } from "@angular/core";
 import { Observable } from "rxjs";
 
+import { StepFramePreview } from "../constructor/editor/frame-preview.model";
 import { RuntimeConfigService } from "../shared/runtime-config.service";
 import {
   CreateRunRequest,
@@ -26,6 +27,19 @@ export class RunApiService {
   /** Kick off a run; pair with RunMonitorService.stream(run_id) for live events. */
   start(req: CreateRunRequest = {}): Observable<CreateRunResponse> {
     return this.http.post<CreateRunResponse>(`${this.base}/runs`, req);
+  }
+
+  /** The exact frame one step of a (possibly unsaved) scenario would send,
+   *  resolved like a run under ``environment_name``; nothing is dialled. */
+  stepFramePreview(req: {
+    scenario: Record<string, unknown>;
+    step_id: string;
+    environment_name?: string;
+  }): Observable<StepFramePreview> {
+    return this.http.post<StepFramePreview>(
+      `${this.base}/scenarios/step-frame-preview`,
+      req,
+    );
   }
 
   /** Run history registry, newest first. */

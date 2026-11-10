@@ -14,6 +14,8 @@ export interface DeSpec {
   len_type?: string;
   length?: number;
   type?: string;
+  /** Other keys a dialect may carry per field (e.g. an `encoding` override). */
+  [key: string]: unknown;
 }
 
 export type DeTable = Record<string, DeSpec>;
@@ -142,29 +144,70 @@ export function formatHint(spec: DeSpec | undefined): string {
   return `${type} ≤ ${len} ${lt}`.trim();
 }
 
+/** Classes a short fixed field is space-filled for (mirror of
+ *  `payprobe_common.iso8583.validate._SPACE_FILLED`). */
+const SPACE_FILLED = ["a", "an", "ans", "anp", "p", "s"];
+
+function fitsClass(value: string, type: string): boolean {
+  if (type === "a") return /^[A-Za-z ]*$/.test(value);
+  if (type === "an") return /^[A-Za-z0-9 ]*$/.test(value);
+  return [...value].every((c) => c >= " " && c <= "~");
+}
+
+/** The value the codec sends for a literal (mirror of
+ *  `payprobe_common.iso8583.pad_fixed`): a short `fixed` field is zero-filled
+ *  on the left for `n` and space-filled on the right for the text classes,
+ *  when the value already fits its class. Anything else is unchanged. */
+export function padFixed(value: string, spec: DeSpec | undefined): string {
+  if (!spec || !value || isReference(value)) return value;
+  if ((spec.len_type ?? "fixed") !== "fixed") return value;
+  const len = spec.length ?? 0;
+  if (!len || value.length >= len) return value;
+  const type = (spec.type ?? "").toLowerCase();
+  if (type === "n" && /^\d+$/.test(value)) return value.padStart(len, "0");
+  if (SPACE_FILLED.includes(type) && fitsClass(value, type))
+    return value.padEnd(len, " ");
+  return value;
+}
+
+/** "Sent as 000000010000 (zeros added on the left)" when the codec will pad
+ *  this literal; null when it goes out as typed. */
+export function paddingNote(
+  row: DeRow,
+  spec: DeSpec | undefined,
+): string | null {
+  const sent = padFixed(row.value, spec);
+  if (sent === row.value) return null;
+  const added = sent.length - row.value.length;
+  if (sent.startsWith("0") && sent.endsWith(row.value))
+    return `Sent as ${sent}: ${added} zero${added === 1 ? "" : "s"} added on the left.`;
+  return `Sent as "${sent}": ${added} space${added === 1 ? "" : "s"} added on the right.`;
+}
+
 /** Why a literal value would not pack under its DE spec, in the codec's own
- *  wording ("DE4 expected 12 chars, got 11"); null when it fits, when it is a
- *  reference, or when the DE is not in the table (see {@link unknownDe}). */
+ *  wording ("DE4 expected 12 chars, got 11"); null when it fits once padded,
+ *  when it is a reference, or when the DE is not in the table (see
+ *  {@link unknownDe}). */
 export function validateRow(
   row: DeRow,
   spec: DeSpec | undefined,
 ): string | null {
-  const v = row.value;
+  const v = padFixed(row.value, spec);
   if (!spec || isReference(v)) return null;
   if (v === "") return `DE${row.de} is empty`;
   const len = spec.length ?? 0;
   const lt = spec.len_type ?? "fixed";
   const type = spec.type ?? "";
-  if (type === "n" && !/^\d*$/.test(v))
-    return `DE${row.de} is numeric (n): digits only`;
-  if (type === "b" && !/^[0-9a-fA-F]*$/.test(v))
-    return `DE${row.de} is binary (b): hex digits only`;
   if (len > 0) {
     if (lt === "fixed" && v.length !== len)
       return `DE${row.de} expected ${len} chars, got ${v.length}`;
     if (lt !== "fixed" && v.length > len)
       return `DE${row.de} allows at most ${len} chars, got ${v.length}`;
   }
+  if (type === "n" && !/^\d*$/.test(v))
+    return `DE${row.de} is numeric (n): digits only`;
+  if (type === "b" && !/^[0-9a-fA-F]*$/.test(v))
+    return `DE${row.de} is binary (b): hex digits only`;
   return null;
 }
 

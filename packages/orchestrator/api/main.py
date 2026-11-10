@@ -5942,6 +5942,132 @@ async def frame_preview(req: FramePreviewRequest) -> dict:
         raise HTTPException(400, f"{detail} ({where})")
 
 
+class StepFramePreviewRequest(BaseModel):
+    """One step of a (possibly unsaved) scenario to frame exactly as a run
+    would: ``scenario`` is the editor's draft, ``step_id`` the step, and
+    ``environment_name`` the environment whose connection values apply."""
+    scenario: dict[str, Any]
+    step_id: str
+    environment_name: str | None = None
+
+
+def _string_leaves(node: Any, path: str = "") -> list[tuple[str, str]]:
+    """Every string in a JSON-like value with its dotted path."""
+    if isinstance(node, str):
+        return [(path, node)]
+    if isinstance(node, dict):
+        out: list[tuple[str, str]] = []
+        for k, v in node.items():
+            out += _string_leaves(v, f"{path}.{k}" if path else str(k))
+        return out
+    if isinstance(node, list):
+        out = []
+        for i, v in enumerate(node):
+            out += _string_leaves(v, f"{path}[{i}]")
+        return out
+    return []
+
+
+@app.post("/scenarios/step-frame-preview")
+async def step_frame_preview(req: StepFramePreviewRequest) -> dict:
+    """The exact frame one scenario step would send, with nothing dialled.
+
+    Resolves the step the way a run does: the scenario's effective variables
+    (global < project < set < scenario, the draft's own on top), its card and
+    terminal pools, the generators (``${seq.*}``, ``${now.*}``, ``${rand.*}``,
+    seeded with a constant so a repeated preview is stable: the values are
+    samples, a run draws its own), and the step's connection under
+    ``environment_name`` (a selected one, else the type's default). Then frames
+    it through :func:`frame_preview`, so the dialect, padding and framing are the
+    real ones. Refused with 400, never partially shown: a reference only a run
+    can know (a prior step's response), a value that resolves to a secret
+    variable (a preview never prints one, invariant #8), a step with no TCP
+    connection.
+    """
+    from worker.engine.generators import GeneratorContext
+    from worker.engine.variables import UnresolvedReferenceError, resolve_value
+
+    sc = json.loads(json.dumps(req.scenario))  # never mutate the caller's draft
+    step = next((s for s in sc.get("steps", []) if s.get("id") == req.step_id), None)
+    if step is None:
+        raise HTTPException(404, f"no step '{req.step_id}' in this scenario")
+    if step.get("kind", "action") != "action":
+        raise HTTPException(400, "only an action step sends a message")
+
+    draft_vars = dict(sc.get("variables") or {})
+    secrets: list[str] = []
+    if sc.get("id"):
+        try:
+            v = await _http_get_json(f"{SCENARIO_API_URL}/scenarios/{quote(str(sc['id']), safe='')}/variables")
+            sc["variables"] = {**(v.get("effective") or {}), **draft_vars}
+            secrets = [str(x) for x in (v.get("secret_values") or []) if x]
+        except Exception:  # noqa: BLE001 — an unsaved scenario has only its own vars
+            sc["variables"] = draft_vars
+    await _attach_test_data([sc])
+
+    try:
+        conns = await _http_get_json(f"{SCENARIO_API_URL}/connections")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"could not list connections ({type(exc).__name__}: {exc})")
+    if not isinstance(conns, list):
+        raise HTTPException(502, "could not list connections (unexpected reply)")
+    env = await _resolve_run_env(None, req.environment_name)
+    await _attach_connections(env, [sc], req.environment_name)
+    step = next(s for s in sc.get("steps", []) if s.get("id") == req.step_id)
+    target = str(step.get("target") or "")
+    cfg = (env.get("adapters") or {}).get(target)
+    if not isinstance(cfg, dict):
+        raise HTTPException(
+            400,
+            f"step '{req.step_id}' resolves to '{target}', which has no connection under "
+            f"environment '{req.environment_name or 'default'}': select a TCP connection "
+            "in the step, or mark one as the default for its type",
+        )
+
+    def _ctx() -> dict:
+        gen = GeneratorContext(
+            seed="frame-preview", terminals=sc.get("terminals"), cards=sc.get("cards")
+        )
+        gen.new_transaction()
+        return {"vars": sc.get("variables") or {}, "tables": sc.get("tables") or {}, GEN_KEY: gen}
+
+    payload = step.get("payload") if isinstance(step.get("payload"), dict) else {}
+    # name every reference a preview cannot know, on a throwaway context so the
+    # real pass below still draws the first sample of each counter
+    probe = _ctx()
+    unresolved: list[str] = []
+    for path, text in _string_leaves(payload):
+        if "${" not in text:
+            continue
+        try:
+            resolve_value(text, probe)
+        except UnresolvedReferenceError:
+            unresolved.append(f"{path} = {text}")
+    if unresolved:
+        raise HTTPException(
+            400,
+            "the preview cannot resolve: " + "; ".join(unresolved) + ". A reference to an "
+            "earlier step's response is only known during a run; put a sample literal in "
+            "the field to preview the frame.",
+        )
+    resolved = resolve_value(payload, _ctx())
+    if secrets:
+        leaked = sorted({p for p, t in _string_leaves(resolved) for sv in secrets if sv in t})
+        if leaked:
+            raise HTTPException(
+                400,
+                "not shown: " + ", ".join(leaked) + " resolve to a secret variable, and "
+                "a preview never prints a secret. Preview with a non-secret sample value.",
+            )
+
+    out = await frame_preview(
+        FramePreviewRequest(config=cfg, action=str(step.get("action") or ""), payload=resolved)
+    )
+    out["connection"] = target
+    out["environment"] = req.environment_name or ""
+    return out
+
+
 async def _test_grpc_connection(cfg: dict) -> dict:
     """Probe a gRPC connection: open the channel and wait until it's ready.
 

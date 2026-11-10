@@ -63,6 +63,39 @@ def charset_error(value: str, type_code: str) -> str | None:
     return None
 
 
+#: Classes a short fixed field is space-filled for (left-justified).
+_SPACE_FILLED = ("a", "an", "ans", "anp", "p", "s")
+
+
+def pad_fixed(value: str, spec: dict) -> str:
+    """``value`` filled to its fixed length the ISO 8583 way, or unchanged.
+
+    A ``fixed`` field shorter than ``length`` is padded when the value already
+    fits its class: ``n`` digits are right-justified and zero-filled
+    (``"10000"`` -> ``"000000010000"`` for DE 4), the text classes are
+    left-justified and space-filled (``"MERCH01"`` -> ``"MERCH01        "`` for
+    DE 42). Everything else is returned unchanged so the codec still refuses
+    it with the real reason: an empty value, a value that breaks its class
+    (``"0000000002A"`` in an ``n`` field), a value that is too long, a variable
+    field, and ``b`` / ``z`` fields, which have no safe fill.
+
+    Before 2026-11-10 a short fixed value was written short, which shifted
+    every later field and the host received a garbled message.
+    """
+    value = str(value)
+    if not value or spec.get("len_type", "fixed") != "fixed":
+        return value
+    length = int(spec.get("length", 0) or 0)
+    if not length or len(value) >= length:
+        return value
+    typ = (spec.get("type") or "").lower()
+    if typ == "n" and value.isdigit():
+        return value.rjust(length, "0")
+    if typ in _SPACE_FILLED and charset_error(value, typ) is None:
+        return value.ljust(length, " ")
+    return value
+
+
 def length_error(value: str, spec: dict) -> str | None:
     """Fixed fields must match ``length`` exactly, variable ones must not exceed it."""
     lt = spec.get("len_type", "fixed")
@@ -138,6 +171,7 @@ __all__ = [
     "VARIABLE_LEN_TYPES",
     "charset_error",
     "length_error",
+    "pad_fixed",
     "validate_field",
     "validate_message",
 ]
