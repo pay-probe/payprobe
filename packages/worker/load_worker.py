@@ -102,18 +102,30 @@ def make_run_once(engine: WorkerEngine, scenario: dict, generators: GeneratorCon
 
 
 def _failure_reason(result) -> str:
-    """A short human reason from the first failed step of a scenario result."""
+    """A short human reason from the first failed step of a scenario result.
+
+    The runner stores a step's assertion results as plain dicts
+    (``AssertionResult.__dict__``); until 2026-11-10 this read them as objects,
+    so every assertion failure was swallowed and the load card showed a bare
+    ``<conn>.<action>: failed``. A step that failed with neither an error nor a
+    failed assertion names the reply's response code instead of nothing.
+    """
     for step in getattr(result, "steps", []) or []:
         if getattr(step, "status", "") in ("failed", "error"):
             if step.error:
                 return f"{step.target}.{step.action}: {step.error}"
             for a in getattr(step, "assertions", []) or []:
-                if not getattr(a, "passed", True):
+                view = a if isinstance(a, dict) else vars(a)
+                if not view.get("passed", True):
                     return (
-                        f"{step.target}.{step.action}: assertion {a.field} "
-                        f"{a.operator} {a.expected!r} (got {a.actual!r})"
+                        f"{step.target}.{step.action}: assertion {view.get('field')} "
+                        f"{view.get('operator')} {view.get('expected')!r} "
+                        f"(got {view.get('actual')!r})"
                     )
-            return f"{step.target}.{step.action}: {step.status}"
+            resp = getattr(step, "response", None)
+            rc = resp.get("response_code") if isinstance(resp, dict) else None
+            detail = f" (response_code {rc})" if rc is not None else ""
+            return f"{step.target}.{step.action}: {step.status}{detail}"
     return "scenario failed"
 
 

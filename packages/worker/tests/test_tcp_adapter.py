@@ -10,6 +10,7 @@ import pytest
 
 from worker.adapters.tcp import iso8583
 from worker.adapters.tcp.adapter import TcpAdapter
+from worker.adapters.tcp.protocols import make_protocol
 
 _RESP_MTI = {"0100": "0110", "0200": "0210", "0400": "0410", "0800": "0810"}
 
@@ -708,6 +709,20 @@ def test_preview_frame_is_a_dry_run_that_needs_no_socket():
     # with nothing given it previews the health-check message (what *Test
     # connection* sends): the default 0800 echo here
     assert adapter.preview_frame()["request"]["values"]["70"] == "301"
+
+
+async def test_step_error_is_never_empty(monkeypatch):
+    """``str(OSError())`` is "": the step error must still name the failure,
+    or the load card shows a bare "failed"."""
+    adapter = TcpAdapter({"host": "203.0.113.9", "port": 1, "sign_on": {"enabled": False}})
+    adapter.protocol = make_protocol(adapter.config)  # connect() is never called
+
+    async def boom(msg):
+        raise OSError()
+
+    monkeypatch.setattr(adapter, "_exchange", boom)
+    res = await adapter.execute("send_0800", {"values": {"70": "301"}})
+    assert res.success is False and res.error.startswith("OSError")
 
 
 def test_preview_frame_refuses_a_framing_typo_instead_of_binding_the_default():

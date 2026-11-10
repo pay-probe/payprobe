@@ -480,7 +480,15 @@ Notes (verified in `orchestrator/api/main.py` + `api/playground.py`):
   `cleanup` step outcomes in the run, `cleanup_failed:<step>` note never changes
   the verdict). `writes: "permanent"` allows `cleanup: null`.
 - Load runs refuse a probe target with 400 unless the connection has
-  `load_ok: true` (mocked probes exempt).
+  `load_ok: true` (mocked probes exempt). The step must have a connection
+  selected: a probe step still targeting its catalog type (`db_probe_core`) is
+  refused under that name and the detail says so, since no saved connection's
+  `load_ok` can apply to it (fix: pick the connection in the step, or put
+  `load_ok: true` on the environment's inline adapter of that name). A mix
+  run attaches selected connections exactly like a single run since
+  2026-11-10 (target rewritten to the connection, `environment_overrides[<env>]`
+  applied when the run names the environment); before, a mix step ran
+  against its catalog type and the selected connection was ignored.
 - Run fixtures (on by default; `PAYPROBE_RUN_FIXTURES=0` disables): `POST /runs {"fixtures": {"before": [...], "after": [...]}}`
   runs saved scenarios once around the run; results under `summary.fixtures`,
   in the sign-off report's Fixtures section and the provenance stamp. With the

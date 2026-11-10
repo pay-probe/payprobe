@@ -166,11 +166,107 @@ async def test_probe_in_a_load_scenario_is_refused_unless_load_ok(store, monkeyp
 def test_probe_load_ok_opt_in_and_registry_doc_path():
     env = {"adapters": {"core_db": {"adapter": "db_probe_core", "engine": "sqlite", "load_ok": True}}}
     assert m._probe_load_targets(env, [_scenario(target="core_db")], {}) == []
-    # mix path: the registry doc is the source of truth, keyed by the step's connection
+    # mix path: the registry doc is the source of truth, keyed by the step's
+    # connection; the catalog type the step was authored under is not judged
+    # on its own (since 2026-11-10 — before, it was always refused, so load_ok
+    # on the connection could never clear a probe step in a mix)
     conns = {"switch_db": {"name": "switch_db", "adapter": "db_probe_switch"}}
-    assert m._probe_load_targets({"adapters": {}}, [_scenario(target="db_probe_switch", connection="switch_db")], conns) == ["db_probe_switch", "switch_db"]
+    assert m._probe_load_targets({"adapters": {}}, [_scenario(target="db_probe_switch", connection="switch_db")], conns) == ["switch_db"]
+    conns["switch_db"]["load_ok"] = True
+    assert m._probe_load_targets({"adapters": {}}, [_scenario(target="db_probe_switch", connection="switch_db")], conns) == []
     # the target name itself resolving to a probe impl (default-connection type)
     assert m._probe_load_targets({"adapters": {}}, [_scenario(target="db_probe_core")], {}) == ["db_probe_core"]
+
+
+async def test_unbound_probe_step_is_named_in_the_refusal(store, monkeypatch):
+    """A probe step with no connection selected is refused under its catalog
+    type name; the detail says so and names the step, because the generic
+    "set load_ok on the connection" advice cannot apply to it."""
+    _patch_resolution(monkeypatch, {"adapters": {}}, [_scenario(target="db_probe_core")])
+    req = m.LoadRunRequest(type="steady", duration_s=5, workers=1, target_tps=20)
+    with pytest.raises(HTTPException) as exc:
+        await m.create_load_run(req)
+    assert exc.value.status_code == 400
+    assert "Step 's1' targets the adapter type 'db_probe_core' with no connection" in exc.value.detail
+    assert "Allow in load runs" in exc.value.detail
+
+
+async def test_probe_load_ok_per_environment_counts_on_the_mix_path(monkeypatch):
+    """``load_ok`` set only under ``environment_overrides[<env>]`` is honoured
+    when the run names that environment: the mix path never attaches
+    connections, so the registry doc is read as its effective config."""
+    conns = [{
+        "name": "core_db", "adapter": "db_probe_core", "engine": "postgresql",
+        "environment_overrides": {"staging": {"load_ok": True}},
+    }]
+
+    async def fake_get_json(url, *a, **k):
+        assert url.endswith("/connections")
+        return conns
+
+    monkeypatch.setattr(m, "_http_get_json", fake_get_json)
+    scs = [_scenario(target="db_probe_core", connection="core_db")]
+    with pytest.raises(HTTPException) as exc:
+        await m._refuse_external_load_targets({"adapters": {}}, scs)
+    assert exc.value.status_code == 400 and "'core_db'" in exc.value.detail
+    assert await m._refuse_external_load_targets({"adapters": {}}, scs, "staging") is None
+
+
+async def test_external_flag_on_the_registry_doc_counts_on_the_mix_fallback(monkeypatch):
+    """A mix step bound to a provider connection is refused from the registry
+    doc, and ``external`` set only per environment counts when the run names
+    that environment."""
+    conns = [{"name": "psp_sandbox", "adapter": "http", "base_url": "https://x.test",
+              "environment_overrides": {"staging": {"external": True}}}]
+
+    async def fake_get_json(url, *a, **k):
+        return conns
+
+    monkeypatch.setattr(m, "_http_get_json", fake_get_json)
+    scs = [_scenario(target="http", connection="psp_sandbox")]
+    assert await m._refuse_external_load_targets({"adapters": {}}, scs) is None
+    with pytest.raises(HTTPException) as exc:
+        await m._refuse_external_load_targets({"adapters": {}}, scs, "staging")
+    assert "psp_sandbox" in exc.value.detail and "external" in exc.value.detail
+    conns[0]["external"] = True
+    with pytest.raises(HTTPException):
+        await m._refuse_external_load_targets({"adapters": {}}, scs)
+
+
+async def test_resolve_load_mix_attaches_selected_connections(monkeypatch):
+    """A mix run wires selected connections like a single run: the step's
+    target becomes the connection name and env['adapters'] carries the
+    connection's effective config under the named environment."""
+    conns = [{"name": "core_db", "adapter": "db_probe_core", "engine": "postgresql",
+              "environment_overrides": {"staging": {"load_ok": True}}}]
+
+    async def fake_env(environment, environment_name):
+        return {"adapters": {}}
+
+    async def fake_fetch(ids):
+        return [_scenario(target="db_probe_core", connection="core_db")]
+
+    async def fake_test_data(scenarios):
+        return None
+
+    async def fake_get_json(url, *a, **k):
+        assert url.endswith("/connections")
+        return conns
+
+    monkeypatch.setattr(m, "_resolve_run_env", fake_env)
+    monkeypatch.setattr(m, "_fetch_scenarios_by_ids", fake_fetch)
+    monkeypatch.setattr(m, "_attach_test_data", fake_test_data)
+    monkeypatch.setattr(m, "_http_get_json", fake_get_json)
+    req = m.LoadRunRequest(
+        type="steady", duration_s=5, workers=1, target_tps=20, environment_name="staging",
+        mix=[{"scenario_id": "sc1", "weight": 1.0}],
+    )
+    env, scenarios, weights, label = await m._resolve_load_mix(req)
+    step = scenarios[0]["steps"][0]
+    assert step["target"] == "core_db" and step["config"]["_catalog_target"] == "db_probe_core"
+    assert env["adapters"]["core_db"]["load_ok"] is True
+    assert m._probe_load_targets(env, scenarios, {}) == []
+    assert weights == [1.0] and label.startswith("mix:")
 
 
 def test_probe_guardrail_exempts_mocked_probes():

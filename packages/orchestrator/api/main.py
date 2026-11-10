@@ -1821,6 +1821,12 @@ async def _resolve_load_mix(
         weights.append(float(entry.get("weight", 1.0)))
 
     await _attach_test_data(scenarios)
+    # Same wiring as a single-scenario run (since 2026-11-10): a step that
+    # selected a connection has its target rewritten to that name and the
+    # connection's effective config (base ⊕ environment override) lands in
+    # env["adapters"]. Before, a mix step ran against its catalog type and the
+    # selected connection was ignored, so a probe's load_ok could never apply.
+    await _attach_connections(env, scenarios, req.environment_name)
     label = req.label or "mix:" + "/".join(
         f"{s.get('id', s.get('name', '?'))}@{w:g}" for s, w in zip(scenarios, weights)
     )
@@ -1860,9 +1866,10 @@ def _external_load_targets(
 
     A connection marked external points at a real provider sandbox/live API
     (ADR-0009). Checked against every action step's effective target — the
-    env-attached adapter config (single-scenario path), the raw connection doc
-    (mix path, which doesn't attach connections), and group members (a group
-    fanning onto an external member is just as much of a ToS violation).
+    env-attached adapter config (both load paths attach connections), the
+    registry doc as a fallback (a step bound to a connection the attach could
+    not fetch), and group members (a group fanning onto an external member is
+    just as much of a ToS violation).
     """
     refused: set[str] = set()
     adapters = env.get("adapters") or {}
@@ -1882,8 +1889,12 @@ def _external_load_targets(
         for step in sc.get("steps", []):
             if step.get("kind", "action") != "action":
                 continue
-            _check(step.get("target"))
-            _check((step.get("config") or {}).get("connection"))
+            # A step that selected a connection runs against it (the run
+            # resolver rewrites ``target`` to that name); the catalog type it
+            # was authored under is not a second target to judge, or a
+            # connection's ``load_ok`` could never clear a probe step.
+            chosen = (step.get("config") or {}).get("connection")
+            _check(chosen or step.get("target"))
     return sorted(refused)
 
 
@@ -1909,13 +1920,45 @@ def _probe_load_targets(env: dict, scenarios: list[dict], conn_index: dict[str, 
         for step in sc.get("steps", []):
             if step.get("kind", "action") != "action":
                 continue
-            _check(step.get("target"))
-            _check((step.get("config") or {}).get("connection"))
+            # A step that selected a connection runs against it (the run
+            # resolver rewrites ``target`` to that name); the catalog type it
+            # was authored under is not a second target to judge, or a
+            # connection's ``load_ok`` could never clear a probe step.
+            chosen = (step.get("config") or {}).get("connection")
+            _check(chosen or step.get("target"))
     return sorted(refused)
 
 
-async def _refuse_external_load_targets(env: dict, scenarios: list[dict]) -> None:
+def _unbound_probe_steps(
+    scenarios: list[dict], refused: list[str], env: dict, conn_index: dict[str, dict]
+) -> list[tuple[str, str]]:
+    """``(step id, target)`` for every refused probe target that is an adapter
+    *type* from the catalog (``db_probe_core``) rather than a connection: the
+    step has no connection selected, so no saved connection's ``load_ok`` can
+    apply to it and the generic "set load_ok on the connection" advice is a
+    dead end."""
+    adapters = env.get("adapters") or {}
+    out: list[tuple[str, str]] = []
+    for sc in scenarios:
+        for step in sc.get("steps", []):
+            if step.get("kind", "action") != "action":
+                continue
+            target = step.get("target")
+            chosen = (step.get("config") or {}).get("connection")
+            if target in refused and not chosen and target not in adapters and target not in conn_index:
+                out.append((str(step.get("id") or "?"), str(target)))
+    return out
+
+
+async def _refuse_external_load_targets(
+    env: dict, scenarios: list[dict], env_name: str | None = None
+) -> None:
     """400 if the load mix targets an external (real provider) connection.
+
+    ``env_name`` is the run's named environment: a registry doc consulted as
+    the fallback is checked as its *effective* config under it (base ⊕
+    ``environment_overrides[env]``), so ``load_ok`` / ``external`` set per
+    environment count the same way they do once attached.
 
     The guardrail lives here, in the registry/tool layer, not in docs or
     prompts (invariant #6): scenarios, functional runs and the playground may
@@ -1927,7 +1970,11 @@ async def _refuse_external_load_targets(env: dict, scenarios: list[dict]) -> Non
     try:
         conns = await _http_get_json(f"{SCENARIO_API_URL}/connections")
         if isinstance(conns, list):
-            conn_index = {c.get("name"): c for c in conns if isinstance(c, dict)}
+            conn_index = {
+                c.get("name"): _connection_effective(c, env_name)
+                for c in conns
+                if isinstance(c, dict) and c.get("name")
+            }
     except Exception:  # noqa: BLE001 — env-attached configs still checked below
         log.warning("external-target check: could not list connections", exc_info=True)
     refused = _external_load_targets(env, scenarios, conn_index)
@@ -1943,15 +1990,24 @@ async def _refuse_external_load_targets(env: dict, scenarios: list[dict]) -> Non
         )
     probes = _probe_load_targets(env, scenarios, conn_index)
     if probes:
-        raise HTTPException(
-            400,
+        detail = (
             "load run refused: connection(s) "
             + ", ".join(f"'{n}'" for n in probes)
             + " are database probes. A load run executes the whole scenario per "
             "transaction, so the probe would query that database at the target TPS. "
             "Move the probe step out of the load scenario, or set load_ok: true on the "
-            "connection (per environment) to accept that deliberately (ADR-0012).",
+            "connection (per environment) to accept that deliberately (ADR-0012)."
         )
+        unbound = _unbound_probe_steps(scenarios, probes, env, conn_index)
+        if unbound:
+            detail += " " + " ".join(
+                f"Step '{sid}' targets the adapter type '{target}' with no connection "
+                f"selected, so no saved connection's load_ok applies to it: open the step, "
+                f"pick the database connection (with 'Allow in load runs' ticked), or "
+                f"set load_ok: true on the environment's inline '{target}' adapter."
+                for sid, target in unbound
+            )
+        raise HTTPException(400, detail)
 
 
 @app.post("/load-runs")
@@ -1969,7 +2025,7 @@ async def create_load_run(req: LoadRunRequest) -> dict:
             502, f"could not resolve transaction for load run: {exc or type(exc).__name__}"
         ) from exc
     # ADR-0009 guardrail: never point sustained load at a real provider.
-    await _refuse_external_load_targets(env, scenarios)
+    await _refuse_external_load_targets(env, scenarios, req.environment_name)
     scenario = scenarios[0]
     profile = LoadProfile(
         type=req.type, duration_s=req.duration_s, workers=req.workers,

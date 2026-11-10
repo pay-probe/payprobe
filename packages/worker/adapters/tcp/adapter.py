@@ -543,12 +543,14 @@ class TcpAdapter(BaseAdapter):
                 error=self._with_hint(f"No response within {self.response_timeout}s."),
             )
         except Exception as exc:  # noqa: BLE001 - deliberate catch-all
+            # ``str(OSError())`` is "" — an empty error reads as a bare "failed"
+            # on the load card, so the type name is the floor.
             return StepResult(
                 success=False,
                 request_payload=payload,
                 response_payload={},
                 duration_ms=int((time.monotonic() - start) * 1000),
-                error=str(exc),
+                error=self._with_hint(str(exc) or type(exc).__name__),
             )
 
     def _wire_log(self, msg: EncodedMessage, parsed: dict, shaped: dict) -> str:
