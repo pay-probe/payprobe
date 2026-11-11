@@ -57,6 +57,40 @@ def test_load_healthy():
     assert d["findings"][0]["code"] == "healthy"
 
 
+def test_tcp_no_response_is_a_timeout():
+    assert classify_error("svfe_pos.send_message: No response within 30s.") == "timeout"
+
+
+def test_load_small_share_of_timeouts_is_not_called_healthy():
+    # 1.9 % errors used to read "Run looks healthy"; the outcome split names
+    # the timeouts and the declines separately, whatever the last error was.
+    d = diagnose(_load(
+        sent=139995, received=137385, errors=2610, tps=500, target_tps=500,
+        last_error="svfe_pos.send_message: assertion response_code eq '000' (got '120')",
+        error_outcomes={"rejected": 2580, "timeout": 30, "connection": 0, "other": 0},
+        late_replies=28))
+    codes = [f["code"] for f in d["findings"]]
+    assert "healthy" not in codes
+    assert codes[0] == "outcome_timeout"
+    assert "outcome_rejected" in codes and "outcome_connection" not in codes
+    t = d["findings"][0]
+    assert "28 of those replies arrived later" in t["cause"]
+    assert t["evidence"] == "timeout 30, late replies 28"
+
+
+def test_load_timeouts_without_late_replies_point_at_drops():
+    d = diagnose(_load(sent=100, received=90, errors=10,
+                       error_outcomes={"rejected": 0, "timeout": 10,
+                                       "connection": 0, "other": 0}))
+    t = next(f for f in d["findings"] if f["code"] == "outcome_timeout")
+    assert "no late reply" in t["cause"]
+
+
+def test_load_run_recorded_before_the_split_gets_no_outcome_findings():
+    d = diagnose(_load(sent=1000, received=990, errors=10))
+    assert not any(f["code"].startswith("outcome_") for f in d["findings"])
+
+
 def test_load_notice_surfaced():
     d = diagnose(_load(sent=0, notice="start external workers"))
     assert d["findings"][0]["code"] == "notice"

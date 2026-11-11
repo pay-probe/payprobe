@@ -35,6 +35,7 @@ except Exception:  # noqa: BLE001, S110
 from .engine import NullSink, ScenarioRunner, WorkerEngine
 from .engine.generators import GeneratorContext
 from .engine.load import SOAK, LoadDriver, RedisLoadBus, Shard
+from .engine.load.outcomes import OTHER, REJECTED, classify_error_text, classify_step
 
 log = logging.getLogger("payprobe.load_worker")
 
@@ -84,7 +85,7 @@ def make_run_once(engine: WorkerEngine, scenario: dict, generators: GeneratorCon
     every message carrying the same PAN/STAN/RRN.
     """
 
-    async def run_once() -> tuple[bool, float, str | None]:
+    async def run_once() -> tuple[bool, float, str | None, str | None]:
         runner = ScenarioRunner(
             NullSink(),
             run_id="load",
@@ -95,14 +96,25 @@ def make_run_once(engine: WorkerEngine, scenario: dict, generators: GeneratorCon
         result = await runner.run(scenario, engine._execute_step, phase=2)
         latency_ms = (time.monotonic() - start) * 1000.0
         if result.passed:
-            return True, latency_ms, None
-        return False, latency_ms, _failure_reason(result)
+            return True, latency_ms, None, None
+        reason, outcome = _failure(result)
+        return False, latency_ms, reason, outcome
 
     return run_once
 
 
 def _failure_reason(result) -> str:
-    """A short human reason from the first failed step of a scenario result.
+    """The human reason half of :func:`_failure`."""
+    return _failure(result)[0]
+
+
+def _failure(result) -> tuple[str, str]:
+    """A short human reason and the outcome (``engine.load.outcomes``) from the
+    first failed step of a scenario result.
+
+    The outcome keys off structure first: a failed step that carried a reply
+    was *rejected* (response code, assertion, error status); one without a
+    reply is a timeout, a connection failure or other, read from its error.
 
     The runner stores a step's assertion results as plain dicts
     (``AssertionResult.__dict__``); until 2026-11-10 this read them as objects,
@@ -112,8 +124,16 @@ def _failure_reason(result) -> str:
     """
     for step in getattr(result, "steps", []) or []:
         if getattr(step, "status", "") in ("failed", "error"):
+            resp = getattr(step, "response", None)
+            if step.target == "call":
+                # a sub-scenario's response is a map of its children's
+                # responses, never empty: classify by the child's error, which
+                # the runner carries up ("sub-scenario failed: <child error>")
+                outcome = classify_error_text(step.error)
+            else:
+                outcome = classify_step(resp, step.error)
             if step.error:
-                return f"{step.target}.{step.action}: {step.error}"
+                return f"{step.target}.{step.action}: {step.error}", outcome
             for a in getattr(step, "assertions", []) or []:
                 view = a if isinstance(a, dict) else vars(a)
                 if not view.get("passed", True):
@@ -121,12 +141,11 @@ def _failure_reason(result) -> str:
                         f"{step.target}.{step.action}: assertion {view.get('field')} "
                         f"{view.get('operator')} {view.get('expected')!r} "
                         f"(got {view.get('actual')!r})"
-                    )
-            resp = getattr(step, "response", None)
+                    ), outcome
             rc = resp.get("response_code") if isinstance(resp, dict) else None
             detail = f" (response_code {rc})" if rc is not None else ""
-            return f"{step.target}.{step.action}: {step.status}{detail}"
-    return "scenario failed"
+            return f"{step.target}.{step.action}: {step.status}{detail}", outcome
+    return "scenario failed", OTHER
 
 
 class WeightedPicker:
@@ -172,7 +191,7 @@ def make_weighted_run_once(
         return runners[0]
     picker = WeightedPicker(weights, seed=seed)
 
-    async def run_once() -> tuple[bool, float, str | None]:
+    async def run_once() -> tuple[bool, float, str | None, str | None]:
         return await runners[picker.pick()]()
 
     return run_once
@@ -192,12 +211,16 @@ def make_open_client(engine: WorkerEngine, scenario: dict, heartbeat_action: str
     payload = scenario.get("heartbeat_payload") or (steps[0].get("payload") if steps else {}) or {}
 
     class _Client:
-        async def heartbeat(self) -> tuple[bool, float]:
+        async def heartbeat(self) -> tuple[bool, float, str | None, str | None]:
             adapter = await engine.registry.get(target)
             start = time.monotonic()
             sr = await adapter.execute(action, dict(payload))
             latency = sr.duration_ms or (time.monotonic() - start) * 1000.0
-            return (not sr.failed), float(latency)
+            if not sr.failed:
+                return True, float(latency), None, None
+            reason = f"{target}.{action}: {sr.error or 'failed'}"
+            outcome = REJECTED if sr.response_payload else classify_error_text(sr.error)
+            return False, float(latency), reason, outcome
 
         async def aclose(self) -> None:
             return None
@@ -310,6 +333,7 @@ async def run_worker(
             shard,
             open_client=make_open_client(engine, scenario, heartbeat_action),
             on_sample=on_sample,
+            late_replies=engine.registry.late_replies,
         )
     else:
         # One generator context per shard, seeded from run + worker so each
@@ -335,6 +359,7 @@ async def run_worker(
                 seed=f"{run_id}:{shard.worker_index}:mix",
             ),
             on_sample=on_sample,
+            late_replies=engine.registry.late_replies,
         )
 
     # publish presence immediately so the worker shows up the instant it claims

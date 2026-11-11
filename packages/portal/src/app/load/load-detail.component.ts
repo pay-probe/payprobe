@@ -140,6 +140,31 @@ import { LoadRunCardComponent, Point } from "./load-run-card.component";
                     }
                   </tbody>
                 </table>
+                @if ((c.error_outcomes?.length || 0) > 0) {
+                  <h4 class="cmp__sub">Errors by outcome</h4>
+                  <table class="cmp__table cmp__table--cats">
+                    <tbody>
+                      @for (o of c.error_outcomes; track o.outcome) {
+                        <tr>
+                          <td>{{ outcomeLabel(o.outcome) }}</td>
+                          <td>{{ o.current ?? "—" }}</td>
+                          <td class="muted">was {{ o.base ?? "—" }}</td>
+                          <td
+                            class="cmp__delta"
+                            [class.cmp__delta--bad]="(o.delta ?? 0) > 0"
+                            [class.cmp__delta--good]="(o.delta ?? 0) < 0"
+                          >
+                            @if (o.delta === null) {
+                              —
+                            } @else {
+                              {{ o.delta > 0 ? "+" : "" }}{{ o.delta }}
+                            }
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                }
                 @if (c.error_categories.length > 0) {
                   <h4 class="cmp__sub">Top error categories</h4>
                   <table class="cmp__table cmp__table--cats">
@@ -470,6 +495,10 @@ export class LoadDetailComponent implements OnInit, OnDestroy {
         this.error.set("Diagnosis failed — is the orchestrator running?");
       },
     });
+  }
+
+  outcomeLabel(o: string): string {
+    return o === "late_replies" ? "late replies" : o;
   }
 
   fmtDelta(d: LoadDelta, unit: string): string {

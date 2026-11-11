@@ -295,6 +295,17 @@ class AdapterRegistry:
                 results[target] = False
         return results
 
+    def late_replies(self) -> int:
+        """Late replies summed over every adapter this registry opened (the
+        load driver reads it once per metric sample)."""
+        total = 0
+        for adapter in list(self._instances.values()):
+            try:
+                total += int(adapter.late_replies())
+            except Exception:  # noqa: BLE001, S112 — a counter read never fails a sample
+                continue
+        return total
+
     async def disconnect_all(self) -> None:
         for target, adapter in self._instances.items():
             try:

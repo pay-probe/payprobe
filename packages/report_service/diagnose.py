@@ -38,7 +38,8 @@ def classify_error(msg: str | None) -> str:
                  r"unreachable|name or service not known|no route to host|"
                  r"failed to connect|connection reset", m):
         return "unreachable"
-    if re.search(r"timed out|timeout|deadline exceeded|read timed out", m):
+    if re.search(r"timed out|timeout|deadline exceeded|no response within|"
+                 r"no reply within", m):
         return "timeout"
     if re.search(r"\b401\b|\b403\b|unauthor|forbidden|invalid token|"
                  r"permission denied|authentication", m):
@@ -167,6 +168,8 @@ def diagnose_load(summary: dict) -> list[dict]:
                 f"{errors} of {errors+received} transactions failed. {cause}",
                 suggestion, evidence=s.get("last_error") or ""))
 
+    findings.extend(_outcome_findings(s, errors))
+
     pending = int(s.get("pending", 0))
     target = float(s.get("target_tps", 0) or 0)
     tps = float(s.get("tps", 0) or 0)
@@ -186,6 +189,56 @@ def diagnose_load(summary: dict) -> list[dict]:
             "No action needed.",
             evidence=f"received {received}, errors {errors}"))
     return _rank(findings)
+
+
+def _outcome_findings(s: dict, errors: int) -> list[dict]:
+    """One finding per failure outcome the run recorded (``error_outcomes``:
+    rejected / timeout / connection / other), so a small share of timeouts is
+    not hidden behind a healthy-looking error rate or a last error that
+    happens to be a decline. Runs recorded before the split have no
+    ``error_outcomes`` and get none of these."""
+    outcomes = s.get("error_outcomes") or {}
+    if not errors or not outcomes:
+        return []
+    out: list[dict] = []
+    timeouts = int(outcomes.get("timeout", 0))
+    late = int(s.get("late_replies", 0) or 0)
+    conn = int(outcomes.get("connection", 0))
+    rejected = int(outcomes.get("rejected", 0))
+    if timeouts:
+        if late:
+            cause = (f"{timeouts} transactions got no reply within the response "
+                     f"timeout; {late} of those replies arrived later.")
+            suggestion = ("The target answers, but slower than the connection's "
+                          "response_timeout_sec. Check the target's latency under "
+                          "this load, or raise the timeout if the target's SLA "
+                          "allows it.")
+        else:
+            cause = (f"{timeouts} transactions got no reply within the response "
+                     f"timeout, and no late reply was seen for them.")
+            suggestion = ("The target dropped them, or replied with a correlation "
+                          "key (STAN / RRN) that did not match the request. Check "
+                          "the target's log for those STANs.")
+        out.append(_finding("outcome_timeout", "warn", "Transactions timed out",
+                            cause, suggestion,
+                            evidence=f"timeout {timeouts}, late replies {late}"))
+    if conn:
+        out.append(_finding(
+            "outcome_connection", "warn", "Connections refused or lost",
+            f"{conn} transactions failed because the connection was refused, "
+            f"lost while waiting, or did not come back.",
+            "Check the target's connection limit and stability under load; the "
+            "wire journal on the Connections page shows when the peer closed.",
+            evidence=f"connection {conn}"))
+    if rejected:
+        out.append(_finding(
+            "outcome_rejected", "info", "Replies rejected",
+            f"{rejected} transactions got a reply that failed a check (a "
+            f"response code or an assertion).",
+            "The target is reachable and answering; look at the request data "
+            "it declined (terminal, merchant, card) and the expected values.",
+            evidence=f"rejected {rejected}"))
+    return out
 
 
 # -- functional-run diagnosis ------------------------------------------------

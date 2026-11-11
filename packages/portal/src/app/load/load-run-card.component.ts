@@ -61,7 +61,9 @@ export interface Point {
               }
               @if ((s.aborted || 0) > 0) {
                 <span>·</span>
-                <span class="warn">{{ s.aborted | number }} timed out</span>
+                <span class="warn"
+                  >{{ s.aborted | number }} cut off at drain end</span
+                >
               }
             </div>
           </div>
@@ -124,9 +126,12 @@ export interface Point {
           ><label>pending</label>
         </div>
         @if ((s.aborted || 0) > 0) {
-          <div class="stat">
+          <div
+            class="stat"
+            title="Sent, still waiting for a reply when the drain window closed, and cancelled. Not in errors. Raise the drain window to let them finish."
+          >
             <span class="warn">{{ s.aborted | number }}</span
-            ><label>aborted</label>
+            ><label>aborted at drain</label>
           </div>
         }
         <div class="stat">
@@ -142,6 +147,56 @@ export interface Point {
           </div>
         }
       </div>
+
+      <!-- errors split by what happened on the wire -->
+      @if (outcomes(); as o) {
+        <h3 class="statgroup statgroup--outcomes">
+          Errors by outcome
+          <span class="statgroup__hint">sum to errors</span>
+        </h3>
+        <div class="stats stats--outcomes">
+          <div
+            class="stat"
+            title="A reply came back but failed a check: a rejecting response code or a failed assertion. The target is reachable and answering."
+          >
+            <span [class.warn]="o.rejected > 0">{{ o.rejected | number }}</span
+            ><label>rejected</label>
+          </div>
+          <div
+            class="stat"
+            title="No reply within the connection's response timeout (response_timeout_sec)."
+          >
+            <span [class.good]="o.timeout === 0" [class.bad]="o.timeout > 0">{{
+              o.timeout | number
+            }}</span
+            ><label>timeout</label>
+          </div>
+          <div
+            class="stat"
+            title="The connection was refused, lost while waiting for the reply, or did not come back."
+          >
+            <span
+              [class.good]="o.connection === 0"
+              [class.bad]="o.connection > 0"
+              >{{ o.connection | number }}</span
+            ><label>connection</label>
+          </div>
+          <div
+            class="stat"
+            title="Anything else: a payload that could not be encoded, a scenario error, an exception with no recognisable cause. The last error and Diagnose show which."
+          >
+            <span [class.warn]="o.other > 0">{{ o.other | number }}</span
+            ><label>other</label>
+          </div>
+          <div
+            class="stat"
+            title="Replies that arrived after their transaction had already timed out. Each one is also counted in timeout: the target answered, but too late. Counted for TCP (ISO 8583) and HSM connections."
+          >
+            <span [class.warn]="o.late > 0">{{ o.late | number }}</span
+            ><label>late replies</label>
+          </div>
+        </div>
+      }
 
       <!-- connections / concurrency -->
       <h3 class="statgroup statgroup--conn">
@@ -270,7 +325,12 @@ export interface Point {
 
       @if (s.errors > 0 && s.last_error) {
         <div class="errbox">
-          <strong>Transactions are failing.</strong> Last error:
+          <strong
+            >{{ s.errors | number }} of
+            {{ (s.received || 0) + (s.errors || 0) | number }} transactions
+            failed ({{ 100 - successRate() | number: "1.0-2" }}%).</strong
+          >
+          Last error:
           <code>{{ s.last_error }}</code>
         </div>
       }
@@ -368,6 +428,14 @@ export interface Point {
       .statgroup--latency::before {
         background: #f5a524;
       }
+      .statgroup--outcomes::before {
+        background: #e5484d;
+      }
+      .statgroup__hint {
+        text-transform: none;
+        letter-spacing: 0;
+        opacity: 0.8;
+      }
       .stats {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
@@ -387,6 +455,9 @@ export interface Point {
       }
       .stats--latency {
         border-left-color: #f5a524;
+      }
+      .stats--outcomes {
+        border-left-color: #e5484d;
       }
       .stat {
         display: flex;
@@ -636,6 +707,26 @@ export class LoadRunCardComponent {
     if (!s) return 100;
     const offered = s.generated ?? s.sent ?? 0;
     return offered ? ((s.received || 0) / offered) * 100 : 100;
+  });
+
+  /** ``errors`` split by outcome, plus late replies. Null on a run recorded
+   *  before the split, and while nothing has failed, so the group stays out
+   *  of the way on a clean run. */
+  readonly outcomes = computed(() => {
+    const s = this._snap();
+    const o = s?.error_outcomes;
+    // {} = no worker reported the split (an older worker): no breakdown,
+    // rather than four zeros that would not sum to errors.
+    if (!s || !o || Object.keys(o).length === 0) return null;
+    const late = s.late_replies || 0;
+    if ((s.errors || 0) === 0 && late === 0) return null;
+    return {
+      rejected: o.rejected || 0,
+      timeout: o.timeout || 0,
+      connection: o.connection || 0,
+      other: o.other || 0,
+      late,
+    };
   });
 
   readonly tpsPath = computed(() => this.path((p) => p.tps));

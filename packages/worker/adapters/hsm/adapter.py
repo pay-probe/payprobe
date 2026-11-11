@@ -247,6 +247,9 @@ class _HsmConnection:
         self._writer: asyncio.StreamWriter | None = None
         self._reader_task: asyncio.Task | None = None
         self._pending: dict[str, asyncio.Future] = {}
+        #: replies with no waiting caller: the command had already timed out
+        #: (an HSM sends nothing unsolicited)
+        self.late_replies = 0
         self._seq = 0
         self._modulo = 10**header_bytes
         self._write_lock = asyncio.Lock()
@@ -293,7 +296,9 @@ class _HsmConnection:
                 fut = self._pending.get(header)
                 if fut is not None and not fut.done():
                     fut.set_result(self._parse(text))
-                # a reply with no waiting caller (timed-out/late) is dropped.
+                else:
+                    # no waiting caller: the command timed out; drop the reply
+                    self.late_replies += 1
         except (asyncio.IncompleteReadError, ConnectionError, OSError):
             pass
         finally:
@@ -367,6 +372,9 @@ class HSMAdapter(BaseAdapter):
         await asyncio.gather(*(c.close() for c in self._conns), return_exceptions=True)
         self._conns = []
 
+    def late_replies(self) -> int:
+        return sum(c.late_replies for c in self._conns)
+
     def _pick(self) -> _HsmConnection:
         """Round-robin the next connection (lazily connecting the first one)."""
         if not self._conns:
@@ -427,7 +435,8 @@ class HSMAdapter(BaseAdapter):
                 request_payload={"action": action, "payload": payload},
                 response_payload={},
                 duration_ms=int((time.monotonic() - start) * 1000),
-                error=str(exc),
+                # str(TimeoutError()) is "", which hid every HSM timeout
+                error=str(exc) or type(exc).__name__,
             )
 
 

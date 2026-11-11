@@ -2274,6 +2274,26 @@ def _compare_load_summaries(run_id: str, base_id: str | None,
         cats.append({"category": name, "current": c, "base": b, "delta": c - b})
     cats.sort(key=lambda r: (r["current"], r["base"]), reverse=True)
 
+    # errors split by outcome (rejected / timeout / connection / other) plus
+    # late replies. A run recorded before the split has no ``error_outcomes``:
+    # its side reads ``None`` rather than a fabricated 0.
+    def _outcomes(summary: dict | None) -> dict | None:
+        oc = (summary or {}).get("error_outcomes")
+        if not oc:
+            return None
+        out = {k: int(oc.get(k, 0) or 0) for k in ("rejected", "timeout", "connection", "other")}
+        out["late_replies"] = int((summary or {}).get("late_replies", 0) or 0)
+        return out
+
+    cur_oc, base_oc = _outcomes(cur), _outcomes(base)
+    outcomes = []
+    if cur_oc is not None or base_oc is not None:
+        for name in ("rejected", "timeout", "connection", "other", "late_replies"):
+            c = None if cur_oc is None else cur_oc[name]
+            b = None if base_oc is None else base_oc[name]
+            delta = None if c is None or b is None else c - b
+            outcomes.append({"outcome": name, "current": c, "base": b, "delta": delta})
+
     regressions = sum(1 for v in deltas.values() if v.get("regressed"))
     improvements = sum(1 for v in deltas.values() if v.get("improved"))
     return {
@@ -2284,6 +2304,7 @@ def _compare_load_summaries(run_id: str, base_id: str | None,
         "base": bm,
         "deltas": deltas,
         "error_categories": cats[:20],
+        "error_outcomes": outcomes,
         "summary": {"regressions": regressions, "improvements": improvements},
     }
 

@@ -59,9 +59,17 @@ class MockIsoServer:
     """Tiny ISO 8583 echo server: replies <reqMTI+0x10>, DE39=rc, echoes DE11."""
 
     def __init__(
-        self, fr=None, *, reorder=False, drop=False, response_code="00", drop_after_first=False
+        self,
+        fr=None,
+        *,
+        reorder=False,
+        drop=False,
+        response_code="00",
+        drop_after_first=False,
+        delay_s=0.0,
     ):
         self.fr = fr or _DEFAULT_FR
+        self.delay_s = delay_s
         self.reorder = reorder
         self.drop = drop
         self.response_code = response_code
@@ -110,6 +118,8 @@ class MockIsoServer:
                         await writer.drain()
                         pending = []
                 else:
+                    if self.delay_s:
+                        await asyncio.sleep(self.delay_s)  # answer, but late
                     writer.write(_frame(resp, self.fr))
                     await writer.drain()
         except (asyncio.IncompleteReadError, ConnectionResetError):
@@ -198,6 +208,44 @@ async def test_timeout_when_no_response():
         result = await adapter.execute("send_0200", {"amount": 100})
         assert result.success is False
         assert "No response" in (result.error or "")
+    finally:
+        await adapter.disconnect()
+        await server.stop()
+
+
+async def test_reply_after_timeout_counts_as_late():
+    """The target answers after the caller gave up: the step is a timeout,
+    and the reply that turns up later is counted as a late reply."""
+    server = MockIsoServer(delay_s=0.4)
+    port = await server.start()
+    adapter = await _make_adapter(port, response_timeout_sec=0.15)
+    try:
+        result = await adapter.execute("send_0200", {"amount": 100})
+        assert result.success is False
+        assert "No response" in (result.error or "")
+        assert result.response_payload == {}
+        assert adapter.late_replies() == 0
+        await asyncio.sleep(0.5)  # the late reply lands
+        assert adapter.late_replies() == 1
+        assert len(adapter.events()) == 1  # still visible as uncorrelated
+    finally:
+        await adapter.disconnect()
+        await server.stop()
+
+
+async def test_unsolicited_message_is_not_a_late_reply_and_the_sink_is_bounded():
+    from worker.adapters.tcp.adapter import UNSOLICITED_MAX
+
+    server = MockIsoServer()
+    port = await server.start()
+    adapter = await _make_adapter(port)
+    try:
+        packed = iso8583.iso_pack("0810", {"11": "999999", "39": "00"}, iso8583.DEFAULT_FIELDS)
+        parsed = iso8583.iso_unpack(packed, iso8583.DEFAULT_FIELDS)
+        for _ in range(UNSOLICITED_MAX + 50):
+            adapter._dispatch(parsed)
+        assert adapter.late_replies() == 0  # no request ever timed out on that key
+        assert len(adapter.events()) == UNSOLICITED_MAX
     finally:
         await adapter.disconnect()
         await server.stop()

@@ -164,6 +164,13 @@ class LoadStats:
     #: per-category error counts, summed across the fleet (see
     #: ``LoadDriver.categorize_error``). Empty when nothing failed.
     error_categories: dict[str, int] = field(default_factory=dict)
+    #: ``errors`` split by outcome (rejected / timeout / connection / other, see
+    #: ``engine.load.outcomes``), summed across the fleet. Empty when no worker
+    #: reported it (a sample from a worker older than the split).
+    error_outcomes: dict[str, int] = field(default_factory=dict)
+    #: replies that arrived after their transaction had timed out (each one is
+    #: also inside ``error_outcomes["timeout"]``), summed across the fleet.
+    late_replies: int = 0
     hist: LatencyHistogram = field(default_factory=LatencyHistogram)
 
     @property
@@ -201,6 +208,8 @@ class LoadStats:
             "error_categories": dict(
                 sorted(self.error_categories.items(), key=lambda kv: kv[1], reverse=True)
             ),
+            "error_outcomes": dict(self.error_outcomes),
+            "late_replies": self.late_replies,
             "latency_ms": {
                 "min": round(h.min, 2),
                 "mean": round(h.mean, 2),
@@ -242,6 +251,9 @@ def merge_samples(samples: list[dict[str, Any]]) -> LoadStats:
             out.last_error = s["last_error"]
         for cat, n in (s.get("error_categories") or {}).items():
             out.error_categories[cat] = out.error_categories.get(cat, 0) + int(n)
+        for kind, n in (s.get("error_outcomes") or {}).items():
+            out.error_outcomes[kind] = out.error_outcomes.get(kind, 0) + int(n)
+        out.late_replies += int(s.get("late_replies", 0) or 0)
         hsnap = s.get("hist")
         if hsnap:
             out.hist.merge_snapshot(hsnap)

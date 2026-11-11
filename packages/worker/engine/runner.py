@@ -175,6 +175,16 @@ class StepOutcome:
     environment_override: str | None = None
 
 
+def _sub_failure(sub_result: ScenarioResult) -> str:
+    """``sub-scenario failed``, plus the first failed child's error when it has
+    one, so the caller sees why (and a load run can tell a timeout from a
+    decline inside a called sub-flow)."""
+    for o in sub_result.steps:
+        if o.status in (FAILED, ERROR) and o.error:
+            return f"sub-scenario failed: {o.target}.{o.action}: {o.error}"
+    return "sub-scenario failed"
+
+
 @dataclass
 class ScenarioResult:
     scenario_id: str
@@ -857,7 +867,7 @@ class GraphExecutor:
             status=status,
             duration_ms=duration,
             response=response,
-            error=None if status == PASSED else "sub-scenario failed",
+            error=None if status == PASSED else _sub_failure(sub_result),
         )
         await self._emit(outcome, scenario_id, phase)
         return outcome

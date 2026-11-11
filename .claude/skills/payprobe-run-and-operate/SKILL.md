@@ -244,7 +244,7 @@ REDIS_URL=redis://<host>:6379 LOAD_RUN_ID=<run_id> python -m worker.load_worker
 
 | Action | Endpoint |
 |---|---|
-| Live snapshot / final summary | `GET /load-runs/{id}` |
+| Live snapshot / final summary (`errors` split in `error_outcomes`: rejected / timeout / connection / other; `late_replies`; full accounting in `docs/operations/load-test-runbook.md` Step 4) | `GET /load-runs/{id}` |
 | History (label `load:` prefix, headline metrics) | `GET /load-runs` |
 | Stop (this replica → other replica via run control → stranded record reconciled to `interrupted`) | `POST /load-runs/{id}/stop` |
 | Hot re-tune rate without restart (`target_tps`/`base_tps`/`spike_tps`/`end_tps`) | `POST /load-runs/{id}/retune` |

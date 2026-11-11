@@ -32,6 +32,12 @@ export interface LoadSnapshot {
   workers_reporting?: number;
   profile?: string;
   last_error?: string | null;
+  /** ``errors`` split by what happened on the wire; the four always sum to
+   *  ``errors``. Absent on runs recorded before the split. */
+  error_outcomes?: Partial<Record<LoadErrorOutcome, number>>;
+  /** Replies that arrived after their transaction had timed out (each one is
+   *  also counted in ``error_outcomes.timeout``). TCP and HSM only. */
+  late_replies?: number;
   notice?: string | null;
   // saturation / backpressure (summed across the fleet)
   in_flight?: number;
@@ -48,6 +54,11 @@ export interface LoadSnapshot {
   send_elapsed_s?: number; // driving time (fleet-ready → send window closed)
   drain_elapsed_s?: number; // how long the drain ran / has been running (s)
 }
+
+/** rejected = a reply came back but failed a check (response code, assertion);
+ *  timeout = no reply within the response timeout; connection = refused or
+ *  lost; other = anything else (encoding, scenario error). */
+export type LoadErrorOutcome = "rejected" | "timeout" | "connection" | "other";
 
 export type LoadProfileType = "steady" | "ramp" | "spike" | "soak";
 
@@ -313,6 +324,15 @@ export interface LoadErrorCategory {
   delta: number;
 }
 
+/** One error outcome's count in each run. ``null`` on a side recorded before
+ *  the outcome split existed. */
+export interface LoadOutcomeDelta {
+  outcome: LoadErrorOutcome | "late_replies";
+  current: number | null;
+  base: number | null;
+  delta: number | null;
+}
+
 /** GET /load-runs/{id}/compare — full run-vs-run load comparison. */
 export interface LoadCompare {
   run_id: string;
@@ -329,5 +349,7 @@ export interface LoadCompare {
     tps_cv: LoadDelta;
   };
   error_categories: LoadErrorCategory[];
+  /** Empty when neither run has the outcome split. */
+  error_outcomes?: LoadOutcomeDelta[];
   summary: { regressions: number; improvements: number };
 }

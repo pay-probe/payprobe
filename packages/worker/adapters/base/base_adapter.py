@@ -52,6 +52,12 @@ class BaseAdapter(ABC):
     async def disconnect(self) -> None:
         """Release all resources."""
 
+    def late_replies(self) -> int:
+        """Replies that arrived after their request had timed out. Adapters
+        that correlate replies to requests (TCP, HSM) count them; the rest
+        cannot tell, and report 0."""
+        return 0
+
     def assert_response(self, response: dict, assertions: list[dict]) -> list:
         results = []
         for rule in assertions:

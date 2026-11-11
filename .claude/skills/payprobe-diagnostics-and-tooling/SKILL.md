@@ -143,7 +143,7 @@ The taxonomy — what each verdict means and the next step:
 | Category | Matched error text (essence) | Meaning | Next step |
 |---|---|---|---|
 | `unreachable` | refused / reset / no route / cannot connect / name not known | Nothing accepted the connection — target down or wrong host/port | Start the target (Simulators page) or fix the Connection; confirm with `/diagnostics?connection=<name>` |
-| `timeout` | timed out / deadline exceeded | Connected but no answer in time — firewall drop, hung target, or overload | Raise timeout only after checking target health; under load this usually means the target is the bottleneck |
+| `timeout` | timed out / deadline exceeded / no response within / no reply within | Connected but no answer in time — firewall drop, hung target, or overload | Raise timeout only after checking target health; under load this usually means the target is the bottleneck |
 | `auth` | 401 / 403 / unauthorized / invalid token | Target rejected credentials | Fix the Connection's key/secret (check the environment override too) |
 | `assertion` | assertion / expected…got / response_code / did not match | The link works; the *response content* mismatched | Functional issue, not connectivity — verify expected values or fix upstream data (evidence bar: see payprobe-validation-and-qa) |
 | `tls` | tls / ssl / certificate / handshake | Handshake failed | Check http vs https, cert validity, client-cert requirement |
@@ -159,8 +159,18 @@ Load-run findings (from `diagnose_load`), with their exact triggers:
 | `no_workers` | workers expected > 0 but `workers_reporting == 0` | No load was generated at all — start the worker fleet (`LOAD_RUN_ID=<id> python -m worker.load_worker`) |
 | `all_failing_<cat>` | `sent > 0`, `received == 0`, `errors > 0` | Every transaction failed; `<cat>` is the taxonomy class of `last_error` |
 | `partial_failures_<cat>` | error rate ≥ **20%** | Elevated failures, same taxonomy drill-down |
+| `outcome_timeout` | `error_outcomes.timeout > 0` (any share) | No reply within `response_timeout_sec`; the cause says how many replies came back late (`late_replies`): late ⇒ target slower than the timeout, none ⇒ dropped or uncorrelated (STAN / RRN) |
+| `outcome_connection` | `error_outcomes.connection > 0` | Refused, lost while waiting, or never came back |
+| `outcome_rejected` (info) | `error_outcomes.rejected > 0` | A reply came back but failed a response-code or assertion check |
 | `below_target` | achieved TPS < **0.6 ×** target with `pending > 0` | The target or network is the bottleneck, not the generator |
 | `healthy` | none of the above | No action needed |
+
+The `outcome_*` findings key off the summary's `error_outcomes` (rejected /
+timeout / connection / other, summing to `errors`; classifier in
+`packages/worker/engine/load/outcomes.py`) and fire at any error share, so a
+1 % timeout rate is not hidden behind `healthy` or behind a `last_error` that
+happens to be a decline. Runs recorded before 2026-11-11 have no
+`error_outcomes` and get none of them.
 
 **Doctor ride-along:** when a finding is connectivity-class, the endpoint also
 runs a scoped doctor pass (`connections` + `listeners`) and attaches its
@@ -258,6 +268,10 @@ never `regressed`/`improved` — so sub-2% jitter can't cry wolf.
 
 **How to read a regression verdict:**
 
+- `error_outcomes` (list of `{outcome, current, base, delta}` for
+  `rejected` / `timeout` / `connection` / `other` / `late_replies`; a side
+  recorded before 2026-11-11 reads `null`; empty when neither run has it)
+  says whether the extra errors are declines or lost replies.
 - `regressions ≥ 1` with `error_rate` up → look at `error_categories` (list of
   `{category, current, base, delta}`, taxonomy names from section 2): a new or
   growing category names the failure mode (e.g. `timeout` grew = target

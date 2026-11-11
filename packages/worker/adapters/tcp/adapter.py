@@ -78,7 +78,7 @@ import asyncio
 import logging
 import os
 import time
-from collections import deque
+from collections import OrderedDict, deque
 
 from .. import socket_registry
 from ..base.base_adapter import BaseAdapter, StepResult
@@ -99,6 +99,13 @@ _WIRE_LEVEL = (
 #: as ``StepResult.raw_log``; an ISO 8583 message fits whole.
 WIRE_HEX_BYTES = 256
 WIRE_JOURNAL_SIZE = 200
+#: cap on kept unsolicited / uncorrelated messages (oldest dropped). Under load a
+#: slow target can send thousands of late replies; unbounded, this list grew
+#: until the worker ran out of memory.
+UNSOLICITED_MAX = 1000
+#: how many timed-out correlation keys are remembered, so a reply that arrives
+#: later is counted as *late* rather than unsolicited. Oldest forgotten first.
+TIMED_OUT_KEYS_MAX = 10_000
 
 HEALTH_MODES = ("probe", "connect", "message")
 
@@ -270,7 +277,12 @@ class TcpAdapter(BaseAdapter):
 
         self._pending: dict[str, asyncio.Future] = {}
         self._rx_frames: dict[str, bytes] = {}  # correlation key -> raw reply frame
-        self._events: list[dict] = []  # unsolicited / uncorrelated messages
+        # unsolicited / uncorrelated messages, newest UNSOLICITED_MAX kept
+        self._events: deque[dict] = deque(maxlen=UNSOLICITED_MAX)
+        #: correlation keys whose caller gave up waiting (response timeout)
+        self._timed_out: OrderedDict[str, None] = OrderedDict()
+        #: replies that matched a timed-out key: the target answered, too late
+        self._late_replies = 0
         self._send_lock = asyncio.Lock()
         self._closing = False
         self._sock_token: int | None = None  # /peers outbound registration
@@ -384,8 +396,20 @@ class TcpAdapter(BaseAdapter):
 
     def drain_events(self) -> list[dict]:
         """Return and clear the collected unsolicited messages."""
-        evs, self._events = self._events, []
+        evs = list(self._events)
+        self._events.clear()
         return evs
+
+    def late_replies(self) -> int:
+        """Replies that arrived after their request had already timed out."""
+        return getattr(self, "_late_replies", 0)
+
+    def _mark_timed_out(self, key: str) -> None:
+        keys = self._timed_out
+        keys[key] = None
+        keys.move_to_end(key)
+        if len(keys) > TIMED_OUT_KEYS_MAX:
+            keys.popitem(last=False)
 
     def wire_events(self) -> list[dict]:
         """The wire journal: every open / tx / rx / close on this socket, with
@@ -610,6 +634,7 @@ class TcpAdapter(BaseAdapter):
                 raise ConnectionError(f"{self.host}:{self.port} did not reconnect in time")
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
+        self._timed_out.pop(msg.key, None)  # the key is live again
         self._pending[msg.key] = fut
         try:
             frame = self.frame_spec.frame(msg.body)
@@ -620,7 +645,11 @@ class TcpAdapter(BaseAdapter):
                 self.journal.record(
                     "tx", frame, " · ".join(x for x in (note, f"MTI {mti}" if mti else "") if x)
                 )
-            parsed = await asyncio.wait_for(fut, timeout=self.response_timeout)
+            try:
+                parsed = await asyncio.wait_for(fut, timeout=self.response_timeout)
+            except TimeoutError:
+                self._mark_timed_out(msg.key)
+                raise
             msg.reply = self._rx_frames.pop(msg.key, b"")
             return parsed
         finally:
@@ -702,6 +731,10 @@ class TcpAdapter(BaseAdapter):
                 self._rx_frames[key] = raw
             fut.set_result(parsed)
         else:
+            if key is not None and key in self._timed_out:
+                # the target answered a request whose caller already gave up
+                del self._timed_out[key]
+                self._late_replies += 1
             self._events.append(parsed)  # unsolicited / late / unmatched
 
     def _fail_pending(self, exc: Exception) -> None:

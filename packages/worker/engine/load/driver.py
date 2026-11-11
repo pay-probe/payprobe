@@ -23,15 +23,19 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from .histogram import LatencyHistogram, LoadStats
+from .outcomes import OUTCOMES, classify_error_text, classify_exception, empty_outcomes
 from .profile import SOAK, Shard
 
 log = logging.getLogger("payprobe.load_driver")
 
-RunOnce = Callable[[], Awaitable[tuple[bool, float]]]
+#: ``run_once`` / ``heartbeat`` return ``(ok, latency_ms)``, optionally followed
+#: by an error reason and an outcome (see :mod:`.outcomes`). A missing outcome is
+#: derived from the reason text.
+RunOnce = Callable[[], Awaitable[tuple]]
 
 
 class SoakClient(Protocol):
-    async def heartbeat(self) -> tuple[bool, float]: ...
+    async def heartbeat(self) -> tuple: ...
     async def aclose(self) -> None: ...
 
 
@@ -50,10 +54,14 @@ class LoadDriver:
         sample_interval_s: float = 1.0,
         tick_s: float = 0.005,
         clock: Callable[[], float] = time.monotonic,
+        late_replies: Callable[[], int] | None = None,
     ) -> None:
         self.shard = shard
         self._run_once = run_once
         self._open_client = open_client
+        #: reads the adapters' count of replies that arrived after their
+        #: transaction had already timed out (None ⇒ not measured, reported 0).
+        self._late_replies = late_replies
         self._on_sample = on_sample
         self._sample_interval = sample_interval_s
         self._tick = tick_s
@@ -82,6 +90,10 @@ class LoadDriver:
         #: "top error categories" run-vs-run comparison. Bounded to keep an
         #: adversarial adapter from filling memory with unique messages.
         self.error_categories: dict[str, int] = {}
+        #: ``errors`` split by what happened on the wire: rejected (a reply came
+        #: back but was not accepted), timeout (no reply), connection (refused or
+        #: lost), other. Fixed keys; they always sum to ``errors``.
+        self.error_outcomes: dict[str, int] = empty_outcomes()
 
         # -- saturation / backpressure -------------------------------------
         #: max concurrent in-flight permitted on this worker (the semaphore cap).
@@ -146,6 +158,10 @@ class LoadDriver:
             peak_in_flight=self.peak_in_flight,
             throttled=self.throttled,
             aborted=self.aborted,
+            last_error=self.last_error,
+            error_categories=dict(self.error_categories),
+            error_outcomes=dict(self.error_outcomes),
+            late_replies=self.late_replies(),
             hist=self.hist,
         )
 
@@ -173,7 +189,21 @@ class LoadDriver:
             "hist": self.hist.snapshot(),
             "last_error": self.last_error,
             "error_categories": dict(self.error_categories),
+            "error_outcomes": dict(self.error_outcomes),
+            "late_replies": self.late_replies(),
         }
+
+    def late_replies(self) -> int:
+        """Replies that arrived after their transaction had timed out. Each
+        is also counted in ``error_outcomes["timeout"]``: this says how many of
+        those timeouts the target did answer, too late."""
+        if self._late_replies is None:
+            return 0
+        try:
+            return int(self._late_replies())
+        except Exception as exc:  # noqa: BLE001 — a counter read never breaks a sample
+            log.debug("late-reply count unavailable: %s", exc)
+            return 0
 
     #: cap on distinct error categories tracked per worker; overflow is lumped
     #: into ``"other"`` so a misbehaving adapter can't grow this without bound.
@@ -208,23 +238,32 @@ class LoadDriver:
     def _elapsed(self) -> float:
         return self._clock() - self._start if self._start else 0.0
 
-    async def _record_result(self, ok: bool, latency_ms: float, error: str | None = None) -> None:
+    async def _record_result(
+        self, ok: bool, latency_ms: float, error: str | None = None, outcome: str | None = None
+    ) -> None:
         if ok:
             self.received += 1
             self.hist.record(latency_ms)
         else:
             self.errors += 1
             self._bump_error_category(error)
+            if outcome not in self.error_outcomes:
+                outcome = classify_error_text(error)
+            self.error_outcomes[outcome] += 1
             if error:
                 self.last_error = error[:300]
 
     @staticmethod
-    def _unpack(result: Any) -> tuple[bool, float, str | None]:
-        """run_once / heartbeat may return (ok, latency) or (ok, latency, error)."""
-        if isinstance(result, tuple) and len(result) >= 3:
-            return bool(result[0]), float(result[1]), result[2]
+    def _unpack(result: Any) -> tuple[bool, float, str | None, str | None]:
+        """run_once / heartbeat return (ok, latency), (ok, latency, error) or
+        (ok, latency, error, outcome)."""
+        if isinstance(result, tuple) and len(result) >= 4:
+            outcome = result[3] if result[3] in OUTCOMES else None
+            return bool(result[0]), float(result[1]), result[2], outcome
+        if isinstance(result, tuple) and len(result) == 3:
+            return bool(result[0]), float(result[1]), result[2], None
         ok, latency = result
-        return bool(ok), float(latency), None
+        return bool(ok), float(latency), None, None
 
     async def _fire(self) -> None:
         # Acquire an in-flight permit, then dispatch. ``sent`` is incremented here
@@ -236,12 +275,13 @@ class LoadDriver:
             self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
             self.sent += 1
             try:
-                ok, latency, error = self._unpack(await self._run_once())  # type: ignore[misc]
+                ok, latency, error, outcome = self._unpack(await self._run_once())  # type: ignore[misc]
             except Exception as exc:  # noqa: BLE001 — a thrown adapter call is an error sample
-                ok, latency, error = False, 0.0, f"{type(exc).__name__}: {exc}"
+                ok, latency = False, 0.0
+                error, outcome = f"{type(exc).__name__}: {exc}", classify_exception(exc)
             finally:
                 self.in_flight -= 1
-            await self._record_result(ok, latency, error)
+            await self._record_result(ok, latency, error, outcome)
 
     def _backlog_cap(self) -> int | None:
         """Max outstanding (launched-but-unfinished) transactions, or None for
@@ -352,10 +392,11 @@ class LoadDriver:
                     self.generated += 1
                     self.sent += 1
                     try:
-                        ok, latency, error = self._unpack(await client.heartbeat())
+                        ok, latency, error, outcome = self._unpack(await client.heartbeat())
                     except Exception as exc:  # noqa: BLE001
-                        ok, latency, error = False, 0.0, f"{type(exc).__name__}: {exc}"
-                    await self._record_result(ok, latency, error)
+                        ok, latency = False, 0.0
+                        error, outcome = f"{type(exc).__name__}: {exc}", classify_exception(exc)
+                    await self._record_result(ok, latency, error, outcome)
                     if not ok:
                         # try one reconnect before declaring the client dead
                         try:

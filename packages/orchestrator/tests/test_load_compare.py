@@ -20,8 +20,11 @@ def store():
     return m.run_store
 
 
-def _summary(*, p50, p95, p99, tps, received, errors, cv=0.0, cats=None):
+def _summary(*, p50, p95, p99, tps, received, errors, cv=0.0, cats=None,
+             outcomes=None, late=0):
+    extra = {"error_outcomes": outcomes, "late_replies": late} if outcomes else {}
     return {
+        **extra,
         "sent": received + errors,
         "received": received,
         "errors": errors,
@@ -117,6 +120,37 @@ async def test_compare_flags_throughput_drop_and_errors(store):
     cats = {c["category"]: c for c in out["error_categories"]}
     assert cats["connect/TimeoutError"]["current"] == 80
     assert cats["connect/TimeoutError"]["delta"] == 80          # new this run
+
+
+async def test_compare_splits_errors_by_outcome(store):
+    store.create("l1", "mock", 1, label="load:steady")
+    store.finish("l1", "completed", _summary(
+        p50=10, p95=20, p99=30, tps=1000, received=990, errors=10,
+        outcomes={"rejected": 10, "timeout": 0, "connection": 0, "other": 0}))
+    store.create("l2", "mock", 1, label="load:steady")
+    store.finish("l2", "completed", _summary(
+        p50=10, p95=20, p99=30, tps=1000, received=960, errors=40,
+        outcomes={"rejected": 10, "timeout": 30, "connection": 0, "other": 0}, late=25))
+    out = await m.compare_load_run("l2")
+    oc = {o["outcome"]: o for o in out["error_outcomes"]}
+    assert oc["timeout"] == {"outcome": "timeout", "current": 30, "base": 0, "delta": 30}
+    assert oc["rejected"]["delta"] == 0
+    assert oc["late_replies"]["current"] == 25
+
+
+async def test_compare_against_a_run_recorded_before_the_split(store):
+    store.create("old", "mock", 1, label="load:steady")
+    store.finish("old", "completed", _summary(
+        p50=10, p95=20, p99=30, tps=1000, received=990, errors=10))
+    store.create("new", "mock", 1, label="load:steady")
+    store.finish("new", "completed", _summary(
+        p50=10, p95=20, p99=30, tps=1000, received=990, errors=10,
+        outcomes={"rejected": 4, "timeout": 6, "connection": 0, "other": 0}))
+    oc = {o["outcome"]: o for o in (await m.compare_load_run("new"))["error_outcomes"]}
+    assert oc["timeout"]["current"] == 6
+    assert oc["timeout"]["base"] is None and oc["timeout"]["delta"] is None
+    # neither side split → no breakdown at all
+    assert (await m.compare_load_run("old", to="old"))["error_outcomes"] == []
 
 
 async def test_compare_no_baseline(store):

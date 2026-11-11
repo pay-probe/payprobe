@@ -91,6 +91,9 @@ class GroupAdapter(BaseAdapter):
             except Exception:  # noqa: S110, BLE001 — best-effort teardown
                 pass
 
+    def late_replies(self) -> int:
+        return sum(c.late_replies() for c in self._children.values())
+
     async def health_check(self) -> bool:
         if not self.members:
             return False

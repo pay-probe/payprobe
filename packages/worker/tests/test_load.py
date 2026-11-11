@@ -829,8 +829,8 @@ async def test_weighted_run_once_single_scenario_is_passthrough():
     eng = WorkerEngine({})
     sc = {"id": "noop", "steps": []}
     fn = make_weighted_run_once(eng, [sc], [1.0])
-    ok, _latency, err = await fn()
-    assert ok and err is None
+    ok, _latency, err, outcome = await fn()
+    assert ok and err is None and outcome is None
 
 
 # -- saturation / backpressure ----------------------------------------------

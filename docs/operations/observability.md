@@ -33,12 +33,13 @@ scrapers reach them even when the auth gate is enforced.
 | `payprobe_runs_inflight`, `payprobe_runs_total{status}` | Scenario-run concurrency and outcomes. |
 | `payprobe_load_runs_inflight` | Active load tests. |
 | `payprobe_load_run_tps{run_id}` | Live achieved throughput per load run. |
-| `payprobe_load_run_errors{run_id}` | Cumulative errors per load run. |
+| `payprobe_load_run_errors{run_id}` | Cumulative errors per load run (the total only; the split into rejected / timeout / connection / other and the late-reply count is in `GET /load-runs/{id}` `error_outcomes` / `late_replies`, not in Prometheus). |
 | `payprobe_load_run_workers_reporting{run_id}` | Workers reporting samples — fleet liveness. |
 
 These directly answer **"why is throughput low?"**: `workers_reporting` below the
 configured worker count means the fleet isn't fully up; `errors` climbing while
-`tps` stays flat means the target is rejecting traffic.
+`tps` stays flat means the target is rejecting traffic or not answering;
+`error_outcomes` on the run says which.
 
 ## Bring up Prometheus + Grafana
 

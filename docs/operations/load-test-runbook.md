@@ -173,6 +173,51 @@ watch -n1 "curl -s localhost:8100/load-runs/$RUN | jq '{tps,target_tps,errors,la
 part of the fleet isn't up. A non-zero `last_error` tells you *why* transactions fail (e.g. an
 empty pool, or a switch decline) instead of a silent 0 TPS.
 
+### Where every transaction ends up
+
+Each generated transaction lands in exactly one counter, so the run always reconciles:
+
+```
+generated = sent + throttled
+sent      = received + errors + aborted + pending
+errors    = error_outcomes.rejected + .timeout + .connection + .other
+```
+
+| Counter | Meaning |
+|---|---|
+| `received` | A reply came back and every assertion passed. |
+| `error_outcomes.rejected` | A reply came back but failed a check: a rejecting response code, a failed assertion, an HTTP error status, an HSM error code. |
+| `error_outcomes.timeout` | No reply within the connection's `response_timeout_sec`. |
+| `error_outcomes.connection` | The connection was refused, lost while waiting, or did not come back. |
+| `error_outcomes.other` | Anything else: a payload that could not be encoded, a scenario error. |
+| `aborted` | Sent, still waiting when the drain window closed, and cancelled. Not in `errors`. |
+| `pending` | Sent and still waiting (live runs only; 0 at the end). |
+| `late_replies` | Replies that arrived after their transaction had timed out. Each is **also** in `error_outcomes.timeout`; it is not a separate transaction. |
+
+`late_replies` tells two timeout causes apart: a high count means the target answers but slower than
+`response_timeout_sec`; zero means the target dropped the request or replied with a correlation key
+(STAN / RRN) that did not match it.
+
+```bash
+curl -s localhost:8100/load-runs/$RUN | jq '{errors, error_outcomes, late_replies, aborted, last_error}'
+```
+
+Known limits, by design:
+
+- `late_replies` is counted by the TCP (ISO 8583) and HSM adapters only; HTTP, gRPC and NATS cannot
+  see a reply after their timeout and report 0. A reply that arrives after the worker stopped is
+  not counted.
+- The TCP adapter remembers the last 10,000 timed-out correlation keys. A late reply to an older
+  one is counted as unsolicited, not late.
+- The HSM adapter counts every reply with no waiting caller as late, because an HSM sends nothing
+  unsolicited.
+- A connection group (`members`) loses a member's late-reply count when that member is evicted and
+  reconnected, so `late_replies` can step down on a failover group.
+- A failed sub-scenario (`call` node) is classified by its first failed child's error text, not by
+  structure: a child decline whose error does not name a timeout or connection reads as `other`.
+- Runs recorded before 2026-11-11 have no `error_outcomes`: the portal hides the breakdown and
+  the compare view shows `—` for that side.
+
 ---
 
 ## Step 5 — scale to a real fleet (optional, for high TPS)
