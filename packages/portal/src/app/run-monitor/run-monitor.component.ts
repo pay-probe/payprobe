@@ -21,6 +21,7 @@ import {
 } from "./run.models";
 import { ScenarioApiService } from "../constructor/scenario-api.service";
 import { UiService } from "../shared/ui.service";
+import { ActiveEnvironmentService } from "../shared/active-environment.service";
 import { NetworkFlowsService } from "../topologies/network-flows.service";
 import {
   Project,
@@ -277,6 +278,16 @@ const PHASE_LABELS: Record<number, string> = {
               <h2 class="launch__h">Start a run</h2>
               <p class="launch__lede">
                 Pick a project to run its whole suite, or fire a single case.
+              </p>
+              <p class="launch__env">
+                <pp-icon name="globe" [size]="14"></pp-icon>
+                @if (activeEnv(); as env) {
+                  Runs against environment <strong>{{ env }}</strong> (topbar
+                  selection).
+                } @else {
+                  No environment selected in the topbar: runs use the bundled
+                  mock environment.
+                }
               </p>
             </div>
           </div>
@@ -989,6 +1000,14 @@ const PHASE_LABELS: Record<number, string> = {
         padding: var(--space-4);
         text-align: center;
       }
+      .launch__env {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 4px 0 0;
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+      }
       .launch__mock {
         align-self: flex-start;
         padding: 0.4rem 0.8rem;
@@ -1019,6 +1038,9 @@ export class RunMonitorComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly ui = inject(UiService);
   private readonly networks = inject(NetworkFlowsService);
+  /** Topbar environment: project and case runs resolve connections and
+   *  per-environment overrides against it (the bundled mock examples do not). */
+  readonly activeEnv = inject(ActiveEnvironmentService).active;
 
   readonly runId = signal<string | null>(null);
   readonly status = signal<RunStatus>("pending");
@@ -1270,11 +1292,20 @@ export class RunMonitorComponent implements OnInit, OnDestroy {
     const id = this.selectedProjectId();
     if (!id) return;
     const name = this.projects().find((p) => p.id === id)?.name ?? "project";
-    this.launch({ project_id: id, label: name });
+    this.launch({ project_id: id, label: name, ...this.envField() });
   }
 
   runScenario(s: ScenarioSummary): void {
-    this.launch({ scenario_ids: [s.id], label: s.name });
+    this.launch({ scenario_ids: [s.id], label: s.name, ...this.envField() });
+  }
+
+  /** The topbar environment as a run field. Without it the orchestrator falls
+   *  back to the bundled mock environment and applies no connection
+   *  environment_overrides, so the run hits different hosts/ports/keys than the
+   *  ones selected. */
+  private envField(): Pick<CreateRunRequest, "environment_name"> {
+    const env = this.activeEnv();
+    return env ? { environment_name: env } : {};
   }
 
   /** Mock examples shortcut. */

@@ -273,6 +273,68 @@ async def test_coordinator_aggregates_inproc_workers():
     assert run.summary["workers"] == 3
 
 
+async def test_coordinator_summary_carries_error_outcomes_end_to_end():
+    """worker → bus → coordinator → final summary: the outcome split and the
+    late-reply count survive the whole path and still sum to ``errors``."""
+    import pathlib
+    import sys
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "orchestrator"))
+    from api.load_coordinator import LoadCoordinator
+
+    from worker.engine import InMemoryStreamBackbone
+
+    bus = InMemoryLoadBus()
+
+    async def fake_worker(b, run_id):
+        from worker.engine.load import Shard
+
+        payload = await b.claim_shard(run_id, timeout_s=5)
+        shard = Shard.from_dict(payload)
+        n = 0
+
+        async def run_once():
+            nonlocal n
+            n += 1
+            if n % 3 == 0:
+                return False, 1.0, "pos.send: No response within 1s.", "timeout"
+            if n % 3 == 1:
+                return False, 1.0, "pos.send: assertion rc eq '000' (got '120')", "rejected"
+            return True, 1.0
+
+        async def on_sample(s):
+            s["worker_id"] = f"w{shard.worker_index}"
+            await b.report_sample(run_id, s)
+
+        driver = LoadDriver(
+            shard,
+            run_once=run_once,
+            on_sample=on_sample,
+            sample_interval_s=0.1,
+            late_replies=lambda: 2,
+        )
+        return await driver.run()
+
+    coord = LoadCoordinator(
+        bus,
+        InMemoryStreamBackbone(),
+        run_store=None,
+        in_proc_worker=fake_worker,
+        emit_interval_s=0.1,
+        grace_s=0.5,
+    )
+    profile = LoadProfile(type=STEADY, duration_s=0.5, workers=2, target_tps=100)
+    run = await coord.start("run-oc", profile, env={}, scenario={"id": "s"})
+    await asyncio.gather(*run._tasks, return_exceptions=True)
+
+    s = run.summary
+    assert s is not None and s["errors"] > 0
+    oc = s["error_outcomes"]
+    assert sum(oc.values()) == s["errors"]
+    assert oc["timeout"] > 0 and oc["rejected"] > 0
+    assert s["late_replies"] == 4  # 2 per worker, summed across the fleet
+
+
 def test_read_rss_bytes_is_positive():
     """The dependency-free RSS reader returns this process's resident memory."""
     from worker.load_worker import read_rss_bytes

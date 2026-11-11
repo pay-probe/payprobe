@@ -28,6 +28,7 @@ import { RefAutocompleteDirective } from "../../shared/ref-autocomplete.directiv
 import { IconComponent } from "../../shared/ui/icon.component";
 import { ThemeService } from "../../shared/theme.service";
 import { UiService } from "../../shared/ui.service";
+import { ActiveEnvironmentService } from "../../shared/active-environment.service";
 import {
   ExecuteNodeResult,
   RunApiService,
@@ -325,6 +326,7 @@ export class ConstructorComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly ui = inject(UiService);
+  private readonly activeEnv = inject(ActiveEnvironmentService);
   private readonly participants = inject(ParticipantsService);
 
   /** Flow mode: the same editor authoring a participant flow instead of a
@@ -2650,7 +2652,8 @@ export class ConstructorComponent implements OnInit {
   // -- scenario preview run (Execute) & live debugging ---------------------
 
   readonly environments = signal<EnvironmentInfo[]>([]);
-  readonly selectedEnv = signal<string>("mock");
+  /** Starts on the topbar environment; the Execute picker can still override it. */
+  readonly selectedEnv = signal<string>(this.activeEnv.active() ?? "mock");
   /** Cached global tables, attached to preview runs as scenario.tables. */
   readonly tablesRuntime = signal<Record<string, Record<string, unknown>[]>>(
     {},
