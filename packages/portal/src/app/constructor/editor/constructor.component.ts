@@ -151,7 +151,19 @@ interface RenderWire {
 }
 
 type DragState =
-  | { kind: "node"; id: string; offX: number; offY: number; moved: boolean }
+  | {
+      kind: "node";
+      id: string;
+      offX: number;
+      offY: number;
+      /** Pointer position at press, to tell a click from a drag. */
+      startX: number;
+      startY: number;
+      /** Node position at press, to tell a real move from a no-op. */
+      fromX: number;
+      fromY: number;
+      moved: boolean;
+    }
   | {
       kind: "pan";
       startX: number;
@@ -168,6 +180,9 @@ const PORT_GAP = 26;
 const GRID_DOTS = 24;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2;
+/** Pointer travel (screen px) below which a press is a click, not a drag:
+ *  hand and trackpad jitter would otherwise swallow node clicks. */
+const DRAG_THRESHOLD_PX = 4;
 
 /** A node in a starter flow: a catalog step + config overrides (may carry
  * `${ref.…}` references to earlier nodes in the same flow, rewritten on insert). */
@@ -1947,6 +1962,10 @@ export class ConstructorComponent implements OnInit {
       id: node.step.id,
       offX: w.x - node.x,
       offY: w.y - node.y,
+      startX: event.clientX,
+      startY: event.clientY,
+      fromX: node.x,
+      fromY: node.y,
       moved: false,
     };
   }
@@ -1976,6 +1995,14 @@ export class ConstructorComponent implements OnInit {
     const drag = this.drag;
     if (!drag) return;
     if (drag.kind === "node") {
+      if (
+        !drag.moved &&
+        Math.abs(event.clientX - drag.startX) +
+          Math.abs(event.clientY - drag.startY) <=
+          DRAG_THRESHOLD_PX
+      ) {
+        return; // still a click
+      }
       const w = this.toWorld(event.clientX, event.clientY);
       drag.moved = true;
       this.layout.update((l) => ({
@@ -1988,7 +2015,7 @@ export class ConstructorComponent implements OnInit {
     } else if (drag.kind === "pan") {
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
-      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+      if (Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD_PX) drag.moved = true;
       this.pan.set({ x: drag.panX + dx, y: drag.panY + dy });
     } else {
       const w = this.toWorld(event.clientX, event.clientY);
@@ -2007,8 +2034,15 @@ export class ConstructorComponent implements OnInit {
     this.drag = null;
     if (!drag) return;
     if (drag.kind === "node") {
-      if (drag.moved) this.dirty.set(true);
-      else this.selectStep(drag.id);
+      if (!drag.moved) {
+        this.selectStep(drag.id);
+      } else {
+        // A drag that snapped back to where it started changed nothing.
+        const pos = this.layout()[drag.id];
+        if (!pos || pos.x !== drag.fromX || pos.y !== drag.fromY) {
+          this.dirty.set(true);
+        }
+      }
     } else if (drag.kind === "pan") {
       if (!drag.moved) this.clearSelection();
     } else {
