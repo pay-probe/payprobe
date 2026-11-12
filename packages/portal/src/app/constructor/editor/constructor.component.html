@@ -418,12 +418,30 @@
         }
 
         <div class="canvas__world" [style.transform]="worldTransform()">
+          <!-- ADR-0014: loop containers, drawn behind wires and nodes -->
+          @for (b of shownBoxes(); track b.loopId) {
+            <div
+              class="cbox"
+              [class.cbox--empty]="b.empty"
+              [class.cbox--selected]="b.loopId === selectedId()"
+              [style.left.px]="b.x"
+              [style.top.px]="b.y"
+              [style.width.px]="b.w"
+              [style.height.px]="b.h"
+            >
+              <span class="cbox__head mono">{{ boxLabel(b.loopId) }}</span>
+              @if (b.empty) {
+                <span class="cbox__hint">Drop steps here to repeat them</span>
+              }
+            </div>
+          }
           <svg class="wires">
             @for (w of wires(); track w.index) {
               <g class="wire-group">
                 <path
                   class="wire"
                   [class.wire--invalid]="w.invalid"
+                  [class.wire--error]="w.error"
                   [attr.d]="w.d"
                 />
                 <path
@@ -537,21 +555,31 @@
                       >{{ node.step.assertions.length }} ✓</span
                     >
                   }
+                  @if (node.failBadge) {
+                    <span
+                      class="cnode__fail mono"
+                      [title]="routeExplain(node.step)"
+                      >{{ node.failBadge }}</span
+                    >
+                  }
                 </div>
               </div>
               @for (p of node.ports; track p.port) {
                 <span
                   class="cnode__port cnode__port--out"
                   [class.cnode__port--connected]="p.connected"
+                  [class.cnode__port--error]="p.error"
                   [style.top.px]="p.cy - node.y"
                   [title]="
-                    node.kind === 'action'
-                      ? 'Drag onto another node to make it run next'
-                      : 'Output: ' + p.label
+                    p.error
+                      ? 'On failure: drag onto the step that handles it (e.g. a reversal)'
+                      : node.kind === 'action'
+                        ? 'Drag onto another node to make it run next'
+                        : 'Output: ' + p.label
                   "
                   (pointerdown)="onPortPointerDown($event, node, p.port)"
                 >
-                  @if (node.kind !== "action") {
+                  @if (node.kind !== "action" && !p.error) {
                     <span class="cnode__portlabel">{{ p.label }}</span>
                   }
                 </span>
@@ -938,9 +966,78 @@
                 />
               </label>
               <p class="muted config__hint">
-                Wire the <strong>loop</strong> port to the body, and
-                <strong>done</strong> to what runs after the loop.
+                Drop steps into the loop's box to repeat them; the
+                <strong>loop</strong> port enters the body,
+                <strong>done</strong> runs after the last pass, and
+                <strong>error</strong> runs when a failure leaves the loop.
               </p>
+              <div class="field">
+                <span>Steps inside — on failure</span>
+                <select
+                  [ngModel]="step.config?.on_failure ?? ''"
+                  (ngModelChange)="setLoopConfig(step, { on_failure: $event })"
+                >
+                  <option value="">
+                    Scenario default ({{
+                      meta().stop_on_failure ? "Stop scenario" : "Ignore"
+                    }})
+                  </option>
+                  @for (o of failurePolicies; track o.value) {
+                    <option [value]="o.value">{{ o.label }}</option>
+                  }
+                </select>
+                @if (step.config?.on_failure; as pol) {
+                  @for (o of failurePolicies; track o.value) {
+                    @if (o.value === pol) {
+                      <span class="muted config__hint">{{ o.hint }}</span>
+                    }
+                  }
+                }
+                @if (
+                  step.config?.on_failure === "next" &&
+                  step.config?.mode === "while"
+                ) {
+                  <span class="config__warn">
+                    A while loop whose condition does not change keeps going
+                    until Max iterations.
+                  </span>
+                }
+              </div>
+              <div class="field">
+                <span>Handled failures inside</span>
+                <select
+                  [ngModel]="step.config?.handled_failures ?? ''"
+                  (ngModelChange)="
+                    setLoopConfig(step, { handled_failures: $event })
+                  "
+                >
+                  <option value="">
+                    Scenario setting ({{
+                      (meta().handled_failures ?? "pass") === "pass"
+                        ? "count as passed"
+                        : "fail the run"
+                    }})
+                  </option>
+                  <option value="pass">Count as passed</option>
+                  <option value="fail">Fail the run</option>
+                </select>
+                <span class="muted config__hint">
+                  A handled failure took an error wire or an On failure choice
+                  other than Stop. Counted as passed it shows amber as
+                  <em>handled</em>; the run stays green.
+                </span>
+              </div>
+              @if (canMakeContainer(step)) {
+                <div class="field">
+                  <button class="btn" (click)="makeContainer(step)">
+                    ▣ Make container
+                  </button>
+                  <span class="muted config__hint">
+                    This loop's body is wired from its loop port but not inside
+                    a box. Puts those steps in the box.
+                  </span>
+                </div>
+              }
             }
             @case ("wait") {
               <label class="field">
@@ -2177,6 +2274,46 @@
             </button>
           </div>
         }
+
+        @if (canFail(step)) {
+          <!-- ADR-0014: what a failure of this step does -->
+          <div class="field failroute">
+            <span>On failure</span>
+            <select
+              [ngModel]="step.on_failure ?? ''"
+              [disabled]="hasErrorWire(step)"
+              (ngModelChange)="setOnFailure(step, $event)"
+            >
+              <option value="">Inherit ({{ inheritedLabel(step) }})</option>
+              @for (o of failurePolicies; track o.value) {
+                @if (!o.loopOnly || inLoop(step)) {
+                  <option [value]="o.value">{{ o.label }}</option>
+                }
+              }
+            </select>
+            <span
+              class="config__hint"
+              [class.failroute__ok]="stepRoute(step).passes"
+              >{{ routeExplain(step) }}</span
+            >
+            @if (hasErrorWire(step)) {
+              <span class="muted config__hint">
+                The red error wire decides; remove it to use On failure.
+              </span>
+            } @else {
+              <span class="muted config__hint">
+                Or drag the red <strong>error</strong> port onto a recovery step
+                (e.g. a reversal after a timeout); it reads
+                <span class="mono"
+                  >${{ "{" }}{{ step.id }}.status{{ "}" }}</span
+                >
+                and
+                <span class="mono">${{ "{" }}{{ step.id }}.error{{ "}" }}</span
+                >.
+              </span>
+            }
+          </div>
+        }
       } @else {
         <h2>Scenario Settings</h2>
 
@@ -2346,6 +2483,28 @@
           />
           <span>Stop on first failure</span>
         </label>
+
+        @if (!flowMode) {
+          <!-- A participant flow's runner has no scenario-level switch; its
+               loops' "Handled failures inside" still applies. -->
+          <label class="field">
+            <span
+              >Handled failures
+              <span class="muted"
+                >— an error wire or an On failure choice</span
+              ></span
+            >
+            <select
+              [ngModel]="meta().handled_failures ?? 'pass'"
+              (ngModelChange)="updateMeta('handled_failures', $event)"
+            >
+              <option value="pass">
+                Count as passed (failing flow is expected)
+              </option>
+              <option value="fail">Fail the run</option>
+            </select>
+          </label>
+        }
 
         <label class="field">
           <span

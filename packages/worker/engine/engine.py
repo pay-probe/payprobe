@@ -351,6 +351,9 @@ class WorkerEngine:
             "status": r.status,
             "steps": [o.__dict__ for o in r.steps],
             "notes": list(getattr(r, "notes", []) or []),
+            # ADR-0014: handled failures that did not fail the run, per
+            # "<step>:<route>", so Go/No-Go can show them next to the verdict.
+            "handled": dict(getattr(r, "handled", {}) or {}),
         }
 
     async def _run_fixtures(

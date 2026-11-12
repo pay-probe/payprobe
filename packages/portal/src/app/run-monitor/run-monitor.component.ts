@@ -50,6 +50,8 @@ interface MetricsSnapshot {
   passedSteps: number;
   failedSteps: number;
   blockedSteps: number;
+  /** ADR-0014: failures routed by the author and counted as passed. */
+  handledSteps: number;
   avgDuration: number;
   passRate: number;
   duration: number;
@@ -244,6 +246,16 @@ const PHASE_LABELS: Record<number, string> = {
               >
                 ⊘ {{ metrics().blockedSteps }}
               </button>
+              @if (metrics().handledSteps > 0) {
+                <button
+                  class="seg seg--warn"
+                  [class.seg--on]="filterStatus() === 'handled'"
+                  (click)="filterStatus.set('handled')"
+                  title="Failures routed by an error wire or On failure and counted as passed"
+                >
+                  ↷ {{ metrics().handledSteps }} handled
+                </button>
+              }
             </div>
           </div>
           <div class="feed">
@@ -254,7 +266,23 @@ const PHASE_LABELS: Record<number, string> = {
                 <span class="feed__act">{{ s.action }}</span>
                 <span class="feed__step">{{ s.scenario }} · {{ s.step }}</span>
                 <span class="feed__ms">{{ s.duration_ms }}ms</span>
-                <span class="feed__st">{{ s.status }}</span>
+                <span
+                  class="feed__st"
+                  [title]="
+                    s.failure_route
+                      ? s.failure_route.status +
+                        ' → ' +
+                        s.failure_route.route +
+                        (s.error ? ': ' + s.error : '')
+                      : ''
+                  "
+                  >{{ s.status
+                  }}{{
+                    s.failure_route && s.status !== "handled"
+                      ? " → " + s.failure_route.route
+                      : ""
+                  }}</span
+                >
               </div>
             } @empty {
               <p class="feed__idle">
@@ -861,8 +889,12 @@ const PHASE_LABELS: Record<number, string> = {
       .feed__row--failed .feed__dot {
         background: var(--color-danger);
       }
-      .feed__row--blocked .feed__dot {
+      .feed__row--blocked .feed__dot,
+      .feed__row--handled .feed__dot {
         background: var(--color-warning);
+      }
+      .feed__row--handled {
+        background: color-mix(in srgb, var(--color-warning) 7%, transparent);
       }
       .feed__tgt {
         color: #8ab4ff;
@@ -892,7 +924,8 @@ const PHASE_LABELS: Record<number, string> = {
       .feed__row--failed .feed__st {
         color: var(--color-danger);
       }
-      .feed__row--blocked .feed__st {
+      .feed__row--blocked .feed__st,
+      .feed__row--handled .feed__st {
         color: var(--color-warning);
       }
       .feed__idle {
@@ -1086,6 +1119,7 @@ export class RunMonitorComponent implements OnInit, OnDestroy {
     const passed = steps.filter((s) => s.status === "passed").length;
     const failed = steps.filter((s) => s.status === "failed").length;
     const blocked = steps.filter((s) => s.status === "blocked").length;
+    const handled = steps.filter((s) => s.status === "handled").length;
     const durations = steps.map((s) => s.duration_ms ?? 0).filter((d) => d > 0);
     const avgDuration =
       durations.length > 0
@@ -1096,6 +1130,7 @@ export class RunMonitorComponent implements OnInit, OnDestroy {
       passedSteps: passed,
       failedSteps: failed,
       blockedSteps: blocked,
+      handledSteps: handled,
       avgDuration,
       passRate:
         steps.length > 0 ? Math.round((passed / steps.length) * 100) : 0,

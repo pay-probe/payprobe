@@ -271,3 +271,42 @@ def test_signoff_html_without_annotation_or_without_verdicts():
                                               "verdicts": [], "error": "agent-hub down"}}
     html = signoff_html(snap)
     assert "No agent verdict recorded" in html and "agent-hub down" in html
+
+
+# -- ADR-0014: handled failures ----------------------------------------------
+
+def _handled_detail():
+    d = _detail("passed")
+    sc = d["summary"]["scenarios"][0]
+    sc["steps"].append({
+        "step_id": "auth", "target": "tcp_iso8583", "action": "send_message",
+        "status": "handled", "duration_ms": 30_000, "error": "timeout after 30000 ms",
+        "failure_route": {"route": "error_port", "status": "error"},
+        "assertions": [],
+    })
+    sc["handled"] = {"auth:error_port": 1}
+    return d
+
+
+def test_handled_step_counts_as_passing_in_rollup():
+    roll = run_rollup(_handled_detail())
+    assert roll["steps"]["handled"] == 1
+    assert roll["steps"]["failed"] == 0 and roll["steps"]["error"] == 0
+    assert roll["pass_rate"] == 100.0
+    assert roll["failures"] == []
+
+
+def test_handled_step_is_a_passing_junit_case_with_its_route():
+    xml = junit_xml(_handled_detail())
+    dom = minidom.parseString(xml)
+    suites = dom.getElementsByTagName("testsuites")[0]
+    assert suites.getAttribute("failures") == "0" and suites.getAttribute("errors") == "0"
+    assert "handled: error routed by error_port" in xml
+
+
+def test_signoff_evidence_shows_handled_failures():
+    snap = _snapshot("GO")
+    snap["summary"] = _handled_detail()["summary"]
+    html = signoff_html(snap)
+    assert "handled</div>" in html
+    assert "1 handled failure(s): auth:error_port" in html

@@ -3541,10 +3541,16 @@ def _relay_node(flow: dict) -> dict | None:
 
 
 def _relay_is_terminal(flow: dict, relay: dict) -> bool:
-    """True when the relay node has no outgoing wire — the whole flow is then a
-    transparent byte-level proxy (see :func:`_relay_node`)."""
+    """True when the relay node has no outgoing ``out`` wire — the whole flow is
+    then a transparent byte-level proxy (see :func:`_relay_node`). An ``error``
+    wire (ADR-0014) does not count: a transparent proxy has no failure route,
+    and a success path that dead-ends would leave a graph responder without a
+    reply, so the byte-exact posture wins."""
     rid = relay.get("id")
-    return not any(e.get("source") == rid for e in flow.get("edges", []) or [])
+    return not any(
+        e.get("source") == rid and (e.get("source_port") or "out") != "error"
+        for e in flow.get("edges", []) or []
+    )
 
 
 async def _build_relay_proxy(flow: dict, listen_config: dict, relay: dict):

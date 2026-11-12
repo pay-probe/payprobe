@@ -48,8 +48,8 @@ def test_call_node_requires_scenario_id():
         steps=[{"id": "c", "kind": "call", "config": {"scenario_id": "sc-9"}}],
     )
     assert validate_scenario(ok).valid
-    # call node exposes a single "out" port
-    assert node_output_ports(ok.steps[0]) == ["out"]
+    # call node exposes "out" plus the ADR-0014 "error" port
+    assert node_output_ports(ok.steps[0]) == ["out", "error"]
 
 
 def test_output_ports_per_kind():
@@ -65,7 +65,7 @@ def test_output_ports_per_kind():
                 "config": {"cases": [{"value": "a"}, {"value": "b"}]}}],
     ).steps[0]
     assert node_output_ports(if_node) == ["true", "false"]
-    assert node_output_ports(loop_node) == ["loop", "done"]
+    assert node_output_ports(loop_node) == ["loop", "done", "error"]
     assert node_output_ports(switch_node) == ["case_0", "case_1", "default"]
 
 
@@ -144,7 +144,7 @@ def test_valid_http_node():
                 "config": {"method": "GET", "url": "https://api.example.com/ping"}}],
     )
     assert validate_scenario(d).valid
-    assert node_output_ports(d.steps[0]) == ["out"]
+    assert node_output_ports(d.steps[0]) == ["out", "error"]
 
 
 def test_http_node_requires_url_and_valid_method():
@@ -209,3 +209,130 @@ def test_loop_item_reference_allowed():
         edges=[{"source": "lp", "source_port": "loop", "target": "body"}],
     )
     assert validate_scenario(d).valid
+
+
+# -- ADR-0014: loop containers, error ports, failure policies -----------------
+
+
+def _act(sid, **kw):
+    return {"id": sid, "target": "http", "action": "echo_test", **kw}
+
+
+def _loop(sid="lp", **cfg):
+    return {"id": sid, "kind": "loop", "config": {"mode": "times", "count": 2, **cfg}}
+
+
+def test_contained_loop_body_is_valid():
+    d = ScenarioDraft(
+        name="box",
+        steps=[_loop(), _act("a", parent="lp"), _act("b", parent="lp"), _act("after")],
+        edges=[
+            {"source": "lp", "source_port": "loop", "target": "a"},
+            {"source": "a", "source_port": "out", "target": "b"},
+            {"source": "lp", "source_port": "done", "target": "after"},
+        ],
+    )
+    assert validate_scenario(d).valid, _msgs(validate_scenario(d))
+
+
+def test_wire_crossing_a_container_is_an_error():
+    d = ScenarioDraft(
+        name="cross",
+        steps=[_loop(), _act("a", parent="lp"), _act("after")],
+        edges=[
+            {"source": "lp", "source_port": "loop", "target": "a"},
+            {"source": "a", "source_port": "out", "target": "after"},
+        ],
+    )
+    res = validate_scenario(d)
+    assert not res.valid
+    assert any("crosses the container" in m for m in _msgs(res))
+
+
+def test_error_wire_must_stay_inside_the_container():
+    d = ScenarioDraft(
+        name="err-out",
+        steps=[_loop(), _act("a", parent="lp"), _act("rescue")],
+        edges=[
+            {"source": "lp", "source_port": "loop", "target": "a"},
+            {"source": "a", "source_port": "error", "target": "rescue"},
+        ],
+    )
+    assert not validate_scenario(d).valid
+
+
+def test_loop_entry_outside_its_container_is_an_error():
+    d = ScenarioDraft(
+        name="entry-out",
+        steps=[_loop(), _act("a", parent="lp"), _act("b")],
+        edges=[{"source": "lp", "source_port": "loop", "target": "b"}],
+    )
+    assert any("outside its container" in m for m in _msgs(validate_scenario(d)))
+
+
+def test_parent_must_be_a_loop_and_not_cycle():
+    not_loop = ScenarioDraft(name="p", steps=[_act("x"), _act("a", parent="x")])
+    assert any("not a loop" in m for m in _msgs(validate_scenario(not_loop)))
+    cyc = ScenarioDraft(
+        name="c", steps=[_loop("l1", ) | {"parent": "l2"}, _loop("l2") | {"parent": "l1"}]
+    )
+    assert any("contain each other" in m for m in _msgs(validate_scenario(cyc)))
+
+
+def test_old_loop_body_leaking_into_main_flow_is_only_a_warning():
+    d = ScenarioDraft(
+        name="leak",
+        steps=[_loop(), _act("a"), _act("after")],
+        edges=[
+            {"source": "lp", "source_port": "loop", "target": "a"},
+            {"source": "a", "source_port": "out", "target": "after"},
+            {"source": "lp", "source_port": "done", "target": "after"},
+        ],
+    )
+    res = validate_scenario(d)
+    assert res.valid  # old scenarios keep saving
+    assert any("wires back into the main flow" in m for m in _msgs(res))
+
+
+def test_next_and_break_need_a_loop():
+    outside = ScenarioDraft(
+        name="o",
+        steps=[_act("a", on_failure="next"), _act("b")],
+        edges=[{"source": "a", "source_port": "out", "target": "b"}],
+    )
+    assert not validate_scenario(outside).valid
+    inside_old = ScenarioDraft(
+        name="i",
+        steps=[_loop(), _act("a", on_failure="break")],
+        edges=[{"source": "lp", "source_port": "loop", "target": "a"}],
+    )
+    assert validate_scenario(inside_old).valid
+    ignore_outside = ScenarioDraft(name="g", steps=[_act("a", on_failure="ignore")])
+    assert validate_scenario(ignore_outside).valid
+
+
+def test_unreachable_contained_step_warns():
+    d = ScenarioDraft(
+        name="u",
+        steps=[_loop(), _act("a", parent="lp"), _act("stray", parent="lp")],
+        edges=[{"source": "lp", "source_port": "loop", "target": "a"}],
+    )
+    res = validate_scenario(d)
+    assert res.valid
+    assert any("not reachable from its entry" in m for m in _msgs(res))
+
+
+def test_loop_policy_values_are_checked():
+    d = ScenarioDraft(name="v", steps=[_loop(on_failure="retry", handled_failures="maybe")])
+    msgs = _msgs(validate_scenario(d))
+    assert any("on_failure" in m for m in msgs)
+    assert any("handled_failures" in m for m in msgs)
+
+
+def test_error_port_only_on_executing_kinds():
+    d = ScenarioDraft(
+        name="w",
+        steps=[{"id": "w", "kind": "wait", "config": {"ms": 1}}, _act("a")],
+        edges=[{"source": "w", "source_port": "error", "target": "a"}],
+    )
+    assert not validate_scenario(d).valid

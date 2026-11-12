@@ -538,7 +538,9 @@ default on, portal click-through owed; the `db_probe_core` /
 certification pack and the README already reference get a real worker class:
 PostgreSQL + SQLite engines, read-only enforced by the database session,
 named queries as connection data, opt-in writes with runner-executed
-cleanup, run-level `before` / `after` fixtures flag-gated). The finished build specs of the major
+cleanup, run-level `before` / `after` fixtures flag-gated), 0014 loop node as a
+canvas container with a per-step failure policy (`on_failure`: stop / next /
+break / ignore, `error` ports, handled failures may pass; Accepted 2026-11-12). The finished build specs of the major
 subsystems live in `docs/history/`, in the order they landed;
 `docs/history/PROGRESS.md` and `docs/history/project-review.md` capture the
 mid-project hardening pass. The

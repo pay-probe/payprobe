@@ -56,6 +56,23 @@ CONTROL_KINDS = {
     "call",
 }
 
+#: Kinds that execute something and can therefore fail; each exposes an
+#: ``error`` output port next to ``out`` (ADR-0014). A failed step whose
+#: ``error`` port is wired continues there instead of applying its policy.
+ERROR_PORT_KINDS = frozenset(
+    {"action", "code", "http", "init", "crypto", "call", "relay"}
+)
+
+#: What happens when a step fails and its ``error`` port is not wired
+#: (ADR-0014): ``stop`` the scenario, start the ``next`` loop iteration,
+#: ``break`` out of the loop, or ``ignore`` it and continue at ``out``.
+FailurePolicy = Literal["stop", "next", "break", "ignore"]
+FAILURE_POLICIES: tuple[str, ...] = ("stop", "next", "break", "ignore")
+
+#: Whether a *handled* failure (error port or explicit policy) fails the run.
+HandledFailures = Literal["pass", "fail"]
+HANDLED_FAILURES: tuple[str, ...] = ("pass", "fail")
+
 #: Operations a ``crypto`` node may perform.
 CRYPTO_OPERATIONS = (
     "des", "kcv", "pin_block_encode", "pin_block_decode",
@@ -116,6 +133,14 @@ class Step(BaseModel):
     #: run-build time (see ``_attach_step_environments``); ``None`` means inherit
     #: the run/scenario default.
     environment_override: str | None = None
+    #: Id of the ``loop`` step whose container holds this step (ADR-0014).
+    #: Drawn as a box on the canvas; edges never cross the box except the
+    #: loop's own ``loop`` edge into the body.
+    parent: str | None = None
+    #: Failure policy when this step fails and its ``error`` port is unwired.
+    #: ``None`` inherits the enclosing loop's ``config.on_failure``, then the
+    #: scenario's ``stop_on_failure`` (ADR-0014).
+    on_failure: FailurePolicy | None = None
 
     @field_validator("id")
     @classmethod
@@ -144,11 +169,14 @@ def node_output_ports(step: Step) -> list[str]:
     if kind == "if":
         return ["true", "false"]
     if kind == "loop":
-        return ["loop", "done"]
+        # ``error`` is taken when the loop ends by ``break`` after a failure.
+        return ["loop", "done", "error"]
     if kind == "switch":
         cases = step.config.get("cases") or []
         return [f"case_{i}" for i in range(len(cases))] + ["default"]
-    # action, wait, merge
+    if kind in ERROR_PORT_KINDS:
+        return ["out", "error"]
+    # wait, merge, trigger, reply, state
     return ["out"]
 
 
@@ -179,6 +207,10 @@ class ScenarioDraft(BaseModel):
     icon: str = ""
     tags: list[str] = Field(default_factory=list)
     stop_on_failure: bool = True
+    #: Whether a failure the author handled (error port, or an explicit
+    #: ``on_failure`` of next/break/ignore) fails the run. A loop's
+    #: ``config.handled_failures`` overrides this inside it (ADR-0014).
+    handled_failures: HandledFailures = "pass"
     timeout_ms: int = Field(default=10_000, ge=1)
     test_class: TestClass = "e2e"
     steps: list[Step] = Field(default_factory=list)
@@ -337,6 +369,19 @@ def _validate_control_node(step: Step, issues: list[ValidationIssue]) -> None:
                 severity="error", step_id=step.id,
                 message="while loop needs a condition",
             ))
+        pol = cfg.get("on_failure")
+        if pol not in (None, "", *FAILURE_POLICIES):
+            issues.append(ValidationIssue(
+                severity="error", step_id=step.id,
+                message=f"loop on_failure '{pol}' must be one of "
+                        f"{', '.join(FAILURE_POLICIES)}",
+            ))
+        hf = cfg.get("handled_failures")
+        if hf not in (None, "", *HANDLED_FAILURES):
+            issues.append(ValidationIssue(
+                severity="error", step_id=step.id,
+                message=f"loop handled_failures '{hf}' must be pass or fail",
+            ))
     elif step.kind == "wait":
         try:
             float(cfg.get("ms", 0))
@@ -395,6 +440,133 @@ def _validate_control_node(step: Step, issues: list[ValidationIssue]) -> None:
             issues.append(ValidationIssue(
                 severity="error", step_id=step.id,
                 message="Call node needs a scenario to run (scenario_id)",
+            ))
+
+
+def _reachable(start: str | None, adj: dict[str, list[str]], stop: str) -> set[str]:
+    """Node ids reachable from ``start`` along ``adj`` without passing ``stop``."""
+    seen: set[str] = set()
+    todo = [start] if start else []
+    while todo:
+        n = todo.pop()
+        if n in seen or n == stop:
+            continue
+        seen.add(n)
+        todo.extend(adj.get(n, []))
+    return seen
+
+
+def _validate_containers(
+    draft: ScenarioDraft, by_id: dict[str, Step], issues: list[ValidationIssue]
+) -> None:
+    """Loop containers and failure policies (ADR-0014).
+
+    - ``parent`` names an existing loop, and parent chains do not cycle;
+    - an edge never crosses a container's boundary, except the loop's own
+      ``loop`` edge into its body entry (which must be inside);
+    - an old loop (no contained steps) whose body wires back into the main
+      flow gets a warning, never an error, so saved scenarios keep saving;
+    - ``next`` / ``break`` only on a step inside a loop;
+    - a contained step not reachable from its loop's entry gets a warning.
+    """
+    loops = [s for s in draft.steps if s.kind == "loop"]
+    out_adj: dict[str, list[str]] = {}
+    port_target: dict[tuple[str, str], str] = {}
+    for e in draft.edges:
+        out_adj.setdefault(e.source, []).append(e.target)
+        port_target[(e.source, e.source_port)] = e.target
+
+    # parent must be a loop; no cycles
+    for step in draft.steps:
+        if step.parent is None:
+            continue
+        parent = by_id.get(step.parent)
+        if parent is None or parent.kind != "loop":
+            issues.append(ValidationIssue(
+                severity="error", step_id=step.id,
+                message=f"step '{step.id}' is inside '{step.parent}', which is not a loop",
+            ))
+            continue
+        chain, cur = {step.id}, step.parent
+        while cur is not None:
+            if cur in chain:
+                issues.append(ValidationIssue(
+                    severity="error", step_id=step.id,
+                    message=f"loop containers of '{step.id}' contain each other",
+                ))
+                break
+            chain.add(cur)
+            nxt = by_id.get(cur)
+            cur = nxt.parent if nxt is not None else None
+
+    def descendants(loop_id: str) -> set[str]:
+        out: set[str] = set()
+        todo = [loop_id]
+        while todo:
+            lid = todo.pop()
+            for s in draft.steps:
+                if s.parent == lid and s.id not in out:
+                    out.add(s.id)
+                    todo.append(s.id)
+        return out
+
+    inside_some_loop: set[str] = set()
+    for lp in loops:
+        inner = descendants(lp.id)
+        entry = port_target.get((lp.id, "loop"))
+        if inner:
+            inside_some_loop |= inner
+            if entry is not None and entry not in inner:
+                issues.append(ValidationIssue(
+                    severity="error", step_id=lp.id,
+                    message=f"loop '{lp.id}' enters '{entry}', which is outside its container",
+                ))
+            for e in draft.edges:
+                a, b = e.source in inner, e.target in inner
+                if a == b:
+                    continue
+                if e.source == lp.id and e.source_port == "loop":
+                    continue
+                issues.append(ValidationIssue(
+                    severity="error", step_id=e.source,
+                    message=(
+                        f"wire {e.source} → {e.target} crosses the container of "
+                        f"loop '{lp.id}' (leave a loop with on_failure 'break' "
+                        "or by ending the body)"
+                    ),
+                ))
+            body = _reachable(entry, out_adj, lp.id) & inner
+            for sid in sorted(s.id for s in draft.steps if s.parent == lp.id):
+                if sid not in body:
+                    issues.append(ValidationIssue(
+                        severity="warning", step_id=sid,
+                        message=f"'{sid}' is inside loop '{lp.id}' but not reachable from its entry",
+                    ))
+        elif entry is not None:
+            # Old loop: the body is the chain hanging off the ``loop`` port.
+            body = _reachable(entry, out_adj, lp.id)
+            inside_some_loop |= body
+            after: set[str] = set()
+            for port in ("done", "error"):
+                after |= _reachable(port_target.get((lp.id, port)), out_adj, lp.id)
+            leaked = sorted(body & after)
+            if leaked:
+                issues.append(ValidationIssue(
+                    severity="warning", step_id=lp.id,
+                    message=(
+                        f"loop '{lp.id}' body wires back into the main flow "
+                        f"({', '.join(leaked)}); every iteration will run it"
+                    ),
+                ))
+
+    for step in draft.steps:
+        if step.on_failure in ("next", "break") and step.id not in inside_some_loop:
+            issues.append(ValidationIssue(
+                severity="error", step_id=step.id,
+                message=(
+                    f"on_failure '{step.on_failure}' needs a loop around "
+                    f"'{step.id}' (use stop or ignore outside a loop)"
+                ),
             ))
 
 
@@ -467,6 +639,8 @@ def validate_scenario(draft: ScenarioDraft) -> ValidationResult:
                     f"'{edge.source_port}' (expected one of {', '.join(ports)})"
                 ),
             ))
+
+    _validate_containers(draft, by_id, issues)
 
     ref_severity = "warning" if has_edges else "error"
     earlier: set[str] = set()

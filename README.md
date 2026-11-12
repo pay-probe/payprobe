@@ -294,10 +294,11 @@ with trend lines, and resilience certificates at `/resilience`.
 | [Quick Start](docs/getting-started/quick-start.md) | Up and running in 10 minutes |
 | [Showcase network](docs/getting-started/showcase.md) | The full demo network, one command |
 | [ATLAS](docs/ATLAS.md) | Architecture with its reasoning + the honest roadmap |
-| [ADRs](docs/adr/) | Fleet, proxy tap, report gates, networks, insights, NATS, playground, proxy TLS |
+| [ADRs](docs/adr/) | Fleet, proxy tap, report gates, networks, insights, NATS, playground, proxy TLS, loop containers + failure routes |
 | [Architecture Overview](docs/architecture/overview.md) | How the system fits together |
 | [Writing an Adapter](docs/adapters/writing-an-adapter.md) | Add support for a new system |
 | [Using the Code Step](docs/scenarios/code-step.md) | Custom Python/TypeScript nodes |
+| [Loops and failure routes](docs/scenarios/loops-and-failures.md) | Loop containers, error ports, On failure, handled failures (ADR-0014) |
 | [Configuration Reference](docs/operations/configuration.md) | Every env var, with defaults |
 | [Observability](docs/operations/observability.md) | Metrics, health, Grafana, tracing |
 | [Load test runbook](docs/operations/load-test-runbook.md) | Running distributed load safely |

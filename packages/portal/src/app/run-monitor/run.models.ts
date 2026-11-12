@@ -19,7 +19,10 @@ export type RunStatus =
   | "blocked"
   | "partial"
   | "error"
-  | "cancelled";
+  | "cancelled"
+  /** ADR-0014: a step failure the author routed (error port / On failure)
+   *  that counts as passed. */
+  | "handled";
 
 /** A single frame from `GET /runs/{id}/stream`. `id` is the resume cursor. */
 export interface RunEvent<T = Record<string, unknown>> {
@@ -80,6 +83,8 @@ export interface StepResult {
   error: string | null;
   /** Named environment this step was pinned to (per-step override), if any. */
   environment_override?: string | null;
+  /** ADR-0014: the route a failure took and its original status. */
+  failure_route?: { route: string; status: string } | null;
 }
 
 export interface CreateRunRequest {
@@ -176,6 +181,8 @@ export interface StepOutcome {
   trace?: TraceEntry[];
   /** Named environment this step was pinned to (per-step override), if any. */
   environment_override?: string | null;
+  /** ADR-0014: the route a failure took and its original status. */
+  failure_route?: { route: string; status: string } | null;
 }
 
 /** A scenario (test case) result within a run. */
@@ -184,6 +191,9 @@ export interface ScenarioReport {
   name: string;
   status: RunStatus;
   steps: StepOutcome[];
+  /** ADR-0014: handled failures that did not fail the run, per
+   *  "<step>:<route>" with a count. */
+  handled?: Record<string, number>;
 }
 
 export interface PhaseSummary {

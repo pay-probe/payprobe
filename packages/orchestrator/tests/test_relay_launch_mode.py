@@ -39,6 +39,18 @@ def test_wired_relay_runs_graph_computed():
     assert m._relay_is_terminal(flow, relay) is False
 
 
+def test_error_wire_alone_keeps_the_relay_terminal():
+    """ADR-0014: only an ``out`` wire makes a relay graph-computed."""
+    flow = _flow(
+        [
+            {"source": "t", "source_port": "out", "target": "fwd"},
+            {"source": "fwd", "source_port": "error", "target": "r"},
+        ]
+    )
+    relay = m._relay_node(flow)
+    assert m._relay_is_terminal(flow, relay) is True
+
+
 def test_flow_without_relay_has_no_relay_node():
     assert m._relay_node({"nodes": [{"id": "t", "kind": "trigger"}], "edges": []}) is None
 

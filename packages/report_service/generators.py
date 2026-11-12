@@ -80,7 +80,9 @@ def run_rollup(detail: dict) -> dict:
     """
     scenarios = (detail.get("summary") or {}).get("scenarios", []) or []
     sc_counts = {"total": len(scenarios), "passed": 0, "failed": 0, "blocked": 0}
-    st_counts = {"total": 0, "passed": 0, "failed": 0, "error": 0, "blocked": 0}
+    # ``handled`` (ADR-0014): failed on a route the author chose and counted as
+    # passed by the scenario's handled_failures switch.
+    st_counts = {"total": 0, "passed": 0, "failed": 0, "error": 0, "blocked": 0, "handled": 0}
     as_counts = {"total": 0, "passed": 0}
     step_ms = 0
     failures: list[dict] = []
@@ -109,7 +111,8 @@ def run_rollup(detail: dict) -> dict:
                 as_counts["total"] += 1
                 if a.get("passed"):
                     as_counts["passed"] += 1
-    graded = st_counts["passed"] + st_counts["failed"] + st_counts["error"]
+    ok = st_counts["passed"] + st_counts["handled"]
+    graded = ok + st_counts["failed"] + st_counts["error"]
     return {
         "scenarios": sc_counts,
         "steps": st_counts,
@@ -118,7 +121,7 @@ def run_rollup(detail: dict) -> dict:
         "wall_ms": _wall_ms(detail),
         "failures": failures,
         "slowest": sorted(timed, key=lambda r: -r["duration_ms"])[:5],
-        "pass_rate": round(st_counts["passed"] / graded * 100, 1) if graded else 0.0,
+        "pass_rate": round(ok / graded * 100, 1) if graded else 0.0,
     }
 
 
@@ -408,6 +411,7 @@ def signoff_html(snapshot: dict) -> str:
     scenarios = (snapshot.get("summary") or {}).get("scenarios") or []
     if scenarios:
         counts = {"passed": 0, "failed": 0, "blocked": 0}
+        handled_total = 0
         rows = []
         for sc in scenarios:
             st = sc.get("status", "?")
@@ -418,6 +422,14 @@ def signoff_html(snapshot: dict) -> str:
             first_err = next(
                 (s.get("error") for s in steps
                  if s.get("status") in ("failed", "error") and s.get("error")), "")
+            # ADR-0014: failures the author routed and counted as passed stay
+            # visible next to a green verdict.
+            n_handled = sum((sc.get("handled") or {}).values())
+            handled_total += n_handled
+            if n_handled and not first_err:
+                first_err = f"{n_handled} handled failure(s): " + ", ".join(
+                    sorted(sc.get("handled") or {})
+                )
             rows.append(
                 f"<tr><td class='{'ok' if st == 'passed' else ('bad' if st in ('failed', 'error') else '')}'>"
                 f"{escape(str(st))}</td>"
@@ -431,7 +443,9 @@ def signoff_html(snapshot: dict) -> str:
             f"<div class='stat'><b>{len(scenarios)}</b>scenarios</div>"
             f"<div class='stat'><b class='ok'>{counts['passed']}</b>passed</div>"
             f"<div class='stat'><b class='bad'>{counts['failed']}</b>failed</div>"
-            f"<div class='stat'><b>{counts['blocked']}</b>blocked</div></div>"
+            f"<div class='stat'><b>{counts['blocked']}</b>blocked</div>"
+            f"<div class='stat' title='step failures routed by an error port or on_failure "
+            f"and counted as passed (ADR-0014)'><b>{handled_total}</b>handled</div></div>"
             "<table><thead><tr><th>Result</th><th>Scenario</th><th>Steps</th>"
             "<th>Duration</th><th>First error</th></tr></thead>"
             f"<tbody>{''.join(rows)}</tbody></table>"
@@ -560,6 +574,14 @@ def junit_xml(detail: dict) -> str:
                 body = f"<error message={quoteattr(s.get('error') or 'error')}/>"
             elif s.get("status") == "blocked":
                 body = "<skipped/>"
+            elif s.get("status") == "handled":
+                # ADR-0014: a passing case that records what it absorbed.
+                fr = s.get("failure_route") or {}
+                note = (
+                    f"handled: {fr.get('status', 'failed')} routed by "
+                    f"{fr.get('route', '?')}: {s.get('error') or ''}"
+                )
+                body = f"<system-out>{escape(note)}</system-out>"
             if s.get("status") in ("failed", "error"):
                 lines = [
                     f"target: {s.get('target', '')}.{s.get('action', '')}",

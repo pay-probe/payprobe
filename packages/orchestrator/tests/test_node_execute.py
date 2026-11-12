@@ -114,3 +114,40 @@ def test_validate_code_javascript_error(client):
 def test_validate_code_empty_is_ok(client):
     r = client.post("/code/validate", json={"language": "python", "code": "  "})
     assert r.json() == {"ok": True, "errors": []}
+
+
+def test_inline_run_keeps_failure_routes_through_the_orchestrator(client):
+    """ADR-0014: parent / on_failure / error edges survive the orchestrator's
+    run build and reach the worker (a handled failure, a passed run)."""
+    import time
+
+    scenario = {
+        "id": "routes", "name": "routes_case", "test_class": "e2e",
+        "handled_failures": "pass",
+        "steps": [
+            {"id": "lp", "kind": "loop", "config": {"mode": "times", "count": 2}},
+            {"id": "bad", "target": "http", "action": "echo_test", "payload": {},
+             "parent": "lp", "on_failure": "next",
+             "assertions": [{"field": "no_such_field", "operator": "present"}]},
+            {"id": "after", "target": "http", "action": "echo_test",
+             "payload": {}, "assertions": []},
+        ],
+        "edges": [
+            {"source": "lp", "source_port": "loop", "target": "bad"},
+            {"source": "lp", "source_port": "done", "target": "after"},
+        ],
+    }
+    resp = client.post("/runs", json={"scenarios": [scenario], "environment_name": "mock"})
+    assert resp.status_code == 200, resp.text
+    rid = resp.json()["run_id"]
+    detail = {}
+    for _ in range(100):
+        detail = client.get(f"/runs/{rid}").json()
+        if (detail.get("summary") or {}).get("scenarios"):
+            break
+        time.sleep(0.1)
+    sc = detail["summary"]["scenarios"][0]
+    statuses = [s["status"] for s in sc["steps"] if s["step_id"] == "bad"]
+    assert statuses == ["handled", "handled"]
+    assert sc["status"] == "passed"
+    assert sc["handled"] == {"bad:next": 2}

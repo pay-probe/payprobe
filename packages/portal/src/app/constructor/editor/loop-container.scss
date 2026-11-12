@@ -1,0 +1,92 @@
+/* ADR-0014: loop containers, error ports and failure routes on the canvas.
+ * Kept apart from constructor.component.scss, which is over its size budget. */
+
+.cbox {
+  position: absolute;
+  border: 1.5px dashed color-mix(in srgb, #8957e5 55%, var(--color-border));
+  border-radius: 14px;
+  background: color-mix(in srgb, #8957e5 6%, transparent);
+  pointer-events: none; /* nodes and the canvas stay clickable through it */
+}
+
+.cbox--selected {
+  border-style: solid;
+  border-color: #8957e5;
+  background: color-mix(in srgb, #8957e5 10%, transparent);
+}
+
+.cbox--empty {
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, #8957e5 4%, transparent) 0 10px,
+    transparent 10px 20px
+  );
+}
+
+.cbox__head {
+  position: absolute;
+  top: 6px;
+  left: 12px;
+  right: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8957e5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cbox__hint {
+  position: absolute;
+  right: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 220px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.cnode__port.cnode__port--error {
+  width: 11px;
+  height: 11px;
+  margin-top: -5.5px;
+  border-radius: 3px;
+  background: var(--color-fail);
+  opacity: 0.55;
+}
+
+.cnode__port.cnode__port--error.cnode__port--connected,
+.cnode__port.cnode__port--error:hover {
+  opacity: 1;
+}
+
+.cnode__fail {
+  margin-left: auto;
+  font-size: 9.5px;
+  padding: 0 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+  color: var(--color-warn);
+  background: color-mix(in srgb, var(--color-warn) 14%, transparent);
+}
+
+.wires .wire.wire--error {
+  stroke: var(--color-fail);
+  stroke-dasharray: 5 4;
+  opacity: 0.85;
+}
+
+.failroute {
+  border-top: 1px solid var(--color-border);
+  padding-top: 10px;
+}
+
+.failroute__ok {
+  color: var(--color-warn);
+}
+
+.config__warn {
+  font-size: 11px;
+  color: var(--color-warn);
+}

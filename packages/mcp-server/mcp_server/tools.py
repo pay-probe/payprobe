@@ -679,8 +679,8 @@ def create_participant_flow(draft: dict) -> dict:
     (server-mode) connection the flow listens on. The entry node has kind
     ``trigger`` and every terminal node has kind ``reply`` (``payload`` is the
     answer); in between go scenario step kinds plus the flow-only ``state`` and
-    ``relay``. Edges mean "then" (``source_port`` ``out``, or ``true``/``false``
-    for ``if``). Minimal example: nodes ``[{id: t, kind: trigger}, {id: ack,
+    ``relay``. Edges mean "then" (``source_port`` ``out``, ``error`` when the
+    node failed (ADR-0014), or ``true``/``false`` for ``if``). Minimal example: nodes ``[{id: t, kind: trigger}, {id: ack,
     kind: reply, payload: {status: 200}}]``, edges ``[{source: t, target:
     ack}]``. Returns the created flow (with id and version)."""
     return _request("POST", f"{SCENARIO_API}/participant-flows", draft)

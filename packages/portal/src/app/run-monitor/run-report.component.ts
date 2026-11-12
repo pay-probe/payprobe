@@ -427,6 +427,16 @@ import { AgentVerdictsComponent } from "../agents/agent-verdicts.component";
                   }}</span>
                   <span class="case__name">{{ sc.name }}</span>
                   <span class="muted">{{ sc.steps.length }} step(s)</span>
+                  @if (handledCount(sc); as n) {
+                    <span
+                      class="badge badge--warn"
+                      [title]="
+                        'Failures routed by an error wire or On failure and counted as passed: ' +
+                        handledKeys(sc)
+                      "
+                      >↷ {{ n }} handled</span
+                    >
+                  }
                 </div>
 
                 @for (st of sc.steps; track st.step_id) {
@@ -437,6 +447,21 @@ import { AgentVerdictsComponent } from "../agents/agent-verdicts.component";
                       <span class="step__tgt"
                         >{{ st.target }}.{{ st.action }}</span
                       >
+                      @if (st.failure_route; as fr) {
+                        <span
+                          class="step__env step__route"
+                          [title]="
+                            'Failed (' +
+                            fr.status +
+                            '), routed by ' +
+                            fr.route +
+                            (st.status === 'handled'
+                              ? '; counted as passed'
+                              : '; fails the run')
+                          "
+                          >↷ {{ fr.route }}</span
+                        >
+                      }
                       @if (st.environment_override) {
                         <span
                           class="step__env"
@@ -925,6 +950,18 @@ import { AgentVerdictsComponent } from "../agents/agent-verdicts.component";
       .badge--bad {
         background: color-mix(in srgb, var(--color-danger) 18%, transparent);
         color: var(--color-danger);
+      }
+      .badge--warn {
+        background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+        color: var(--color-warning);
+      }
+      .step--warn .step__dot,
+      .wf__bar--warn {
+        background: var(--color-warning);
+      }
+      .fg--warn,
+      .step__route {
+        color: var(--color-warning);
       }
       .badge--idle {
         background: var(--bg-subtle);
@@ -1566,11 +1603,24 @@ export class RunReportComponent implements OnInit {
     URL.revokeObjectURL(url);
   }
 
+  /** ADR-0014: how many handled failures a test case absorbed. */
+  handledCount(sc: ScenarioReport): number {
+    return Object.values(sc.handled ?? {}).reduce((a, b) => a + b, 0);
+  }
+
+  handledKeys(sc: ScenarioReport): string {
+    return Object.entries(sc.handled ?? {})
+      .map(([k, n]) => (n > 1 ? `${k} ×${n}` : k))
+      .join(", ");
+  }
+
   cls(status: RunStatus): string {
     if (status === "running" || status === "pending") return "run";
     if (status === "passed") return "ok";
     if (status === "failed" || status === "error" || status === "cancelled")
       return "bad";
+    // ADR-0014: failed on a route the author chose, counted as passed.
+    if (status === "handled") return "warn";
     return "idle";
   }
 

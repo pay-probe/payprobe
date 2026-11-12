@@ -100,7 +100,27 @@ import {
   emptyDraft,
   nodeOutputPorts,
   portLabel,
+  ERROR_PORT_KINDS,
+  FAILURE_POLICY_OPTIONS,
+  FailurePolicy,
+  HandledFailures,
 } from "../scenario.models";
+import {
+  ContainerBox,
+  EffectiveRoute,
+  Rect,
+  adoptBody,
+  bodyChain,
+  containerBoxes,
+  crossingError,
+  descendantIds,
+  effectiveRoute,
+  enclosingLoop,
+  innermostBoxAt,
+  containerAfterDrag,
+  releaseChildren,
+  renameParent,
+} from "./loop-container.model";
 
 interface PaletteDrag {
   target?: string;
@@ -118,6 +138,8 @@ interface RenderPort {
   cx: number;
   cy: number;
   connected: boolean;
+  /** ADR-0014 failure port: drawn red at the node's bottom-right corner. */
+  error?: boolean;
 }
 
 /** Render model for one node on the canvas. */
@@ -139,6 +161,9 @@ interface CanvasNode {
   isStart: boolean;
   /** No outgoing wire ⇒ a terminal/finish node. */
   isEnd: boolean;
+  /** Short failure-route badge when the step does not just follow the
+   *  scenario default (ADR-0014), e.g. "on fail: next". */
+  failBadge: string;
 }
 
 /** A rendered wire between two node ports. */
@@ -149,6 +174,8 @@ interface RenderWire {
   midX: number;
   midY: number;
   invalid: boolean;
+  /** Leaves through an `error` port (ADR-0014): drawn red and dashed. */
+  error: boolean;
 }
 
 type DragState =
@@ -164,6 +191,9 @@ type DragState =
       fromX: number;
       fromY: number;
       moved: boolean;
+      /** Last applied position, to move a loop's members by the same delta. */
+      lastX: number;
+      lastY: number;
     }
   | {
       kind: "pan";
@@ -330,7 +360,7 @@ const FLOW_TEMPLATES: FlowTemplate[] = [
   ],
   templateUrl: "./constructor.component.html",
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: "./constructor.component.scss",
+  styleUrls: ["./constructor.component.scss", "./loop-container.scss"],
 })
 export class ConstructorComponent implements OnInit {
   readonly theme = inject(ThemeService);
@@ -503,7 +533,10 @@ export class ConstructorComponent implements OnInit {
     return this.steps().map((s, i) => {
       const pos = layout[s.id] ?? autoPos(i);
       const kind = s.kind ?? "action";
-      const portIds = nodeOutputPorts(s);
+      const allPorts = nodeOutputPorts(s);
+      // `error` sits apart at the bottom-right corner so the main ports keep
+      // the positions (and node heights) they had before ADR-0014.
+      const portIds = allPorts.filter((p) => p !== "error");
       const height = this.nodeHeight(s);
       const ports: RenderPort[] = portIds.map((port, pi) => ({
         port,
@@ -514,6 +547,18 @@ export class ConstructorComponent implements OnInit {
           (e) => e.source === s.id && e.source_port === port,
         ),
       }));
+      if (allPorts.includes("error")) {
+        ports.push({
+          port: "error",
+          label: "error",
+          cx: pos.x + NODE_W,
+          cy: pos.y + height - 9,
+          connected: edges.some(
+            (e) => e.source === s.id && e.source_port === "error",
+          ),
+          error: true,
+        });
+      }
       const meta = kind === "action" ? null : CONTROL_NODE_META[kind];
       return {
         step: s,
@@ -535,11 +580,236 @@ export class ConstructorComponent implements OnInit {
         inY: pos.y + height / 2,
         ports,
         hasError: this.stepHasRefError(s, i),
-        isStart: !hasIncoming.has(s.id),
+        isStart: !hasIncoming.has(s.id) && !s.parent,
         isEnd: !hasOutgoing.has(s.id),
+        failBadge: this.failBadge(s),
       };
     });
   });
+
+  // -- loop containers (ADR-0014) --------------------------------------------
+
+  /** Boxes as they stood when a node drag began: the drop is measured
+   *  against them, and they stay on screen while a member is dragged. */
+  private dragStartBoxes: ContainerBox[] | null = null;
+  private readonly frozenBoxes = signal<ContainerBox[] | null>(null);
+
+  /** What the canvas draws: frozen during a member drag, live otherwise
+   *  (a dragged loop carries its box along). */
+  readonly shownBoxes = computed<ContainerBox[]>(
+    () => this.frozenBoxes() ?? this.containerBoxes(),
+  );
+
+  /** One box per loop that holds steps, outer boxes first. */
+  readonly containerBoxes = computed<ContainerBox[]>(() => {
+    const layout = this.layout();
+    const index = new Map(this.steps().map((s, i) => [s.id, i]));
+    const rectOf = (s: Step): Rect => {
+      const pos = layout[s.id] ?? autoPos(index.get(s.id) ?? 0);
+      return { x: pos.x, y: pos.y, w: NODE_W, h: this.nodeHeight(s) };
+    };
+    return containerBoxes(this.steps(), rectOf, null, this.edges());
+  });
+
+  /** Header text of a box: the loop, what it iterates, its failure default. */
+  boxLabel(loopId: string): string {
+    const loop = this.steps().find((s) => s.id === loopId);
+    if (!loop) return loopId;
+    const pol = loop.config?.on_failure;
+    const policy = pol
+      ? ` · on failure: ${FAILURE_POLICY_OPTIONS.find((o) => o.value === pol)?.label ?? pol}`
+      : "";
+    return `↻ ${loopId} · ${this.controlSummary(loop)}${policy}`;
+  }
+
+  /** Failure route of a step as the runner will apply it. */
+  stepRoute(step: Step): EffectiveRoute {
+    return effectiveRoute(
+      this.steps(),
+      this.edges(),
+      step.id,
+      this.meta().stop_on_failure,
+      this.meta().handled_failures ?? "pass",
+    );
+  }
+
+  private failBadge(step: Step): string {
+    if (!ERROR_PORT_KINDS.has(step.kind ?? "action")) return "";
+    const r = this.stepRoute(step);
+    if (r.source === "scenario") return "";
+    if (r.route === "error_port") return "on fail → error port";
+    const label = FAILURE_POLICY_OPTIONS.find(
+      (o) => o.value === r.route,
+    )?.label;
+    return `on fail: ${label ?? r.route}`;
+  }
+
+  readonly failurePolicies = FAILURE_POLICY_OPTIONS;
+
+  canFail(step: Step): boolean {
+    return ERROR_PORT_KINDS.has(step.kind ?? "action");
+  }
+
+  inLoop(step: Step): boolean {
+    return enclosingLoop(this.steps(), this.edges(), step.id) !== null;
+  }
+
+  hasErrorWire(step: Step): boolean {
+    return this.edges().some(
+      (e) => e.source === step.id && e.source_port === "error",
+    );
+  }
+
+  /** One sentence on what a failure of this step does, and where that comes from. */
+  routeExplain(step: Step): string {
+    const r = this.stepRoute(step);
+    const verdict = r.passes
+      ? "It counts as passed (shown amber as handled)."
+      : r.route === "stop" || r.source === "scenario"
+        ? "The run fails."
+        : "The run fails, but the route is still taken.";
+    const what: Record<string, string> = {
+      error_port: "A failure follows the red error wire.",
+      stop: "A failure stops the scenario.",
+      next: "A failure skips the rest of this iteration.",
+      break: "A failure leaves the loop (its error port, else done).",
+      ignore: "A failure is ignored; the next step runs.",
+    };
+    const from =
+      r.source === "loop"
+        ? ` Inherited from loop ${r.loopId}.`
+        : r.source === "scenario"
+          ? " Scenario default (Stop on first failure)."
+          : "";
+    return `${what[r.route]}${from} ${verdict}`;
+  }
+
+  /** The label of what "Inherit" means for this step right now. */
+  inheritedLabel(step: Step): string {
+    const r = effectiveRoute(
+      this.steps().map((s) =>
+        s.id === step.id ? { ...s, on_failure: null } : s,
+      ),
+      this.edges().filter(
+        (e) => !(e.source === step.id && e.source_port === "error"),
+      ),
+      step.id,
+      this.meta().stop_on_failure,
+    );
+    const label = FAILURE_POLICY_OPTIONS.find(
+      (o) => o.value === r.route,
+    )?.label;
+    return r.source === "loop" ? `${label} — loop ${r.loopId}` : `${label}`;
+  }
+
+  setOnFailure(step: Step, value: string): void {
+    this.updateStep(step.id, {
+      on_failure: (value || null) as FailurePolicy | null,
+    });
+  }
+
+  setLoopConfig(
+    step: Step,
+    patch: { on_failure?: string; handled_failures?: string },
+  ): void {
+    const cfg: NodeConfig = { ...(step.config ?? {}) };
+    if ("on_failure" in patch) {
+      if (patch.on_failure) cfg.on_failure = patch.on_failure as FailurePolicy;
+      else delete cfg.on_failure;
+    }
+    if ("handled_failures" in patch) {
+      if (patch.handled_failures)
+        cfg.handled_failures = patch.handled_failures as HandledFailures;
+      else delete cfg.handled_failures;
+    }
+    this.updateStep(step.id, { config: cfg });
+  }
+
+  loopHasMembers(step: Step): boolean {
+    return this.loopHasMembersById(step.id);
+  }
+
+  private loopHasMembersById(id: string): boolean {
+    return this.steps().some((s) => s.parent === id);
+  }
+
+  /** An old loop (body wired to its `loop` port, no box yet). */
+  canMakeContainer(step: Step): boolean {
+    return (
+      step.kind === "loop" &&
+      !this.loopHasMembers(step) &&
+      bodyChain(this.edges(), step.id).length > 0
+    );
+  }
+
+  /** Adopt the `loop`-port chain into a box (sets `parent`). */
+  makeContainer(step: Step): void {
+    this.steps.set(adoptBody(this.steps(), this.edges(), step.id));
+    const crossing = this.edges().filter(
+      (e) =>
+        crossingError(this.steps(), e.source, e.source_port, e.target) !== null,
+    );
+    this.dirty.set(true);
+    if (crossing.length) {
+      this.ui.toast(
+        "error",
+        `${crossing.length} wire(s) leave the new box — the body wired back into ` +
+          "the main flow. Remove them, or the scenario will not save.",
+      );
+    }
+  }
+
+  /** Loop a palette drop lands in (set by onCanvasDrop); `undefined` = not a
+   *  drop, so a double-clicked palette item joins the selected step's box. */
+  private dropParent: string | null | undefined = undefined;
+
+  /** Membership after a node was dragged: the innermost box under its centre. */
+  private settleMembership(id: string, boxesAtStart: ContainerBox[]): void {
+    const step = this.steps().find((s) => s.id === id);
+    if (!step) return;
+    const pos = this.layout()[id];
+    if (!pos) return;
+    const skip = new Set([id, ...descendantIds(this.steps(), id)]);
+    // Measured against the boxes as they stood when the drag began, with a
+    // margin: a nudge inside a box never ejects its member.
+    const target = containerAfterDrag(
+      boxesAtStart,
+      pos.x + NODE_W / 2,
+      pos.y + this.nodeHeight(step) / 2,
+      skip,
+    );
+    if ((step.parent ?? null) === target) return;
+    this.updateStep(id, { parent: target });
+    // Next iteration / Leave loop mean nothing outside a loop (and the
+    // validator refuses them): fall back to Inherit.
+    let policyNote = "";
+    const moved = this.steps().find((s) => s.id === id)!;
+    if (
+      (moved.on_failure === "next" || moved.on_failure === "break") &&
+      !this.inLoop(moved)
+    ) {
+      this.updateStep(id, { on_failure: null });
+      policyNote = " · On failure reset to Inherit";
+    }
+    // Wires that now cross a box would not save; drop them and say so.
+    const before = this.edges().length;
+    this.edges.update((list) =>
+      list.filter(
+        (e) =>
+          crossingError(this.steps(), e.source, e.source_port, e.target) ===
+          null,
+      ),
+    );
+    const dropped = before - this.edges().length;
+    this.ui.toast(
+      dropped ? "error" : "success",
+      (target
+        ? `${id} moved into loop ${target}`
+        : `${id} moved out of its loop`) +
+        (dropped ? ` — ${dropped} wire(s) crossing the box removed` : "") +
+        policyNote,
+    );
+  }
 
   /**
    * All `${...}` references available for autocomplete: each step's response
@@ -606,8 +876,10 @@ export class ConstructorComponent implements OnInit {
       const port = from.ports.find((p) => p.port === e.source_port);
       const sx = port?.cx ?? from.x + NODE_W;
       const sy = port?.cy ?? from.y + from.height / 2;
-      const label =
-        from.kind === "action" || e.source_port === "out"
+      const isError = e.source_port === "error";
+      const label = isError
+        ? "on error"
+        : from.kind === "action" || e.source_port === "out"
           ? ""
           : (port?.label ?? e.source_port);
       out.push({
@@ -616,7 +888,11 @@ export class ConstructorComponent implements OnInit {
         label,
         midX: (sx + to.x) / 2,
         midY: (sy + to.inY) / 2,
-        invalid: this.connectionError(e.source, e.target) !== null,
+        invalid:
+          this.connectionError(e.source, e.target) !== null ||
+          crossingError(this.steps(), e.source, e.source_port, e.target) !==
+            null,
+        error: isError,
       });
     });
     return out;
@@ -1619,6 +1895,8 @@ export class ConstructorComponent implements OnInit {
       x: snap(w.x - NODE_W / 2),
       y: snap(w.y - NODE_H / 2),
     };
+    // Dropped inside a loop's box: the new step belongs to that loop.
+    this.dropParent = innermostBoxAt(this.containerBoxes(), w.x, w.y);
     if (drag.kind && drag.kind !== "action") {
       this.addControlNode(drag.kind, pos);
     } else if (drag.target && drag.action) {
@@ -1636,8 +1914,29 @@ export class ConstructorComponent implements OnInit {
 
   /** Wire a new node in from the first free output port of `from`. */
   private autoConnect(from: CanvasNode | undefined, toId: string): void {
-    if (!from) return;
-    const free = from.ports.find((p) => !p.connected);
+    if (!from) return; // the new step is the only node
+    // Never the error port, and only within one container (ADR-0014): into a
+    // loop's box through its `loop` port, next to a member through `out`.
+    const toParent = this.steps().find((s) => s.id === toId)?.parent ?? null;
+    const fromParent = from.step.parent ?? null;
+    // First step dropped into a box whose loop has no body yet: wire the
+    // loop's `loop` port to it, whatever was selected.
+    if (toParent && fromParent !== toParent && from.step.id !== toParent) {
+      const loopFree = !this.edges().some(
+        (e) => e.source === toParent && e.source_port === "loop",
+      );
+      if (loopFree) this.connect(toParent, "loop", toId);
+      return;
+    }
+    const entersBox = from.kind === "loop" && toParent === from.step.id;
+    if (!entersBox && fromParent !== toParent) return;
+    const free = from.ports.find(
+      (p) =>
+        !p.connected &&
+        !p.error &&
+        (from.kind !== "loop" ||
+          (entersBox ? p.port === "loop" : p.port !== "loop")),
+    );
     if (free) this.connect(from.step.id, free.port, toId);
   }
 
@@ -1817,7 +2116,7 @@ export class ConstructorComponent implements OnInit {
       assertions: [],
       config,
     };
-    this.steps.update((list) => [...list, step]);
+    this.steps.update((list) => [...list, this.withDropParent(step)]);
     this.layout.update((l) => ({ ...l, [id]: this.defaultPosition(pos) }));
     this.autoConnect(from, id);
     this.dirty.set(true);
@@ -1841,7 +2140,7 @@ export class ConstructorComponent implements OnInit {
       payload,
       assertions: [],
     };
-    this.steps.update((list) => [...list, step]);
+    this.steps.update((list) => [...list, this.withDropParent(step)]);
     this.layout.update((l) => ({ ...l, [id]: this.defaultPosition(pos) }));
     this.autoConnect(from, id);
     this.dirty.set(true);
@@ -1860,11 +2159,21 @@ export class ConstructorComponent implements OnInit {
       assertions: [],
       config: defaultConfig(kind),
     };
-    this.steps.update((list) => [...list, step]);
+    this.steps.update((list) => [...list, this.withDropParent(step)]);
     this.layout.update((l) => ({ ...l, [id]: this.defaultPosition(pos) }));
     this.autoConnect(from, id);
     this.dirty.set(true);
     this.selectStep(id);
+  }
+
+  /** Apply (and consume) the container a palette drop landed in. */
+  private withDropParent(step: Step): Step {
+    const parent =
+      this.dropParent === undefined
+        ? (this.selectedStep()?.parent ?? null)
+        : this.dropParent;
+    this.dropParent = undefined;
+    return parent ? { ...step, parent } : step;
   }
 
   private nextStepId(): string {
@@ -1918,7 +2227,12 @@ export class ConstructorComponent implements OnInit {
   }
 
   removeStep(id: string): void {
-    this.steps.update((list) => list.filter((s) => s.id !== id));
+    const gone = this.steps().find((s) => s.id === id);
+    this.steps.update((list) => {
+      const rest = list.filter((s) => s.id !== id);
+      // Deleting a loop keeps its members, one level up (ADR-0014).
+      return gone?.kind === "loop" ? releaseChildren(rest, gone) : rest;
+    });
     this.edges.update((list) =>
       list.filter((e) => e.source !== id && e.target !== id),
     );
@@ -1968,6 +2282,8 @@ export class ConstructorComponent implements OnInit {
       fromX: node.x,
       fromY: node.y,
       moved: false,
+      lastX: node.x,
+      lastY: node.y,
     };
   }
 
@@ -2005,14 +2321,33 @@ export class ConstructorComponent implements OnInit {
         return; // still a click
       }
       const w = this.toWorld(event.clientX, event.clientY);
+      if (!drag.moved) {
+        this.dragStartBoxes = this.containerBoxes();
+        // A loop with members carries its box; anything else sees it frozen.
+        if (!this.loopHasMembersById(drag.id)) {
+          this.frozenBoxes.set(this.dragStartBoxes);
+        }
+      }
       drag.moved = true;
-      this.layout.update((l) => ({
-        ...l,
-        [drag.id]: {
-          x: snap(w.x - drag.offX),
-          y: snap(w.y - drag.offY),
-        },
-      }));
+      const nx = snap(w.x - drag.offX);
+      const ny = snap(w.y - drag.offY);
+      const dx = nx - drag.lastX;
+      const dy = ny - drag.lastY;
+      drag.lastX = nx;
+      drag.lastY = ny;
+      // A loop carries its whole container along (ADR-0014).
+      const members = descendantIds(this.steps(), drag.id);
+      const index = new Map(this.steps().map((s, i) => [s.id, i]));
+      this.layout.update((l) => {
+        const next = { ...l, [drag.id]: { x: nx, y: ny } };
+        if (dx || dy) {
+          for (const m of members) {
+            const p = l[m] ?? autoPos(index.get(m) ?? 0);
+            next[m] = { x: p.x + dx, y: p.y + dy };
+          }
+        }
+        return next;
+      });
     } else if (drag.kind === "pan") {
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
@@ -2042,7 +2377,10 @@ export class ConstructorComponent implements OnInit {
         const pos = this.layout()[drag.id];
         if (!pos || pos.x !== drag.fromX || pos.y !== drag.fromY) {
           this.dirty.set(true);
+          this.settleMembership(drag.id, this.dragStartBoxes ?? []);
         }
+        this.dragStartBoxes = null;
+        this.frozenBoxes.set(null);
       }
     } else if (drag.kind === "pan") {
       if (!drag.moved) this.clearSelection();
@@ -2064,7 +2402,9 @@ export class ConstructorComponent implements OnInit {
    * node. A port carries at most one outgoing wire, so re-dragging it rewires.
    */
   connect(fromId: string, fromPort: string, toId: string): void {
-    const err = this.connectionError(fromId, toId);
+    const err =
+      this.connectionError(fromId, toId) ??
+      crossingError(this.steps(), fromId, fromPort, toId);
     if (err) {
       this.ui.toast("error", err);
       return;
@@ -2337,7 +2677,7 @@ export class ConstructorComponent implements OnInit {
   // -- node geometry & control helpers -------------------------------------
 
   nodeHeight(step: Step): number {
-    const ports = nodeOutputPorts(step).length;
+    const ports = nodeOutputPorts(step).filter((p) => p !== "error").length;
     return Math.max(NODE_H, ports * PORT_GAP + 28);
   }
 
@@ -3220,7 +3560,11 @@ export class ConstructorComponent implements OnInit {
     if (!trimmed || trimmed === oldId) return;
     if (this.steps().some((s) => s.id === trimmed)) return;
     this.steps.update((list) =>
-      list.map((s) => (s.id === oldId ? { ...s, id: trimmed } : s)),
+      renameParent(
+        list.map((s) => (s.id === oldId ? { ...s, id: trimmed } : s)),
+        oldId,
+        trimmed,
+      ),
     );
     this.edges.update((list) =>
       list.map((e) => ({

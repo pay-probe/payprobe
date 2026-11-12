@@ -201,6 +201,10 @@ export interface NodeConfig {
   list?: string;
   condition?: Condition;
   max_iterations?: number;
+  /** Default failure policy for the steps inside this loop (ADR-0014). */
+  on_failure?: FailurePolicy;
+  /** Whether a handled failure inside this loop fails the run (ADR-0014). */
+  handled_failures?: HandledFailures;
   // wait
   ms?: number;
   // code
@@ -274,7 +278,55 @@ export interface Step {
    * runs this step against that environment's adapter config instead of the
    * run's default environment. */
   environment_override?: string;
+  /** Id of the loop whose container holds this step (ADR-0014). */
+  parent?: string | null;
+  /** What a failure does when the step's `error` port is unwired (ADR-0014);
+   *  unset = inherit the loop's default, then the scenario's stop_on_failure. */
+  on_failure?: FailurePolicy | null;
 }
+
+/** ADR-0014 failure policy: stop the scenario, next iteration, leave the
+ *  loop, or ignore and continue at `out`. */
+export type FailurePolicy = "stop" | "next" | "break" | "ignore";
+/** ADR-0014: does a handled failure count as passed or fail the run? */
+export type HandledFailures = "pass" | "fail";
+
+export const FAILURE_POLICY_OPTIONS: {
+  value: FailurePolicy;
+  label: string;
+  hint: string;
+  loopOnly?: boolean;
+}[] = [
+  { value: "stop", label: "Stop scenario", hint: "End the run here." },
+  {
+    value: "next",
+    label: "Next iteration",
+    hint: "Skip the rest of this pass and start the next item.",
+    loopOnly: true,
+  },
+  {
+    value: "break",
+    label: "Leave loop",
+    hint: "Exit the loop through its error port (else done).",
+    loopOnly: true,
+  },
+  {
+    value: "ignore",
+    label: "Ignore",
+    hint: "Carry on to the next step as if it passed.",
+  },
+];
+
+/** Kinds that execute something and can fail; they get an `error` port. */
+export const ERROR_PORT_KINDS: ReadonlySet<string> = new Set([
+  "action",
+  "code",
+  "http",
+  "init",
+  "crypto",
+  "call",
+  "relay",
+]);
 
 /** A directed wire between two nodes, leaving the source through `source_port`. */
 export interface Edge {
@@ -291,13 +343,16 @@ export function nodeOutputPorts(step: Step): string[] {
     case "if":
       return ["true", "false"];
     case "loop":
-      return ["loop", "done"];
+      return ["loop", "done", "error"];
     case "switch": {
       const cases = step.config?.cases ?? [];
       return [...cases.map((_, i) => `case_${i}`), "default"];
     }
     default:
-      return ["out"];
+      // ADR-0014: anything that executes can fail and route via `error`.
+      return ERROR_PORT_KINDS.has(step.kind ?? "action")
+        ? ["out", "error"]
+        : ["out"];
   }
 }
 
@@ -430,6 +485,8 @@ export interface ScenarioDraft {
   icon?: string;
   tags: string[];
   stop_on_failure: boolean;
+  /** ADR-0014: whether a handled failure fails the run (default pass). */
+  handled_failures?: HandledFailures;
   timeout_ms: number;
   test_class: TestClass;
   steps: Step[];

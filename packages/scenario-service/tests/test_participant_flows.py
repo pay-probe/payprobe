@@ -74,3 +74,33 @@ def test_upsert_and_delete():
     assert s.get(f.id).name == "renamed"
     s.delete(f.id)
     assert s.get(f.id) is None
+
+
+def test_loop_container_and_failure_route_survive_save():
+    """ADR-0014: parent / on_failure / error edges round-trip through the store."""
+    s = ParticipantFlowStore(":memory:")
+    d = ParticipantFlowDraft(
+        name="loop flow",
+        trigger=FlowTrigger(connection="issuer_listen"),
+        nodes=[
+            Step(id="t", kind="trigger"),
+            Step(id="lp", kind="loop", config={"mode": "times", "count": 2,
+                                               "on_failure": "next",
+                                               "handled_failures": "fail"}),
+            Step(id="a", kind="code", parent="lp", on_failure="break",
+                 config={"code": "return {}"}),
+            Step(id="r", kind="reply", payload={"mti": "0210"}),
+        ],
+        edges=[
+            Edge(source="t", source_port="out", target="lp"),
+            Edge(source="lp", source_port="loop", target="a"),
+            Edge(source="lp", source_port="done", target="r"),
+            Edge(source="a", source_port="error", target="r"),
+        ],
+    )
+    got = s.get(s.create(d).id)
+    a = next(n for n in got.nodes if n.id == "a")
+    assert a.parent == "lp" and a.on_failure == "break"
+    lp = next(n for n in got.nodes if n.id == "lp")
+    assert lp.config["handled_failures"] == "fail"
+    assert any(e.source_port == "error" for e in got.edges)

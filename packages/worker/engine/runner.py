@@ -19,6 +19,7 @@ port, continuation via ``done``), ``wait`` (delay) and ``merge`` (join).
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import re
 import time
@@ -39,6 +40,23 @@ PASSED = "passed"
 FAILED = "failed"
 BLOCKED = "blocked"
 ERROR = "error"
+#: A step that failed on a route the author handled (its ``error`` port, or an
+#: explicit ``on_failure`` of next/break/ignore) while ``handled_failures`` is
+#: ``pass`` (ADR-0014). Not a failure for the verdict, gates or JUnit; the
+#: original status stays in ``StepOutcome.handled``.
+HANDLED = "handled"
+
+#: Kinds that execute something and can fail; they expose an ``error`` port.
+ERROR_PORT_KINDS = frozenset({"action", "code", "http", "init", "crypto", "call", "relay"})
+FAILURE_POLICIES = ("stop", "next", "break", "ignore")
+
+#: The failure route decided for the node being executed, read by ``_emit`` so
+#: the published event and the stored outcome carry the same status. A
+#: ContextVar, not an attribute: one runner drives concurrent scenarios
+#: (``asyncio.gather`` in the engine) and every task gets its own copy.
+_FAILURE_ROUTE: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "payprobe_failure_route", default=None
+)
 
 # (target, action, payload, assertions) -> StepResult (with assertions evaluated)
 StepExecutor = Callable[[str, str, dict, list], Awaitable[StepResult]]
@@ -55,6 +73,22 @@ MAX_CALL_DEPTH = 8  # nested sub-scenario (call) recursion guard
 
 class _StopScenario(Exception):
     """Internal signal to abort a scenario walk (stop_on_failure / budget)."""
+
+
+class _LoopSignal(Exception):
+    """Base of the loop-control signals; caught only by the loop that owns them."""
+
+    def __init__(self, loop_id: str) -> None:
+        super().__init__(loop_id)
+        self.loop_id = loop_id
+
+
+class _NextIteration(_LoopSignal):
+    """``on_failure: next`` — skip the rest of this iteration."""
+
+
+class _BreakLoop(_LoopSignal):
+    """``on_failure: break`` — leave the loop (its ``error`` port, else ``done``)."""
 
 
 def _loose_eq(a: Any, b: Any) -> bool:
@@ -173,6 +207,10 @@ class StepOutcome:
     #: Named environment this step was pinned to via ``environment_override``
     #: (resolved by the orchestrator). ``None`` means it ran on the run default.
     environment_override: str | None = None
+    #: Set when the step failed on a route the author chose (ADR-0014):
+    #: ``{"route": "error_port"|"stop"|"next"|"break"|"ignore",
+    #: "status": <original failed/error>}``. ``None`` on the legacy route.
+    failure_route: dict | None = None
 
 
 def _sub_failure(sub_result: ScenarioResult) -> str:
@@ -193,6 +231,9 @@ class ScenarioResult:
     steps: list[StepOutcome] = field(default_factory=list)
     #: Advisory notes that never change the verdict (e.g. ``cleanup_failed:<step>``).
     notes: list[str] = field(default_factory=list)
+    #: Handled failures that did not fail the run, ``{"<step>:<route>": count}``
+    #: (ADR-0014). Aggregated so a 1000-iteration loop adds one entry, not 1000.
+    handled: dict[str, int] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -323,6 +364,10 @@ class GraphExecutor:
 
         start = self._graph_entry(scenario, indegree)
         budget = {"n": 0}
+        settings = {
+            "handled_failures": scenario.get("handled_failures") or "pass",
+            "fail_count": 0,
+        }
         try:
             await self._walk(
                 start,
@@ -335,14 +380,23 @@ class GraphExecutor:
                 result,
                 stop_on_failure,
                 budget,
+                (),
+                settings,
             )
-        except _StopScenario:
+        except (_StopScenario, _LoopSignal):
+            # A loop signal can only escape when a policy names a loop that is
+            # not there (the validator refuses that); end the walk, never crash.
             pass
 
     @staticmethod
     def _graph_entry(scenario: dict, indegree: dict[str, int]) -> str | None:
-        """The node to start at: first with no incoming edge, else first step."""
+        """The node to start at: first with no incoming edge, else first step.
+
+        A step inside a loop container (``parent`` set) is never the start,
+        even before it is wired (ADR-0014)."""
         for step in scenario.get("steps", []):
+            if step.get("parent"):
+                continue
             if indegree.get(step["id"], 0) == 0:
                 return step["id"]
         steps = scenario.get("steps", [])
@@ -364,7 +418,11 @@ class GraphExecutor:
         result: ScenarioResult,
         stop_on_failure: bool,
         budget: dict[str, int],
+        loops: tuple[dict, ...] = (),
+        settings: dict | None = None,
     ) -> None:
+        if settings is None:
+            settings = {"handled_failures": "pass", "fail_count": 0}
         while node_id is not None:
             budget["n"] += 1
             if budget["n"] > NODE_BUDGET:
@@ -377,90 +435,108 @@ class GraphExecutor:
             kind = step.get("kind", "action")
 
             if kind == "action":
-                outcome = await self._run_step(
-                    step,
-                    execute_step,
-                    context,
-                    scenario_id,
-                    phase,
-                )
+                route = self._failure_route(step, adj, loops, settings, stop_on_failure)
+                token = _FAILURE_ROUTE.set(route)
+                try:
+                    outcome = await self._run_step(
+                        step,
+                        execute_step,
+                        context,
+                        scenario_id,
+                        phase,
+                    )
+                finally:
+                    _FAILURE_ROUTE.reset(token)
                 result.steps.append(outcome)
-                if outcome.status in (FAILED, ERROR):
-                    result.status = FAILED
-                    if stop_on_failure:
-                        raise _StopScenario()
-                node_id = self._next(adj, node_id, "out")
+                node_id = self._after_outcome(
+                    step, outcome, adj, loops, settings, stop_on_failure, context, result, route
+                )
 
             elif kind == "code":
-                outcome = await self._run_code_node(
-                    step,
-                    context,
-                    scenario_id,
-                    phase,
-                )
+                route = self._failure_route(step, adj, loops, settings, stop_on_failure)
+                token = _FAILURE_ROUTE.set(route)
+                try:
+                    outcome = await self._run_code_node(
+                        step,
+                        context,
+                        scenario_id,
+                        phase,
+                    )
+                finally:
+                    _FAILURE_ROUTE.reset(token)
                 result.steps.append(outcome)
-                if outcome.status in (FAILED, ERROR):
-                    result.status = FAILED
-                    if stop_on_failure:
-                        raise _StopScenario()
-                node_id = self._next(adj, node_id, "out")
+                node_id = self._after_outcome(
+                    step, outcome, adj, loops, settings, stop_on_failure, context, result, route
+                )
 
             elif kind == "http":
-                outcome = await self._run_http_node(
-                    step,
-                    context,
-                    scenario_id,
-                    phase,
-                )
+                route = self._failure_route(step, adj, loops, settings, stop_on_failure)
+                token = _FAILURE_ROUTE.set(route)
+                try:
+                    outcome = await self._run_http_node(
+                        step,
+                        context,
+                        scenario_id,
+                        phase,
+                    )
+                finally:
+                    _FAILURE_ROUTE.reset(token)
                 result.steps.append(outcome)
-                if outcome.status in (FAILED, ERROR):
-                    result.status = FAILED
-                    if stop_on_failure:
-                        raise _StopScenario()
-                node_id = self._next(adj, node_id, "out")
+                node_id = self._after_outcome(
+                    step, outcome, adj, loops, settings, stop_on_failure, context, result, route
+                )
 
             elif kind == "init":
-                outcome = await self._run_init_node(
-                    step,
-                    context,
-                    scenario_id,
-                    phase,
-                )
+                route = self._failure_route(step, adj, loops, settings, stop_on_failure)
+                token = _FAILURE_ROUTE.set(route)
+                try:
+                    outcome = await self._run_init_node(
+                        step,
+                        context,
+                        scenario_id,
+                        phase,
+                    )
+                finally:
+                    _FAILURE_ROUTE.reset(token)
                 result.steps.append(outcome)
-                if outcome.status in (FAILED, ERROR):
-                    result.status = FAILED
-                    if stop_on_failure:
-                        raise _StopScenario()
-                node_id = self._next(adj, node_id, "out")
+                node_id = self._after_outcome(
+                    step, outcome, adj, loops, settings, stop_on_failure, context, result, route
+                )
 
             elif kind == "crypto":
-                outcome = await self._run_crypto_node(
-                    step,
-                    context,
-                    scenario_id,
-                    phase,
-                )
+                route = self._failure_route(step, adj, loops, settings, stop_on_failure)
+                token = _FAILURE_ROUTE.set(route)
+                try:
+                    outcome = await self._run_crypto_node(
+                        step,
+                        context,
+                        scenario_id,
+                        phase,
+                    )
+                finally:
+                    _FAILURE_ROUTE.reset(token)
                 result.steps.append(outcome)
-                if outcome.status in (FAILED, ERROR):
-                    result.status = FAILED
-                    if stop_on_failure:
-                        raise _StopScenario()
-                node_id = self._next(adj, node_id, "out")
+                node_id = self._after_outcome(
+                    step, outcome, adj, loops, settings, stop_on_failure, context, result, route
+                )
 
             elif kind == "call":
-                outcome = await self._run_call_node(
-                    step,
-                    execute_step,
-                    context,
-                    scenario_id,
-                    phase,
-                )
+                route = self._failure_route(step, adj, loops, settings, stop_on_failure)
+                token = _FAILURE_ROUTE.set(route)
+                try:
+                    outcome = await self._run_call_node(
+                        step,
+                        execute_step,
+                        context,
+                        scenario_id,
+                        phase,
+                    )
+                finally:
+                    _FAILURE_ROUTE.reset(token)
                 result.steps.append(outcome)
-                if outcome.status in (FAILED, ERROR):
-                    result.status = FAILED
-                    if stop_on_failure:
-                        raise _StopScenario()
-                node_id = self._next(adj, node_id, "out")
+                node_id = self._after_outcome(
+                    step, outcome, adj, loops, settings, stop_on_failure, context, result, route
+                )
 
             elif kind == "wait":
                 ms = 0.0
@@ -503,28 +579,65 @@ class GraphExecutor:
 
             elif kind == "loop":
                 body = self._next(adj, node_id, "loop")
-                for index, item in self._loop_iterations(step, context):
-                    previous = context.get("loop")
-                    context["loop"] = {"index": index, "item": item}
-                    if body is not None:
-                        await self._walk(
-                            body,
-                            nodes,
-                            adj,
-                            execute_step,
-                            context,
-                            scenario_id,
-                            phase,
-                            result,
-                            stop_on_failure,
-                            budget,
-                        )
-                    if previous is None:
-                        context.pop("loop", None)
-                    else:
+                had_loop = "loop" in context
+                previous = context.get("loop")
+                iterations = failed_iterations = 0
+                ended = "done"
+                try:
+                    for index, item in self._loop_iterations(step, context):
+                        context["loop"] = {"index": index, "item": item}
+                        iterations += 1
+                        fails_before = settings["fail_count"]
+                        if body is not None:
+                            try:
+                                await self._walk(
+                                    body,
+                                    nodes,
+                                    adj,
+                                    execute_step,
+                                    context,
+                                    scenario_id,
+                                    phase,
+                                    result,
+                                    stop_on_failure,
+                                    budget,
+                                    (*loops, step),
+                                    settings,
+                                )
+                            except _NextIteration as sig:
+                                if sig.loop_id != node_id:
+                                    raise
+                            except _BreakLoop as sig:
+                                if sig.loop_id != node_id:
+                                    raise
+                                ended = "break"
+                        if settings["fail_count"] > fails_before:
+                            failed_iterations += 1
+                        if ended == "break":
+                            break
+                finally:
+                    # Restored on every exit (done, break, stop, cancel) so a
+                    # nested loop never leaves a stale ${loop.*} behind.
+                    if had_loop:
                         context["loop"] = previous
-                await self._record_control(step, PASSED, result, scenario_id, phase)
-                node_id = self._next(adj, node_id, "done")
+                    else:
+                        context.pop("loop", None)
+                await self._record_control(
+                    step,
+                    PASSED,
+                    result,
+                    scenario_id,
+                    phase,
+                    response={
+                        "iterations": iterations,
+                        "ended": ended,
+                        "failed_iterations": failed_iterations,
+                    },
+                )
+                exit_port = "done"
+                if ended == "break" and self._next(adj, node_id, "error") is not None:
+                    exit_port = "error"
+                node_id = self._next(adj, node_id, exit_port)
 
             elif kind == "state":
                 # Mutate the flow instance's shared state (set / incr / append).
@@ -542,19 +655,22 @@ class GraphExecutor:
                 # echo or reshape it). A flow whose relay is TERMINAL never gets
                 # here — the orchestrator launches it as a transparent byte-level
                 # TcpProxy instead of a graph responder.
-                outcome = await self._run_relay_node(
-                    step,
-                    execute_step,
-                    context,
-                    scenario_id,
-                    phase,
-                )
+                route = self._failure_route(step, adj, loops, settings, stop_on_failure)
+                token = _FAILURE_ROUTE.set(route)
+                try:
+                    outcome = await self._run_relay_node(
+                        step,
+                        execute_step,
+                        context,
+                        scenario_id,
+                        phase,
+                    )
+                finally:
+                    _FAILURE_ROUTE.reset(token)
                 result.steps.append(outcome)
-                if outcome.status in (FAILED, ERROR):
-                    result.status = FAILED
-                    if stop_on_failure:
-                        raise _StopScenario()
-                node_id = self._next(adj, node_id, "out")
+                node_id = self._after_outcome(
+                    step, outcome, adj, loops, settings, stop_on_failure, context, result, route
+                )
 
             elif kind == "reply":
                 # A participant flow's terminal node: resolve its payload as the
@@ -570,6 +686,128 @@ class GraphExecutor:
 
             else:  # unknown kind (e.g. trigger) — no-op pass-through
                 node_id = self._next(adj, node_id, "out")
+
+    # -- failure routing (ADR-0014) ------------------------------------------
+
+    @staticmethod
+    def _failure_route(
+        step: dict,
+        adj: dict[tuple[str, str], str],
+        loops: tuple[dict, ...],
+        settings: dict,
+        stop_on_failure: bool,
+    ) -> dict | None:
+        """Decide, before a node runs, what its failure would do.
+
+        Order: a wired ``error`` port; else the step's ``on_failure``; else the
+        nearest enclosing loop's ``config.on_failure``; else the scenario's
+        ``stop_on_failure``. Returns ``None`` for that last, legacy route so
+        old scenarios keep their outcomes exactly; otherwise
+        ``{"route", "explicit", "passes", "msg"}``.
+        """
+        sid = step["id"]
+        if step.get("kind", "action") in ERROR_PORT_KINDS and (sid, "error") in adj:
+            route = "error_port"
+        else:
+            route = step.get("on_failure")
+            if route not in FAILURE_POLICIES:
+                route = None
+                for lp in reversed(loops):
+                    pol = (lp.get("config") or {}).get("on_failure")
+                    if pol in FAILURE_POLICIES:
+                        route = pol
+                        break
+            if route in ("next", "break") and not loops:
+                route = None  # no loop to act on (the validator refuses this)
+        if route is None:
+            return None
+        if route == "stop":
+            return {"route": "stop", "passes": False, "msg": "on_failure=stop: scenario stopped"}
+        handled = settings.get("handled_failures") or "pass"
+        for lp in reversed(loops):
+            hf = (lp.get("config") or {}).get("handled_failures")
+            if hf in ("pass", "fail"):
+                handled = hf
+                break
+        where = f" (loop {loops[-1]['id']})" if loops and route in ("next", "break") else ""
+        msg = (
+            {
+                "error_port": "failure routed to the error port",
+                "next": "on_failure=next: skipping the rest of this iteration",
+                "break": "on_failure=break: leaving the loop",
+                "ignore": "on_failure=ignore: continuing",
+            }[route]
+            + where
+            + (" · counted as passed" if handled == "pass" else " · fails the run")
+        )
+        return {"route": route, "passes": handled == "pass", "msg": msg}
+
+    def _after_outcome(
+        self,
+        step: dict,
+        outcome: StepOutcome,
+        adj: dict[tuple[str, str], str],
+        loops: tuple[dict, ...],
+        settings: dict,
+        stop_on_failure: bool,
+        context: dict[str, Any],
+        result: ScenarioResult,
+        route: dict | None = None,
+    ) -> str | None:
+        """The one place a node's outcome picks the next node (ADR-0014).
+
+        Writes ``status`` / ``error`` into the step's context entry, records the
+        verdict, and follows the route ``_failure_route`` chose; raises the
+        loop / stop signals.
+        """
+        sid = step["id"]
+        entry = context.get(sid)
+        if outcome.status == PASSED:
+            if isinstance(entry, dict):
+                entry["status"] = PASSED
+                entry["error"] = None
+            return self._next(adj, sid, "out")
+
+        settings["fail_count"] += 1
+        handled = outcome.failure_route
+        original = handled["status"] if handled else outcome.status
+        if handled is None:
+            # Legacy route: today's behaviour, byte for byte.
+            if isinstance(entry, dict):
+                entry["status"] = original
+                entry["error"] = outcome.error
+            result.status = FAILED
+            if stop_on_failure:
+                raise _StopScenario()
+            return self._next(adj, sid, "out")
+
+        # A chosen route: the step is readable downstream even when the adapter
+        # raised (``${auth.status}``, ``${auth.error}``, ``${auth.request.*}``).
+        if not isinstance(entry, dict):
+            live_req, live_resp = (route or {}).get("live") or (
+                outcome.request,
+                outcome.response,
+            )
+            entry = {"request": live_req, "response": live_resp}
+            context[sid] = entry
+        entry["status"] = original
+        entry["error"] = outcome.error
+        if outcome.status == HANDLED:
+            key = f"{sid}:{handled['route']}"
+            result.handled[key] = result.handled.get(key, 0) + 1
+        else:
+            result.status = FAILED
+
+        route = handled["route"]
+        if route == "stop":
+            raise _StopScenario()
+        if route == "error_port":
+            return self._next(adj, sid, "error")
+        if route == "next":
+            raise _NextIteration(loops[-1]["id"])
+        if route == "break":
+            raise _BreakLoop(loops[-1]["id"])
+        return self._next(adj, sid, "out")  # ignore
 
     # -- control-node evaluation ---------------------------------------------
 
@@ -906,6 +1144,7 @@ class GraphExecutor:
         scenario_id: str,
         phase: int,
         branch: str | None = None,
+        response: dict | None = None,
     ) -> None:
         kind = step.get("kind", "action")
         outcome = StepOutcome(
@@ -914,7 +1153,7 @@ class GraphExecutor:
             action=kind,
             status=status,
             duration_ms=0,
-            response={"branch": branch} if branch else None,
+            response=response if response is not None else ({"branch": branch} if branch else None),
         )
         result.steps.append(outcome)
         await self._emit(outcome, scenario_id, phase)
@@ -1128,6 +1367,18 @@ class GraphExecutor:
         return outcome
 
     async def _emit(self, outcome: StepOutcome, scenario_id: str, phase: int) -> None:
+        route = _FAILURE_ROUTE.get()
+        if route is not None and outcome.status in (FAILED, ERROR):
+            # Decided before the node ran (ADR-0014), applied before publishing
+            # so the live event and the stored summary agree.
+            original = outcome.status
+            # Live (unredacted) values for the recovery path's context entry;
+            # the outcome itself is redacted below before it is published.
+            route["live"] = (outcome.request, outcome.response)
+            outcome.failure_route = {"route": route["route"], "status": original}
+            outcome.trace = [*(outcome.trace or []), {"level": "warn", "msg": route["msg"]}]
+            if route["passes"]:
+                outcome.status = HANDLED
         # Replace the outcome's outward-facing fields with redacted copies so
         # secrets never reach the event stream or the stored summary; the run
         # context (used for ${...} resolution) keeps the live values.
@@ -1153,6 +1404,7 @@ class GraphExecutor:
                     "assertions": outcome.assertions,
                     "error": outcome.error,
                     "environment_override": outcome.environment_override,
+                    "failure_route": outcome.failure_route,
                 },
             )
         )
@@ -1179,9 +1431,16 @@ class ScenarioRunner(GraphExecutor):
         top_level = self._depth == 0
         if top_level:
             self._cleanups = []
+        # A sub-scenario (``call``) starts with no failure route of its own; the
+        # caller's route applies to the call step, never to the child's steps.
+        route_token = _FAILURE_ROUTE.set(None)
         try:
-            return await self._run_scenario(scenario, execute_step, phase)
+            result = await self._run_scenario(scenario, execute_step, phase)
+            for key, n in result.handled.items():
+                result.notes.append(f"handled:{key}" + (f" x{n}" if n > 1 else ""))
+            return result
         finally:
+            _FAILURE_ROUTE.reset(route_token)
             if top_level and self._cleanups:
                 # runs on pass, fail, stop_on_failure, error and cancel alike
                 await self._run_cleanups(execute_step, scenario, phase)
@@ -1279,16 +1538,27 @@ class ScenarioRunner(GraphExecutor):
             )
             return result
 
+        # Linear scenarios have no ports: only on_failure stop / ignore and
+        # handled_failures apply (ADR-0014).
+        settings = {
+            "handled_failures": scenario.get("handled_failures") or "pass",
+            "fail_count": 0,
+        }
         for step in scenario.get("steps", []):
             if self._debug_hook:
                 await self._debug_hook(step["id"], context)
-            outcome = await self._execute_node(
-                step,
-                execute_step,
-                context,
-                scenario_id,
-                phase,
-            )
+            route = self._failure_route(step, {}, (), settings, stop_on_failure)
+            token = _FAILURE_ROUTE.set(route)
+            try:
+                outcome = await self._execute_node(
+                    step,
+                    execute_step,
+                    context,
+                    scenario_id,
+                    phase,
+                )
+            finally:
+                _FAILURE_ROUTE.reset(token)
             if outcome is None:
                 # A control-flow node (if/switch/loop/merge/wait) needs edges to
                 # drive branching; in an edge-less scenario there's nothing to
@@ -1296,8 +1566,10 @@ class ScenarioRunner(GraphExecutor):
                 await self._record_control(step, PASSED, result, scenario_id, phase)
                 continue
             result.steps.append(outcome)
-            if outcome.status in (FAILED, ERROR):
-                result.status = FAILED
-                if stop_on_failure:
-                    break
+            try:
+                self._after_outcome(
+                    step, outcome, {}, (), settings, stop_on_failure, context, result, route
+                )
+            except _StopScenario:
+                break
         return result

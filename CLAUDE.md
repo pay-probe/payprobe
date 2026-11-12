@@ -80,7 +80,11 @@ in `docs/adr/`.
    callees first). Never blur them; validators enforce the node-kind
    partitions of `NodeKind` (scenario-only `call`/`init`, flow-only
    `trigger`/`reply`/`state`/`relay`, network-only
-   `participant`/`scenario`/`simulator`/`group`).
+   `participant`/`scenario`/`simulator`/`group`). Inside a loop container
+   (ADR-0014, `Step.parent`) an edge never crosses the box except the loop's
+   own `loop` edge; a failure leaves a step only through its `error` port or
+   its `on_failure` route, resolved in one place (`_after_outcome` in
+   `worker/engine/runner.py`).
 2. **Every assistant write is reversible from data.** The change journal
    records `before` state; restore is a pure function of
    (resource, key, before) — JSON-serializable, replayable by any replica.
@@ -173,7 +177,7 @@ in `docs/adr/`.
 
 - `docs/ATLAS.md` — architecture with reasoning + roadmap (the companion to
   this file).
-- `docs/adr/` — thirteen ADRs; 0001 (fleet), 0004 (networks) and 0006 (NATS)
+- `docs/adr/` — fourteen ADRs; 0001 (fleet), 0004 (networks) and 0006 (NATS)
   are fully implemented, 0002 (proxy tap/intercept/stub) through stage 2 with
   only TLS deferred (now specced as 0008, proposed), 0005 (insight service)
   built as advise-only, 0007 (playground) backend built, portal page written
@@ -196,8 +200,11 @@ in `docs/adr/`.
   as connection data, opt-in writes with cleanup, run-level fixtures)
   **Accepted** 2026-09-25, phases 0 to 4 built the same day (adapter, writes
   with cleanup, load refusal, diagnostics layer, run fixtures default on,
-  portal editor built; click-through owed); statuses in the files are kept
-  truthful.
+  portal editor built; click-through owed), 0014 (loop node as a canvas
+  container + `error` ports + per-step `on_failure`: stop / next / break /
+  ignore; handled failures may pass the run as step status `handled`)
+  **Accepted** 2026-11-12, phases 1 to 3 built the same day, host
+  click-through owed; statuses in the files are kept truthful.
 - `.claude/skills/payprobe-run-and-operate`, `payprobe-config-and-flags` and
   `payprobe-agents` — operator-grade API/env-flag/agent reference, kept current.
 - `docs/history/` — finished build specs, plans and working notes (accurate at
