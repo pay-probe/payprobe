@@ -6,8 +6,10 @@ import {
   OnInit,
   ViewChild,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
   ChangeDetectionStrategy,
 } from "@angular/core";
 import { FormsModule } from "@angular/forms";
@@ -406,6 +408,13 @@ export class ConstructorComponent implements OnInit {
   private projectId: string | null = null;
   /** Set the new scenario joins on first save (?set= query param). */
   private setId: string | null = null;
+  /** The scenario list view the editor was opened from (?project= / ?set= /
+   *  ?class=), so the back button returns to that exact view. */
+  private listProject: string | null = null;
+  private listSet: string | null = null;
+  private listClass: string | null = null;
+  /** Step named by ?step= on entry; selected once the scenario has loaded. */
+  private pendingStep: string | null = null;
 
   // -- organisation ----------------------------------------------------------
   readonly projects = signal<Project[]>([]);
@@ -440,6 +449,15 @@ export class ConstructorComponent implements OnInit {
     this.scenarioList().filter((s) => s.id !== this.scenarioId),
   );
   readonly selectedId = signal<string | null>(null);
+
+  constructor() {
+    // Mirror the selected step into ?step= (replaceUrl: selecting a step is
+    // not a history entry), so a refresh or a shared link reopens it.
+    effect(() => {
+      const id = this.selectedId();
+      untracked(() => this.syncStepToUrl(id));
+    });
+  }
   readonly payloadText = signal("");
   readonly payloadError = signal<string | null>(null);
   readonly validation = signal<ValidationResult | null>(null);
@@ -988,8 +1006,14 @@ export class ConstructorComponent implements OnInit {
     this.testData.reloadTerminalPools();
 
     this.loadEnvironments();
-    this.projectId = this.route.snapshot.queryParamMap.get("project");
-    this.setId = this.route.snapshot.queryParamMap.get("set");
+    const q = this.route.snapshot.queryParamMap;
+    this.projectId = q.get("project");
+    const set = q.get("set");
+    this.setId = set && set !== "all" ? set : null;
+    this.listProject = this.projectId;
+    this.listSet = this.setId;
+    this.listClass = q.get("class");
+    this.pendingStep = q.get("step");
     this.currentProjectId.set(this.projectId ?? DEFAULT_PROJECT_ID);
     this.api.projects().subscribe({
       next: (list) => this.projects.set(list),
@@ -1041,6 +1065,7 @@ export class ConstructorComponent implements OnInit {
       },
       error: () => {
         this.busy.set(false);
+        this.pendingStep = null;
         this.error.set("Could not load participant flow.");
       },
     });
@@ -1197,6 +1222,7 @@ export class ConstructorComponent implements OnInit {
       },
       error: () => {
         this.busy.set(false);
+        this.pendingStep = null;
         this.error.set(`Failed to load scenario '${id}'.`);
       },
     });
@@ -1290,6 +1316,7 @@ export class ConstructorComponent implements OnInit {
     this.layout.set({ ...(layout ?? {}) });
     this.version.set(version);
     this.selectedId.set(null);
+    this.restorePendingStep();
     this.validation.set(null);
     setTimeout(() => this.fitView());
   }
@@ -1388,7 +1415,16 @@ export class ConstructorComponent implements OnInit {
           } else {
             this.loadProjectSets();
           }
-          this.router.navigate(["/constructor", sc.id], { replaceUrl: true });
+          this.listProject = sc.project_id;
+          this.router.navigate(["/constructor", sc.id], {
+            replaceUrl: true,
+            queryParams: {
+              project: sc.project_id,
+              set: this.listSet,
+              class: this.listClass,
+              step: this.selectedId(),
+            },
+          });
         }
       },
       error: (err) => {
@@ -1822,6 +1858,36 @@ export class ConstructorComponent implements OnInit {
       if (m) max = Math.max(max, parseInt(m[1], 10));
     }
     return `step_${String(max + 1).padStart(3, "0")}`;
+  }
+
+  /** Select the step ?step= named on entry, if the loaded graph has it. */
+  private restorePendingStep(): void {
+    const want = this.pendingStep;
+    this.pendingStep = null;
+    if (want && this.steps().some((s) => s.id === want)) this.selectStep(want);
+  }
+
+  private syncStepToUrl(id: string | null): void {
+    if (this.pendingStep !== null) return; // ?step= not restored yet
+    if (id === this.route.snapshot.queryParamMap.get("step")) return;
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { step: id },
+      queryParamsHandling: "merge",
+      replaceUrl: true,
+    });
+  }
+
+  /** Query params for the back button: the list view this editor came from,
+   *  or the scenario's project when opened directly or moved to another one. */
+  backQuery(): Record<string, string | null> {
+    const project = this.currentProjectId();
+    const sameList = project === this.listProject;
+    return {
+      project,
+      set: (sameList && this.listSet) || "all",
+      class: sameList ? this.listClass : null,
+    };
   }
 
   selectStep(id: string): void {

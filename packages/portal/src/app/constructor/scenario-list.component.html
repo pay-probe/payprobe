@@ -80,7 +80,7 @@
   @if (error(); as err) {
     <div class="banner banner--error">
       <span>{{ err }}</span>
-      <button class="btn" (click)="reloadProjects(true)">Retry</button>
+      <button class="btn" (click)="reloadProjects()">Retry</button>
     </div>
   }
 
@@ -378,7 +378,7 @@
               ><span class="act">Actions</span>
             </div>
             @for (s of list; track s.id) {
-              <div class="tbl__row tbl__row--case" (click)="goToScenario(s)">
+              <div class="tbl__row tbl__row--case" (click)="openCase(s)">
                 <span class="cell-name cell-name--rich">
                   @if (scenarioBadge(s); as b) {
                     <span class="rowlogo" [style.color]="b.color">
@@ -431,7 +431,7 @@
                   <button
                     class="ic"
                     title="Open in editor"
-                    (click)="goToScenario(s)"
+                    (click)="openCase(s); $event.stopPropagation()"
                   >
                     ✎
                   </button>

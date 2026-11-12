@@ -3,6 +3,7 @@
   <header class="toolbar">
     <a
       [routerLink]="flowMode ? '/participants' : '/constructor'"
+      [queryParams]="flowMode ? null : backQuery()"
       class="btn btn--ghost"
       [title]="flowMode ? 'Back to flows' : 'Back to scenarios'"
       >←</a

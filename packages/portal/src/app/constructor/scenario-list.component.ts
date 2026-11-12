@@ -5,13 +5,15 @@ import {
   HostListener,
   OnInit,
   ViewChild,
+  DestroyRef,
   computed,
   inject,
   signal,
   ChangeDetectionStrategy,
 } from "@angular/core";
 import { FormsModule } from "@angular/forms";
-import { Router, RouterLink } from "@angular/router";
+import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
+import { ActivatedRoute, ParamMap, Router, RouterLink } from "@angular/router";
 
 import { ThemeService } from "../shared/theme.service";
 import { UiService } from "../shared/ui.service";
@@ -30,6 +32,18 @@ import {
 import { RunApiService } from "../run-monitor/run-api.service";
 import { PageHeaderComponent } from "../shared/ui/page-header.component";
 import { IconComponent } from "../shared/ui/icon.component";
+
+/** `?set=` value for the "All cases" view of a project. */
+const ALL_CASES = "all";
+
+/** The list's place in the URL: `/constructor` = projects,
+ *  `?project=P` = that project's sets, `?project=P&set=S|all` = the cases,
+ *  `&class=C` = the test-class filter. */
+interface ListLocation {
+  project?: string | null;
+  set?: string | null;
+  class?: string | null;
+}
 
 @Component({
   selector: "app-scenario-list",
@@ -53,6 +67,8 @@ export class ScenarioListComponent implements OnInit {
   private readonly runApi = inject(RunApiService);
   private readonly ui = inject(UiService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
 
   @ViewChild("importInput")
   importInput?: ElementRef<HTMLInputElement>;
@@ -108,7 +124,63 @@ export class ScenarioListComponent implements OnInit {
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
 
   ngOnInit(): void {
-    this.reloadProjects(true);
+    // The URL is the single source of truth for project / set / class, so
+    // refresh, deep links and browser back/forward all land on the same view.
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((q) => this.applyUrl(q));
+    this.reloadProjects();
+  }
+
+  /** Apply the query params to the view state and reload what changed. */
+  private applyUrl(q: ParamMap): void {
+    const project = q.get("project");
+    const set = q.get("set");
+    const cls = q.get("class");
+    const classFilter = (TEST_CLASSES as readonly string[]).includes(cls ?? "")
+      ? (cls as TestClass)
+      : null;
+    const setId = set && set !== ALL_CASES ? set : null;
+    // On the projects stage keep the last project, so the list stays warm.
+    const projectId = project ?? this.selectedProjectId();
+    const projectChanged = projectId !== this.selectedProjectId();
+    const casesChanged =
+      projectChanged ||
+      setId !== this.selectedSetId() ||
+      classFilter !== this.classFilter();
+
+    this.selectedProjectId.set(projectId);
+    this.selectedSetId.set(setId);
+    this.classFilter.set(classFilter);
+    this.stage.set(!project ? "projects" : set ? "scenarios" : "sets");
+    this.setMenuFor.set(null);
+
+    // First load still in flight: reloadProjects() picks this state up.
+    if (this.projects() === null) return;
+    if (projectChanged) this.reloadSets();
+    if (casesChanged) this.reloadScenarios();
+  }
+
+  /** Move the list to a new place; the URL subscription applies it. */
+  private go(to: ListLocation, replaceUrl = false): void {
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        project: to.project ?? null,
+        set: to.set ?? null,
+        class: to.class ?? null,
+      },
+      replaceUrl,
+    });
+  }
+
+  /** Query params that bring the editor's back button to this exact view. */
+  private caseContext(): ListLocation {
+    return {
+      project: this.selectedProjectId(),
+      set: this.selectedSetId(),
+      class: this.classFilter(),
+    };
   }
 
   @HostListener("document:keydown.escape")
@@ -119,20 +191,20 @@ export class ScenarioListComponent implements OnInit {
 
   // -- loading -----------------------------------------------------------------
 
-  reloadProjects(initial = false): void {
+  reloadProjects(): void {
     this.error.set(null);
     this.api.projects().subscribe({
       next: (list) => {
         this.projects.set(list);
-        if (initial || !list.some((p) => p.id === this.selectedProjectId())) {
-          const keep = list.some((p) => p.id === this.selectedProjectId());
-          if (!keep) {
-            this.selectedProjectId.set(
-              list.find((p) => p.id === DEFAULT_PROJECT_ID)?.id ??
-                list[0]?.id ??
-                DEFAULT_PROJECT_ID,
-            );
-          }
+        if (!list.some((p) => p.id === this.selectedProjectId())) {
+          this.selectedProjectId.set(
+            list.find((p) => p.id === DEFAULT_PROJECT_ID)?.id ??
+              list[0]?.id ??
+              DEFAULT_PROJECT_ID,
+          );
+          // The URL named a project that does not exist (stale deep link or
+          // deleted): show the projects list rather than a different project.
+          if (this.stage() !== "projects") this.go({}, true);
         }
         this.reloadSets();
         this.reloadScenarios();
@@ -153,7 +225,12 @@ export class ScenarioListComponent implements OnInit {
           this.selectedSetId() &&
           !sets.some((s) => s.id === this.selectedSetId())
         ) {
+          // Unknown set in the URL: fall back to "All cases" and say so in it.
           this.selectedSetId.set(null);
+          this.reloadScenarios();
+          if (this.stage() === "scenarios") {
+            this.go({ ...this.caseContext(), set: ALL_CASES }, true);
+          }
         }
       },
       error: () => this.sets.set([]),
@@ -177,51 +254,24 @@ export class ScenarioListComponent implements OnInit {
       });
   }
 
-  // -- selection -----------------------------------------------------------------
-
-  selectProject(id: string): void {
-    if (id === this.selectedProjectId()) return;
-    this.selectedProjectId.set(id);
-    this.selectedSetId.set(null);
-    this.setMenuFor.set(null);
-    this.reloadSets();
-    this.reloadScenarios();
-  }
-
-  selectSet(id: string | null): void {
-    this.selectedSetId.set(id);
-    this.reloadScenarios();
-  }
-
-  // -- stage navigation ------------------------------------------------------
+  // -- stage navigation (each step is a URL, so back/forward walk it) --------
 
   /** Drill from the projects list into a project's sets. */
   openProject(p: Project): void {
-    if (p.id !== this.selectedProjectId()) {
-      this.selectedProjectId.set(p.id);
-      this.selectedSetId.set(null);
-      this.setMenuFor.set(null);
-      this.reloadSets();
-      this.reloadScenarios();
-    }
-    this.stage.set("sets");
+    this.go({ project: p.id });
   }
 
   /** Drill from sets into the cases of a set (null = all cases in project). */
   openSet(id: string | null): void {
-    this.selectedSetId.set(id);
-    this.classFilter.set(null);
-    this.reloadScenarios();
-    this.stage.set("scenarios");
+    this.go({ project: this.selectedProjectId(), set: id ?? ALL_CASES });
   }
 
   backToProjects(): void {
-    this.stage.set("projects");
+    this.go({});
   }
 
   backToSets(): void {
-    this.selectedSetId.set(null);
-    this.stage.set("sets");
+    this.go({ project: this.selectedProjectId() });
   }
 
   /** Heading for the current scenarios view. */
@@ -230,9 +280,16 @@ export class ScenarioListComponent implements OnInit {
     return id ? this.setName(id) : "All cases";
   }
 
+  /** A filter, not a drill-down: replace the history entry. */
   setClass(c: TestClass | null): void {
-    this.classFilter.set(c);
-    this.reloadScenarios();
+    this.go(
+      {
+        project: this.selectedProjectId(),
+        set: this.selectedSetId() ?? ALL_CASES,
+        class: c,
+      },
+      true,
+    );
   }
 
   // -- projects CRUD ----------------------------------------------------------------
@@ -289,11 +346,7 @@ export class ScenarioListComponent implements OnInit {
           `Project "${p.name}" ${id ? "updated" : "created"}`,
         );
         this.reloadProjects();
-        if (!id) {
-          this.selectedProjectId.set(p.id);
-          this.selectedSetId.set(null);
-          this.stage.set("sets");
-        }
+        if (!id) this.go({ project: p.id });
       },
       error: () =>
         this.ui.toast(
@@ -451,27 +504,28 @@ export class ScenarioListComponent implements OnInit {
   goToProject(p: Project): void {
     this.searchOpen.set(false);
     this.searchText = "";
-    this.selectProject(p.id);
-    this.stage.set("sets");
+    this.go({ project: p.id });
   }
 
   goToSet(s: ScenarioSet): void {
     this.searchOpen.set(false);
     this.searchText = "";
-    if (s.project_id !== this.selectedProjectId()) {
-      this.selectedProjectId.set(s.project_id);
-      this.selectedSetId.set(s.id);
-      this.reloadSets();
-      this.reloadScenarios();
-    } else {
-      this.selectSet(s.id);
-    }
-    this.stage.set("scenarios");
+    this.go({ project: s.project_id, set: s.id });
   }
 
+  /** Search hit: open the case; back returns to its project's cases. */
   goToScenario(s: ScenarioSummary): void {
     this.searchOpen.set(false);
-    this.router.navigate(["/constructor", s.id]);
+    this.router.navigate(["/constructor", s.id], {
+      queryParams: { project: s.project_id },
+    });
+  }
+
+  /** Row in the cases table: open it; back returns to this exact view. */
+  openCase(s: ScenarioSummary): void {
+    this.router.navigate(["/constructor", s.id], {
+      queryParams: this.caseContext(),
+    });
   }
 
   projectName(id: string): string {
@@ -505,7 +559,9 @@ export class ScenarioListComponent implements OnInit {
               ),
           });
         }
-        this.router.navigate(["/constructor", sc.id]);
+        this.router.navigate(["/constructor", sc.id], {
+          queryParams: { ...this.caseContext(), class: null },
+        });
       },
       error: (err) => {
         this.importing.set(false);
