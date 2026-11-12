@@ -28,7 +28,7 @@ ENV = {
             "protocol": "iso8583",
             "host": "10.0.1.50",
             "port": 7001,
-            "correlation": {"match_mti": True},
+            "correlation": {"field": "11"},
         },
         "switch_mc": {"adapter": "tcp", "protocol": "iso8583", "host": "10.0.1.50", "port": 7002},
         "hsm_primary": {

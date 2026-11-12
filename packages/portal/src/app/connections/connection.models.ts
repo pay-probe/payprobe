@@ -144,7 +144,6 @@ export interface FramingConfig {
 export interface CorrelationConfig {
   field: string;
   autoGenerate: boolean;
-  matchMti: boolean;
 }
 
 export interface HeaderEchoConfig {
@@ -484,7 +483,7 @@ export function blankConnection(name = ""): Connection {
     responseTimeoutSec: 30,
     connectTimeoutSec: 10,
     framing: { ...DEFAULT_FRAMING },
-    correlation: { field: "11", autoGenerate: true, matchMti: false },
+    correlation: { field: "11", autoGenerate: true },
     headerEcho: {
       headerBytes: 4,
       responseCommandBytes: 2,
@@ -564,7 +563,9 @@ const TCP_SECTIONS: Record<string, string[]> = {
     "trailer_hex",
     "encoding",
   ],
-  correlation: ["field", "auto_generate", "match_mti"],
+  // match_mti / response_mti_map were removed 2026-11-12 (they stranded every
+  // MTI outside a fixed map); listed so a stored value is dropped on save.
+  correlation: ["field", "auto_generate", "match_mti", "response_mti_map"],
   header_echo: [
     "header_bytes",
     "response_command_bytes",
@@ -896,7 +897,6 @@ export function toAdapterConfig(i: Connection): Record<string, unknown> {
     const c: Record<string, unknown> = {};
     if (i.correlation.field !== "11") c["field"] = i.correlation.field;
     if (!i.correlation.autoGenerate) c["auto_generate"] = false;
-    if (i.correlation.matchMti) c["match_mti"] = true;
     if (Object.keys(c).length) cfg["correlation"] = c;
   }
 
@@ -1167,7 +1167,6 @@ export function fromAdapterConfig(
     correlation: {
       field: c["field"] ?? "11",
       autoGenerate: c["auto_generate"] !== false,
-      matchMti: c["match_mti"] === true,
     },
     headerEcho: {
       headerBytes: he["header_bytes"] ?? 4,

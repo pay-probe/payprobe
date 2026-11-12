@@ -52,6 +52,19 @@ describe("connection.models round-trip", () => {
     expect(out["response_timeout_sec"]).toBe(15);
   });
 
+  it("drops the removed match_mti / response_mti_map on save", () => {
+    const stored = {
+      ...posHost,
+      correlation: {
+        field: "37",
+        match_mti: true,
+        response_mti_map: { "0200": "0210" },
+      },
+    };
+    const out = toAdapterConfig(fromAdapterConfig("pos_host", stored));
+    expect(out["correlation"]).toEqual({ field: "37" });
+  });
+
   it("re-emits top-level keys the form has no field for", () => {
     const out = toAdapterConfig(fromAdapterConfig("pos_host", posHost));
     expect(out["mac"]).toEqual({ key_ref: "zak-1", fields: "64" });

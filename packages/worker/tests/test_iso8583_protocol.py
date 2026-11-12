@@ -98,3 +98,24 @@ def test_time_fields_sized_to_dialect():
         )
         == 14
     )
+
+
+def test_reply_pairs_by_stan_for_every_mti():
+    """Correlation is DE 11 alone. The removed ``match_mti`` option waited for a
+    reply MTI from a fixed six-entry map, so 0120, 0500, 1200 and repeats like
+    0221 waited for their own MTI and timed out; a stored ``match_mti: true``
+    is now ignored."""
+    from payprobe_common import iso8583
+
+    fields = {"11": {"name": "STAN", "len_type": "fixed", "length": 6, "type": "n"}}
+    p = Iso8583Protocol(
+        {
+            "fields": fields,
+            "auto_fields": False,
+            "correlation": {"field": "11", "match_mti": True},
+        }
+    )
+    for req, resp in (("0120", "0130"), ("0221", "0230"), ("0500", "0510"), ("1200", "1210")):
+        sent = p.encode("send_message", {"mti": req, "values": {"11": "000042"}})
+        reply = p.decode(iso8583.pack(resp, {"11": "000042"}, fields, p.wire_encoding))
+        assert p.correlation_key(reply) == sent.key, (req, resp)

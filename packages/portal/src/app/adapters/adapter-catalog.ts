@@ -826,7 +826,7 @@ export const ADAPTERS: AdapterSpec[] = [
       "The transport is protocol-agnostic — it owns the socket, reader loop, correlation, framing, sign-on, keep-alive and timeouts. What goes on the wire is decided by a pluggable protocol, so the same class backs ISO 8583 switch/acquirer targets and header-echo host-command links (HSMs). Config picks the protocol.",
     ],
     protocolNotes: [
-      'protocol: "iso8583" — ASCII ISO 8583. Correlation by a configurable DE (default DE 11 / STAN), optionally also matching the response MTI. Field map turns friendly payload keys (pan, amount, stan…) into DEs; explicit values{} sets DEs directly; a per-step fields table pins a dialect.',
+      'protocol: "iso8583" — ASCII ISO 8583. Correlation by a configurable DE (default DE 11 / STAN) alone; the MTI of the reply is not part of the match. Field map turns friendly payload keys (pan, amount, stan…) into DEs; explicit values{} sets DEs directly; a per-step fields table pins a dialect.',
       'protocol: "header_echo" — host-command links where the host echoes a fixed-width leading header used as the correlation key, followed by a response command code and a return/error code.',
       "Framing is fully configurable: a length prefix (width + byte order, whether it counts itself / the header), an optional inbound TPDU to strip and a static outbound TPDU, plus body encoding.",
     ],
@@ -980,17 +980,6 @@ export const ADAPTERS: AdapterSpec[] = [
             desc: "Auto-assign the correlation DE when absent.",
           },
           {
-            key: "correlation.match_mti",
-            type: "bool",
-            default: "false",
-            desc: "Also require the response MTI to match.",
-          },
-          {
-            key: "correlation.response_mti_map",
-            type: "object",
-            desc: "Override request→response MTI mapping (e.g. 0200→0210).",
-          },
-          {
             key: "fields",
             type: "object",
             desc: "DE table / dialect. Defaults to the built-in field set.",
@@ -1103,7 +1092,7 @@ export const ADAPTERS: AdapterSpec[] = [
   "host": "10.0.1.50",
   "port": 7000,
   "framing": { "length_prefix_bytes": 2, "length_byte_order": "big" },
-  "correlation": { "field": "11", "match_mti": true },
+  "correlation": { "field": "11" },
   "sign_on": { "enabled": true },
   "keepalive": { "enabled": true, "interval_sec": 30 }
 }`,

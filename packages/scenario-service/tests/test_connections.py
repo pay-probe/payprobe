@@ -12,13 +12,13 @@ def _draft(**extra):
 def test_upsert_get_list_preserves_extra_keys():
     s = ConnectionStore(":memory:")
     s.upsert("switch_visa", _draft(framing={"length_prefix_bytes": 2},
-                                   correlation={"match_mti": True}))
+                                   correlation={"field": "11"}))
     c = s.get("switch_visa")
     assert c is not None
     assert c.name == "switch_visa" and c.protocol == "iso8583"
     doc = c.model_dump()
     assert doc["framing"] == {"length_prefix_bytes": 2}
-    assert doc["correlation"] == {"match_mti": True}
+    assert doc["correlation"] == {"field": "11"}
     assert [x.name for x in s.list()] == ["switch_visa"]
 
 

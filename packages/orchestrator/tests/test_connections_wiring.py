@@ -9,7 +9,7 @@ def conns(monkeypatch):
     """Stub the scenario-service /connections fetch."""
     docs = [
         {"name": "switch_visa", "adapter": "tcp", "protocol": "iso8583",
-         "host": "10.0.1.50", "port": 7001, "correlation": {"match_mti": True}},
+         "host": "10.0.1.50", "port": 7001, "correlation": {"field": "11"}},
         {"name": "hsm_primary", "adapter": "tcp", "protocol": "header_echo",
          "host": "10.0.2.10", "port": 1500},
     ]
@@ -35,7 +35,7 @@ async def test_only_referenced_connections_merged(conns):
     await m._attach_connections(env, _scn("switch_visa"))
     # the referenced one is injected...
     assert env["adapters"]["switch_visa"]["host"] == "10.0.1.50"
-    assert env["adapters"]["switch_visa"]["correlation"] == {"match_mti": True}
+    assert env["adapters"]["switch_visa"]["correlation"] == {"field": "11"}
     assert "name" not in env["adapters"]["switch_visa"]
     # ...but an unused saved connection is NOT pulled in (no warmup to its host)
     assert "hsm_primary" not in env["adapters"]

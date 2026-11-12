@@ -459,7 +459,6 @@ export class ConnectionsComponent implements OnInit {
     const c = d.correlation;
     const parts = [`DE ${c.field || "?"}`];
     if (c.autoGenerate) parts.push("auto STAN");
-    if (c.matchMti) parts.push("match MTI");
     return parts.join(" · ");
   }
   headerEchoSummary(d: Connection): string {
@@ -506,10 +505,7 @@ export class ConnectionsComponent implements OnInit {
         (c.autoGenerate && de === "11"
           ? " (a fresh STAN is generated when the step sets none)"
           : "") +
-        (c.matchMti
-          ? " and whose MTI is the request's + 10 (0200 → 0210)"
-          : "") +
-        ".",
+        ", whatever its MTI.",
       `A request waits ${d.responseTimeoutSec} s for it; a reply nothing is waiting for is logged and dropped.`,
     ];
     return parts.join(" ");

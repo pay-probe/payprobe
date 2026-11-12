@@ -6,7 +6,7 @@
       "framing": { "length_prefix_bytes": 2, "length_byte_order": "big", "encoding": "ascii" },
       "response_timeout_sec": 20, "connect_timeout_sec": 10,
       "keepalive": { "enabled": true, "interval_sec": 30 },
-      "correlation": { "field": "11", "match_mti": true },
+      "correlation": { "field": "11" },
       "sign_on": { "enabled": true },
       "description": "Visa switch (ISO 8583). Was multi-instance/switch_visa."
     },
@@ -15,7 +15,7 @@
       "framing": { "length_prefix_bytes": 2, "length_byte_order": "big", "encoding": "ascii" },
       "response_timeout_sec": 20, "connect_timeout_sec": 10,
       "keepalive": { "enabled": true, "interval_sec": 30 },
-      "correlation": { "field": "11", "match_mti": true },
+      "correlation": { "field": "11" },
       "sign_on": { "enabled": true },
       "description": "Mastercard switch (ISO 8583). Was multi-instance/switch_mc."
     },

@@ -22,8 +22,7 @@
       "response_timeout_sec": 10,
       "connect_timeout_sec": 10,
       "correlation": {
-        "field": "11",
-        "match_mti": true
+        "field": "11"
       },
       "sign_on": {
         "enabled": false

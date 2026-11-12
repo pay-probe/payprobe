@@ -101,20 +101,13 @@ _DEFAULT_FIELD_MAP = {
     "terminal_id": "41",
     "currency": "49",
 }
-_DEFAULT_RESPONSE_MTI_MAP = {
-    "0100": "0110",
-    "0200": "0210",
-    "0220": "0230",
-    "0400": "0410",
-    "0420": "0430",
-    "0800": "0810",
-}
-
-
 class Iso8583Protocol(TcpProtocol):
     """ISO 8583 under the connection's wire encoding profile (``encoding`` at the
     top level of the config, or the legacy ``framing.encoding`` text codec folded
-    on read). Correlation by a configurable DE (STAN / DE 11)."""
+    on read). Correlation by a configurable DE (STAN / DE 11) alone: the reply's
+    MTI is not part of the key, so every MTI pairs with its reply (a fixed
+    request->response MTI map used to strand any MTI it did not list; removed
+    2026-11-12, a stored ``match_mti`` / ``response_mti_map`` is ignored)."""
 
     name = "iso8583"
 
@@ -123,8 +116,6 @@ class Iso8583Protocol(TcpProtocol):
         c = config.get("correlation", {})
         self.corr_field = str(c.get("field", "11"))
         self.corr_auto = bool(c.get("auto_generate", True))
-        self.match_mti = bool(c.get("match_mti", False))
-        self.resp_mti_map = {**_DEFAULT_RESPONSE_MTI_MAP, **c.get("response_mti_map", {})}
         self.fields = config.get("fields") or iso8583.DEFAULT_FIELDS
         self.field_map = {**_DEFAULT_FIELD_MAP, **config.get("field_map", {})}
         self.auto_fields = bool(config.get("auto_fields", True))
@@ -150,7 +141,6 @@ class Iso8583Protocol(TcpProtocol):
             )
         if self.auto_fields:
             self._stamp_time_fields(values, fields)
-        expected = self.resp_mti_map.get(mti, mti) if self.match_mti else None
         if self.mac_spec:
             body = iso8583.mac.pack_with_mac(
                 mti,
@@ -162,7 +152,7 @@ class Iso8583Protocol(TcpProtocol):
             )
         else:
             body = iso8583.pack(mti, values, fields, self.wire_encoding)
-        return EncodedMessage(self._key(corr, expected), body, {"mti": mti, "values": values})
+        return EncodedMessage(str(corr), body, {"mti": mti, "values": values})
 
     def check(self, action: str, payload: dict) -> list[str]:
         """Why ``(action, payload)`` cannot be packed, one line per data
@@ -234,7 +224,7 @@ class Iso8583Protocol(TcpProtocol):
         corr = (parsed.get("fields", {}).get(self.corr_field) or {}).get("value")
         if corr is None:
             return None
-        return self._key(corr, parsed.get("mti") if self.match_mti else None)
+        return str(corr)
 
     def shape_response(self, parsed: dict) -> dict:
         de = {k: v.get("value") for k, v in parsed.get("fields", {}).items()}
@@ -263,9 +253,6 @@ class Iso8583Protocol(TcpProtocol):
         return bool(parsed.get("mti"))
 
     # -- helpers --
-    def _key(self, corr: str, mti: str | None) -> str:
-        return f"{corr}:{mti}" if mti else corr
-
     def _build_values(self, payload: dict, fields: dict | None = None) -> dict[str, str]:
         fields = fields if fields is not None else self.fields
         values: dict[str, str] = {}

@@ -173,10 +173,8 @@ for and re-emits it on save.
   "protocol": "iso8583",
   "correlation": {
     "field": "11",               // DE used to match response <-> request
-    "auto_generate": true,       // assign the field automatically if absent
-    "match_mti": false,          // also require the response MTI to match
-    "response_mti_map": { "0200": "0210", "0400": "0410", "0800": "0810" }
-  },
+    "auto_generate": true        // assign the field automatically if absent
+  },                             // the MTI of the reply is not part of the match
   "fields": { "<de>": { "name": "...", "len_type": "fixed|llvar|lllvar", "length": 0 } },
   "field_map": { "amount": "4", "pan": "2" },  // convenience key -> DE
   "auto_fields": true            // stamp DE 7/12/13 time fields when in the table
@@ -275,7 +273,7 @@ connection, config and connection-budget entry. The instance name (the step's
   "adapters": {
     "switch_visa": { "adapter": "tcp", "protocol": "iso8583",
                      "host": "10.0.1.50", "port": 7001,
-                     "correlation": { "match_mti": true } },
+                     "correlation": { "field": "11" } },
     "switch_mc":   { "adapter": "tcp", "protocol": "iso8583",
                      "host": "10.0.1.50", "port": 7002 },
     "hsm_primary": { "adapter": "tcp", "protocol": "header_echo",
