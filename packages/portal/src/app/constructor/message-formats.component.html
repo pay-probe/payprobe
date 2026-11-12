@@ -109,7 +109,14 @@
             /></label>
             <label class="field"
               ><span>Encoding</span>
-              @if (d.protocol === "iso8583") {
+              @if (d.protocol === "iso8583" && d.encodingAxes) {
+                <input
+                  class="mono"
+                  [value]="json(d.encodingAxes)"
+                  readonly
+                  title="Encoding axes (bitmap / numeric / text / binary / length / mti). Kept as stored; change them through the formats API."
+                />
+              } @else if (d.protocol === "iso8583") {
                 <input
                   [(ngModel)]="d.encoding"
                   [readonly]="d.builtin"
@@ -188,7 +195,16 @@
                     [(ngModel)]="r.de"
                     [readonly]="d.builtin"
                   />
-                  <input [(ngModel)]="r.name" [readonly]="d.builtin" />
+                  <span class="tbl__name">
+                    <input [(ngModel)]="r.name" [readonly]="d.builtin" />
+                    @if (hasExtra(r)) {
+                      <span
+                        class="pill pill--override"
+                        [title]="'Kept on save: ' + json(r.extra)"
+                        >override</span
+                      >
+                    }
+                  </span>
                   <select [(ngModel)]="r.len_type" [disabled]="d.builtin">
                     @for (lt of lenTypes; track lt) {
                       <option [value]="lt">{{ lt }}</option>
@@ -215,6 +231,13 @@
                 </div>
               }
             </div>
+
+            <app-iso-mapping-editor
+              [model]="d"
+              [des]="d.rows"
+              [readonly]="d.builtin"
+              (changed)="markDirty()"
+            />
           } @else {
             <div class="grid2">
               <label class="field"
@@ -245,10 +268,10 @@
           }
 
           <p class="note">
-            Use a format in a flow: drop an <strong>ISO Messaging</strong> step
-            (ISO8583 pack/parse, ISO20022 build/parse) from the palette, then
-            paste this definition into the step’s field table to target this
-            integration.
+            Use a format in a flow: pick it in a step's
+            <strong>dialect</strong> field. The step packs with this DE table
+            and offers this format's MTIs. Bind it to a simulator to check
+            inbound messages against the field presence by MTI.
           </p>
         </div>
       } @else {

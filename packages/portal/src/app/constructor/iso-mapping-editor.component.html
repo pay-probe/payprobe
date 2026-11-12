@@ -1,0 +1,292 @@
+<!-- Filter controls stop input/change here so they never mark the format dirty;
+     real edits emit `changed`. -->
+<div
+  class="im"
+  (input)="$event.stopPropagation()"
+  (change)="$event.stopPropagation()"
+>
+  <!-- MTI list ------------------------------------------------------------ -->
+  <section class="im__section">
+    <button
+      class="im__head"
+      type="button"
+      (click)="mtiOpen.set(!mtiOpen())"
+      [attr.aria-expanded]="mtiOpen()"
+    >
+      <span class="im__caret">{{ mtiOpen() ? "▾" : "▸" }}</span>
+      <h3>MTIs</h3>
+      <span class="muted">
+        @if (model().mtis.length) {
+          {{ model().mtis.length }} · first is {{ model().mtis[0] }}
+        } @else {
+          none · steps offer the stock MTI menu
+        }
+      </span>
+    </button>
+
+    @if (mtiOpen()) {
+      <p class="im__hint">
+        The MTIs a step offers once this format is bound to it. When a step's
+        MTI is not in this list, binding the format switches it to the
+        <strong>first</strong> one.
+      </p>
+
+      @if (model().mtis.length) {
+        <div class="chips">
+          @for (m of model().mtis; track m; let i = $index) {
+            <span
+              class="chip"
+              [class.chip--first]="i === 0"
+              [title]="mtiTitle(m)"
+            >
+              <span class="mono chip__mti">{{ m }}</span>
+              <span class="chip__label">{{ mtiLabel(m) }}</span>
+              @if (i === 0) {
+                <span class="chip__tag">first</span>
+              }
+              @if (!readonly()) {
+                @if (i > 0) {
+                  <button
+                    type="button"
+                    class="chip__btn"
+                    (click)="moveEarlier(i)"
+                    [attr.aria-label]="'Move ' + m + ' earlier'"
+                    title="Move earlier"
+                  >
+                    ◂
+                  </button>
+                }
+                <button
+                  type="button"
+                  class="chip__btn"
+                  (click)="removeMti(i)"
+                  [attr.aria-label]="'Remove ' + m"
+                  title="Remove from the list (its presence rule stays)"
+                >
+                  ✕
+                </button>
+              }
+            </span>
+          }
+        </div>
+      } @else {
+        <p class="im__empty">
+          No MTI list. Steps bound to this format offer the stock MTI menu of
+          the action. Add the MTIs this dialect sends.
+        </p>
+      }
+
+      @if (!readonly()) {
+        <div class="im__add">
+          <input
+            class="mono"
+            [ngModel]="newMti()"
+            (ngModelChange)="newMti.set($event); mtiError.set(null)"
+            (keydown.enter)="addMti()"
+            list="im-mtis"
+            maxlength="4"
+            placeholder="0200"
+            aria-label="MTI to add"
+          />
+          <datalist id="im-mtis">
+            @for (s of suggestions(); track s) {
+              <option [value]="s">{{ mtiLabel(s) }}</option>
+            }
+          </datalist>
+          <button type="button" class="btn btn--ghost" (click)="addMti()">
+            + add MTI
+          </button>
+          @if (newMti().length === 4 && mtiLabel(newMti()); as l) {
+            <span class="muted">{{ l }}</span>
+          }
+          @if (mtiError(); as e) {
+            <span class="im__error">{{ e }}</span>
+          }
+        </div>
+      }
+    }
+  </section>
+
+  <!-- Presence mapping ---------------------------------------------------- -->
+  <section class="im__section">
+    <button
+      class="im__head"
+      type="button"
+      (click)="gridOpen.set(!gridOpen())"
+      [attr.aria-expanded]="gridOpen()"
+    >
+      <span class="im__caret">{{ gridOpen() ? "▾" : "▸" }}</span>
+      <h3>Field presence by MTI</h3>
+      <span class="muted">{{ gridSummary() }}</span>
+    </button>
+
+    @if (gridOpen()) {
+      <p class="im__hint">
+        Which DEs a message of each MTI must carry. A simulator bound to this
+        format checks every inbound message against it: <code>warn</code>
+        (the default) records violations in the trace and still answers,
+        <code>reject</code> answers with a format error (DE 39 = 30). Steps that
+        send with this format are not checked against it. A message uses
+        <strong>its MTI's rule</strong> if there is one, otherwise
+        <strong>default</strong>; an MTI rule replaces default, it does not add
+        to it.
+      </p>
+
+      <div class="legend">
+        <span class="mk mk--M">M</span> mandatory, validated
+        <span class="mk mk--C">C</span> conditional, recorded only (not
+        validated) <span class="mk mk--M mk--inh">M</span> taken from default
+        @if (!readonly()) {
+          <span class="muted"
+            >· click a cell: none → M → C → none. Clicking in a column that uses
+            default gives that MTI its own rule, copied from default.</span
+          >
+        }
+      </div>
+
+      @if (orphanRules().length || unknownDes().length) {
+        <ul class="warn">
+          @for (k of orphanRules(); track k) {
+            <li>
+              Rule <span class="mono">{{ k }}</span> is not in the MTI list. A
+              simulator still checks inbound {{ k }} messages with it, but a
+              step cannot choose {{ k }}.
+            </li>
+          }
+          @if (unknownDes().length) {
+            <li>
+              DE
+              <span class="mono">{{ unknownDes().join(", ") }}</span>
+              {{ unknownDes().length === 1 ? "is" : "are" }} marked but not in
+              the DE table above: a simulator reports such a DE as "not defined
+              in format", so a mandatory one can never pass.
+            </li>
+          }
+        </ul>
+      }
+
+      <div class="im__filters">
+        <input
+          [ngModel]="query()"
+          (ngModelChange)="query.set($event)"
+          placeholder="Find DE by number or name"
+          aria-label="Find DE"
+        />
+        <label class="im__check">
+          <input
+            type="checkbox"
+            [ngModel]="onlyMarkedEffective()"
+            (ngModelChange)="onlyMarked.set($event)"
+          />
+          only marked DEs
+        </label>
+        <span class="muted">{{ rows().length }} of {{ totalRows() }} DEs</span>
+      </div>
+
+      <div class="pm-wrap">
+        <table class="pm">
+          <thead>
+            <tr>
+              <th class="pm__corner">DE</th>
+              @for (c of columns(); track c.key) {
+                <th
+                  class="pm__col"
+                  [class.pm__col--default]="c.key === DEFAULT"
+                  [class.pm__col--orphan]="!c.inList"
+                  [title]="c.title"
+                >
+                  <div class="mono pm__mti">{{ c.key }}</div>
+                  <div class="pm__label">{{ c.label }}</div>
+                  <div class="pm__state">
+                    @if (c.rule) {
+                      <span>{{ ruleCount(c.rule) }}</span>
+                      @if (!readonly()) {
+                        <button
+                          type="button"
+                          class="linkbtn"
+                          (click)="dropRule(c.key)"
+                          [title]="
+                            c.key === DEFAULT
+                              ? 'Remove the default rule'
+                              : 'Remove this rule: ' +
+                                c.key +
+                                ' uses default again'
+                          "
+                        >
+                          {{ c.key === DEFAULT ? "clear" : "use default" }}
+                        </button>
+                      }
+                    } @else if (c.key === DEFAULT) {
+                      <span class="muted">no rule</span>
+                    } @else {
+                      <span class="muted">uses default</span>
+                      @if (!readonly()) {
+                        <button
+                          type="button"
+                          class="linkbtn"
+                          (click)="ownRule(c.key)"
+                          title="Give this MTI its own rule, copied from default"
+                        >
+                          own rule
+                        </button>
+                      }
+                    }
+                  </div>
+                  @if (!c.inList) {
+                    <div class="pm__orphan">not in MTI list</div>
+                  }
+                </th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (r of rows(); track r.de) {
+              <tr>
+                <th class="pm__de" [class.pm__de--unknown]="!r.inTable">
+                  <span class="mono">{{ r.de }}</span>
+                  <span class="pm__name">{{
+                    r.inTable ? r.name : "not in DE table"
+                  }}</span>
+                </th>
+                @for (c of columns(); track c.key) {
+                  @let v = cell(c, r.de);
+                  <td>
+                    <button
+                      type="button"
+                      class="mk"
+                      [class.mk--M]="v.mark === 'M'"
+                      [class.mk--C]="v.mark === 'C'"
+                      [class.mk--inh]="v.inherited"
+                      [class.mk--empty]="!v.mark"
+                      [disabled]="readonly()"
+                      (click)="toggle(c, r.de)"
+                      [title]="markTitle(c, r.de, v.mark, v.inherited)"
+                      [attr.aria-label]="
+                        markTitle(c, r.de, v.mark, v.inherited)
+                      "
+                    >
+                      {{ v.mark || "·" }}
+                    </button>
+                  </td>
+                }
+              </tr>
+            } @empty {
+              <tr>
+                <td class="im__empty" [attr.colspan]="columns().length + 1">
+                  @if (onlyMarkedEffective() && !markedDes().size) {
+                    No DE is marked yet. Untick "only marked DEs" to pick from
+                    the DE table.
+                  } @else if (!totalRows()) {
+                    The DE table is empty. Add data elements above first.
+                  } @else {
+                    No DE matches the filter.
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </section>
+</div>

@@ -7,7 +7,6 @@ import {
   ChangeDetectionStrategy,
 } from "@angular/core";
 import { FormsModule } from "@angular/forms";
-import { RouterLink } from "@angular/router";
 
 import { ThemeService } from "../shared/theme.service";
 import { UiService } from "../shared/ui.service";
@@ -19,9 +18,19 @@ import {
   Protocol,
 } from "./scenario.models";
 import { PageHeaderComponent } from "../shared/ui/page-header.component";
+import { IsoMappingEditorComponent } from "./iso-mapping-editor.component";
+import {
+  PresenceRule,
+  buildPresence,
+  parseMtis,
+  parsePresence,
+} from "./iso-mapping.model";
 
 interface Iso8583Row extends Iso8583Field {
   de: string;
+  /** Field-spec keys the table does not edit (a per-field `encoding`
+   *  override, ADR-0011), carried through a save untouched. */
+  extra: Record<string, unknown>;
 }
 
 interface EditFormat {
@@ -35,10 +44,17 @@ interface EditFormat {
   isNew: boolean;
   // iso8583
   encoding: string;
+  /** An `encoding` stored as an axis dict ({bitmap, numeric, ...}); the form
+   *  shows it read-only and saves it back unchanged. */
+  encodingAxes: Record<string, unknown> | null;
   /** definition.bitmap_encoding: "" (follow the encoding profile) | hex | binary | ebcdic. */
   bitmapEncoding: string;
   rows: Iso8583Row[];
-  /** Definition keys the form does not edit (presence, mti, mac, …), carried
+  /** definition.mti: the MTI menu of a step bound to this format. */
+  mtis: string[];
+  /** definition.presence: mandatory / conditional DEs per MTI. */
+  rules: PresenceRule[];
+  /** Definition keys the form does not edit (mac, …), carried
    *  through a save untouched instead of being dropped. */
   extras: Record<string, unknown>;
   // iso20022
@@ -47,13 +63,15 @@ interface EditFormat {
   root: string;
 }
 
-const LEN_TYPES = ["fixed", "llvar", "lllvar"];
+const LEN_TYPES = ["fixed", "llvar", "lllvar", "llllvar", "lllllvar"];
 const BITMAP_ENCODINGS = ["hex", "binary", "ebcdic"];
 /** Definition keys the form edits itself; everything else is an extra. */
 const EDITED_KEYS = new Set([
   "encoding",
   "bitmap_encoding",
   "fields",
+  "mti",
+  "presence",
   "message_type",
   "namespace",
   "root",
@@ -68,7 +86,7 @@ const FIELD_TYPES = ["n", "an", "ans", "b", "z"];
 @Component({
   selector: "app-message-formats",
   standalone: true,
-  imports: [PageHeaderComponent, FormsModule, RouterLink],
+  imports: [PageHeaderComponent, FormsModule, IsoMappingEditorComponent],
   templateUrl: "./message-formats.component.html",
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: "./message-formats.component.scss",
@@ -173,11 +191,23 @@ export class MessageFormatsComponent implements OnInit {
       builtin: false,
       isNew: true,
       encoding: "ascii",
+      encodingAxes: null,
       bitmapEncoding: "",
       extras: {},
+      mtis: [],
+      rules: [],
       rows:
         protocol === "iso8583"
-          ? [{ de: "2", name: "PAN", len_type: "llvar", length: 19, type: "n" }]
+          ? [
+              {
+                de: "2",
+                name: "PAN",
+                len_type: "llvar",
+                length: 19,
+                type: "n",
+                extra: {},
+              },
+            ]
           : [],
       messageType: protocol === "iso20022" ? "pacs.008.001.08" : "",
       namespace:
@@ -203,6 +233,14 @@ export class MessageFormatsComponent implements OnInit {
     });
   }
 
+  json(v: unknown): string {
+    return JSON.stringify(v);
+  }
+
+  hasExtra(r: Iso8583Row): boolean {
+    return Object.keys(r.extra ?? {}).length > 0;
+  }
+
   markDirty(): void {
     this.dirty.set(true);
   }
@@ -216,6 +254,7 @@ export class MessageFormatsComponent implements OnInit {
         len_type: "fixed",
         length: 0,
         type: "n",
+        extra: {},
       });
       this.markDirty();
     }
@@ -235,13 +274,10 @@ export class MessageFormatsComponent implements OnInit {
     const def = (f.definition ?? {}) as Record<string, any>;
     const fields = (def["fields"] ?? {}) as Record<string, Iso8583Field>;
     const rows: Iso8583Row[] = Object.entries(fields)
-      .map(([de, v]) => ({
-        de,
-        name: v.name,
-        len_type: v.len_type,
-        length: v.length,
-        type: v.type,
-      }))
+      .map(([de, v]) => {
+        const { name, len_type, length, type, ...extra } = v;
+        return { de, name, len_type, length, type, extra };
+      })
       .sort((a, b) => Number(a.de) - Number(b.de));
     return {
       id: f.id,
@@ -252,12 +288,18 @@ export class MessageFormatsComponent implements OnInit {
       description: f.description,
       builtin: f.builtin,
       isNew: false,
-      encoding: def["encoding"] ?? "ascii",
+      encoding: typeof def["encoding"] === "string" ? def["encoding"] : "ascii",
+      encodingAxes:
+        def["encoding"] && typeof def["encoding"] === "object"
+          ? (def["encoding"] as Record<string, unknown>)
+          : null,
       bitmapEncoding: def["bitmap_encoding"] ?? "",
       extras: Object.fromEntries(
         Object.entries(def).filter(([k]) => !EDITED_KEYS.has(k)),
       ),
       rows,
+      mtis: parseMtis(def["mti"]),
+      rules: parsePresence(def["presence"]),
       messageType: def["message_type"] ?? "",
       namespace: def["namespace"] ?? "",
       root: def["root"] ?? "Document",
@@ -271,14 +313,22 @@ export class MessageFormatsComponent implements OnInit {
       for (const r of d.rows) {
         if (!r.de.toString().trim()) continue;
         fields[r.de.toString().trim()] = {
+          ...r.extra,
           name: r.name,
           len_type: r.len_type,
           length: Number(r.length) || 0,
           type: r.type,
         };
       }
-      definition = { ...d.extras, encoding: d.encoding || "ascii", fields };
+      definition = {
+        ...d.extras,
+        encoding: d.encodingAxes ?? (d.encoding || "ascii"),
+        fields,
+      };
       if (d.bitmapEncoding) definition["bitmap_encoding"] = d.bitmapEncoding;
+      if (d.mtis.length) definition["mti"] = [...d.mtis];
+      const presence = buildPresence(d.rules);
+      if (presence) definition["presence"] = presence;
     } else {
       definition = {
         ...d.extras,

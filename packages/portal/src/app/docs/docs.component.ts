@@ -1022,7 +1022,7 @@ export class DocsComponent {
       title: "Manage a message format",
       icon: "list",
       route: "/message-formats",
-      desc: "Edit the DE table used to pack/parse messages.",
+      desc: "Edit the DE table, the MTI list and which DEs each MTI must carry.",
     },
     {
       title: "Add a data table",
