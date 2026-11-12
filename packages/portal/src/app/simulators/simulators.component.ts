@@ -440,7 +440,7 @@ interface Breakdown {
               </label>
             </div>
 
-            <label class="f">
+            <div class="f">
               <span>Responder config (JSON)</span>
               <app-code-editor
                 language="json"
@@ -448,7 +448,7 @@ interface Breakdown {
                 [height]="300"
                 (valueChange)="config = $event"
               />
-            </label>
+            </div>
 
             @if (framingPresets.has(preset())) {
               <details class="fr-sim" open>

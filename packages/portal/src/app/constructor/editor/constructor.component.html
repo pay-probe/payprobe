@@ -629,7 +629,7 @@
               </p>
             }
             @case ("reply") {
-              <label class="field">
+              <div class="field">
                 <span>
                   Reply action
                   <span class="muted"
@@ -645,7 +645,7 @@
                   [height]="220"
                   (valueChange)="setFlowNodeJson(step, $event)"
                 ></app-code-editor>
-              </label>
+              </div>
               <p class="muted config__hint">
                 e.g.
                 <span class="mono"
@@ -661,7 +661,7 @@
               </p>
             }
             @case ("state") {
-              <label class="field">
+              <div class="field">
                 <span>
                   State ops
                   <span class="muted"
@@ -676,7 +676,7 @@
                   [height]="200"
                   (valueChange)="setFlowNodeJson(step, $event)"
                 ></app-code-editor>
-              </label>
+              </div>
               <p class="muted config__hint">
                 e.g.
                 <span class="mono"
@@ -960,7 +960,7 @@
               </p>
             }
             @case ("init") {
-              <label class="field">
+              <div class="field">
                 <span>
                   Initial JSON
                   <span class="muted"
@@ -976,7 +976,7 @@
                   [height]="240"
                   (valueChange)="updateConfig(step, { data: $event })"
                 ></app-code-editor>
-              </label>
+              </div>
               <p class="muted config__hint">
                 Wire this node's output into the first step. Downstream steps
                 read it as
@@ -1482,7 +1482,7 @@
                 }
               </div>
 
-              <label class="field">
+              <div class="field">
                 <span>
                   Code
                   <span class="muted">
@@ -1494,9 +1494,15 @@
                   [value]="step.config?.code ?? ''"
                   [language]="step.config?.language ?? 'python'"
                   [height]="280"
+                  [title]="step.id + ' · code'"
+                  [hints]="codeHints()"
+                  [runnable]="true"
+                  [running]="executing()"
+                  [result]="nodeResults()[step.id] ?? null"
+                  (run)="runCodeStep(step)"
                   (valueChange)="updateConfig(step, { code: $event })"
                 ></app-code-editor>
-              </label>
+              </div>
               <label class="field">
                 <span>Timeout (ms)</span>
                 <input

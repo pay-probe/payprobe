@@ -28,6 +28,7 @@ import { ActivatedRoute, Router, RouterLink } from "@angular/router";
 import { CodeEditorComponent } from "../../shared/code-editor.component";
 import { RefAutocompleteDirective } from "../../shared/ref-autocomplete.directive";
 import { IconComponent } from "../../shared/ui/icon.component";
+import { CodeHints } from "../../shared/code-completions.model";
 import { ThemeService } from "../../shared/theme.service";
 import { UiService } from "../../shared/ui.service";
 import { ActiveEnvironmentService } from "../../shared/active-environment.service";
@@ -2684,6 +2685,37 @@ export class ConstructorComponent implements OnInit {
       assertions: step.assertions,
       config: step.config ?? {},
     };
+  }
+
+  /** What the code editor completes for the selected step: its Inputs row
+   *  names and the upstream step ids it can read from `context`. */
+  readonly codeHints = computed<CodeHints | null>(() => {
+    const step = this.selectedStep();
+    if (!step) return null;
+    return {
+      inputs: this.codeInputs(step),
+      steps: this.ancestors(step.id),
+    };
+  });
+
+  /** ▶ Run from the code editor: like the detail window's Execute, but with
+   *  this step's own upstream context (the detail window may not be open). */
+  async runCodeStep(step: Step): Promise<void> {
+    this.executing.set(true);
+    try {
+      const res = await this.runOne(step);
+      this.nodeResults.update((m) => ({ ...m, [step.id]: res }));
+      if (res.status !== "passed") {
+        this.ui.toast("error", res.error || `${step.id} ${res.status}`);
+      }
+    } catch {
+      this.ui.toast(
+        "error",
+        "Run failed — is the orchestrator running (port 8100)?",
+      );
+    } finally {
+      this.executing.set(false);
+    }
   }
 
   executeNode(step: Step): void {

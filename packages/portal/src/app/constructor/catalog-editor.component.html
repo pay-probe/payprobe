@@ -357,7 +357,7 @@
                           }
                         </select>
                       </label>
-                      <label class="field">
+                      <div class="field">
                         <span>Code</span>
                         <app-code-editor
                           [value]="a.code"
@@ -365,7 +365,7 @@
                           [height]="220"
                           (valueChange)="a.code = $event; markDirty()"
                         ></app-code-editor>
-                      </label>
+                      </div>
                     }
 
                     @if (a.behaviorKind === "crypto") {

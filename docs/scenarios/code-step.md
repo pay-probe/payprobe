@@ -20,7 +20,9 @@ A Code step has **one input** and **one output**:
 So a node with id `surcharge` that returns `{ "total": 10150 }` exposes
 `${surcharge.response.total}` to everything downstream.
 
-`context` is also available under the alias `inputs`, if that reads better.
+`inputs` is the node's own **Inputs** rows, by name, with their `${…}`
+references already resolved (`inputs["amount"]`). It is empty when the node has
+no Inputs rows; it is not an alias of `context`.
 
 ## Python
 
@@ -72,6 +74,24 @@ object it is wrapped as `{ "value": <result> }`.
 4. Wire it up: connect the previous node's output into the Code node, and the
    Code node's `out` port into whatever runs next.
 5. Reference its output downstream, e.g. `${surcharge.response.total}`.
+
+### The code editor
+
+- **Completions**: `Ctrl+Space` (or typing `[`, `"`, `.`) offers `inputs`,
+  `context`, every Inputs row as `inputs["name"]`, every upstream step as
+  `context["step_id"]["response"]` / `["request"]`, and snippets (`return {…}`,
+  `try / except`, read a response field). Only the Code step's editor gets these.
+- **Resize**: drag the grip under the editor to change its height
+  (120 to 1200 px; not saved).
+- **⤢ Expand** opens the editor full screen; **Esc** or **⤡ Collapse** returns.
+  Undo history and cursor are kept. Esc first closes an open suggestion list,
+  find bar or selection.
+- **▶ Run** (or `Ctrl/Cmd+Enter`) runs this step once with the upstream steps'
+  last results (from Execute or pins) as `context`. Full screen shows the
+  result beside the code: status, duration, response, error and `print` output.
+  Nothing is saved.
+- **Wrap**, **Copy**, the cursor position and the live syntax check sit in the
+  editor's toolbar and status line.
 
 ### Test it in isolation
 
