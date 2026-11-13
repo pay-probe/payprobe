@@ -1,7 +1,10 @@
 """WorkerEngine — the three-phase test execution core.
 
 Phase model (spec §6.3 / §9):
-  Phase 1  Components   health_check() on every adapter in the environment.
+  Phase 1  Components   health_check() on every adapter the run dispatches to
+                        (its scenarios, their call sub-scenarios and its
+                        fixtures); environment adapters it never uses are
+                        neither dialled nor checked.
   Phase 2  Integration  run ``component`` + ``integration`` scenarios.
   Phase 3  End-to-End   run ``e2e`` scenarios, diffed against baseline downstream.
 
@@ -20,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Iterable
 
 from ..adapters.base.base_adapter import StepResult
 from ..adapters.registry import AdapterRegistry
@@ -40,6 +44,7 @@ from .runner import (
     PASSED,
     ScenarioResult,
     ScenarioRunner,
+    batch_targets,
     scenario_targets,
 )
 
@@ -75,8 +80,10 @@ class WorkerEngine:
 
     # -- lifecycle -----------------------------------------------------------
 
-    async def warmup_adapters(self) -> None:
-        await self.registry.warmup()
+    async def warmup_adapters(self, targets: Iterable[str] | None = None) -> None:
+        """Connect adapters ahead of use: only ``targets`` when given, else
+        every adapter the environment declares (see ``AdapterRegistry.warmup``)."""
+        await self.registry.warmup(targets)
 
     async def teardown(self) -> None:
         await self.registry.disconnect_all()
@@ -172,7 +179,15 @@ class WorkerEngine:
         summary: dict = {"run_id": run_id, "phases": {}, "scenarios": []}
 
         # ---- Phase 1: component health checks ----
-        await self.warmup_adapters()
+        # Only the targets this run can dispatch to (its scenarios, their call
+        # sub-scenarios, its fixtures). An environment may declare adapters the
+        # run never uses; probing those would fail a run whose every case
+        # passed (2026-11-13: two unused, unreachable TCP adapters failed a
+        # one-step preview that ran green against its own connection).
+        fixtures = fixtures or {}
+        before = list(fixtures.get("before") or [])
+        after = list(fixtures.get("after") or [])
+        await self.warmup_adapters(batch_targets([*scenarios, *before, *after]))
         health = await self.registry.health_check_all()
         failed_targets = {t for t, ok in health.items() if not ok}
         recovered: list[str] = []
@@ -196,9 +211,6 @@ class WorkerEngine:
             # when the retry saved the run
             summary["phases"]["phase_1"]["recovered"] = recovered
         # ---- Fixtures (before): once, after phase 1, before any scenario ----
-        fixtures = fixtures or {}
-        before = list(fixtures.get("before") or [])
-        after = list(fixtures.get("after") or [])
         if before or after:
             summary["fixtures"] = {}
         if before:

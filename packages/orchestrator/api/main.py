@@ -5728,7 +5728,8 @@ async def execute_node(req: ExecuteNodeRequest) -> dict:
         env = req.environment if req.environment is not None else _load_defaults()[0]
         engine = WorkerEngine(env)
         try:
-            await engine.warmup_adapters()
+            # dial only this node's target, not every adapter in the environment
+            await engine.warmup_adapters({node.get("target", "")})
             try:
                 payload = resolve_value(node.get("payload", {}), context)
             except UnresolvedReferenceError as exc:

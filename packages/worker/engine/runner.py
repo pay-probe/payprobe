@@ -249,6 +249,21 @@ def scenario_targets(scenario: dict) -> set[str]:
     }
 
 
+def batch_targets(scenarios: list[dict]) -> set[str]:
+    """Every adapter target a batch can dispatch to: each scenario's action
+    steps plus the steps of the ``call`` sub-scenarios attached under
+    ``subflows`` (the orchestrator attaches them transitively, so one level of
+    the map holds every reachable sub-scenario). Cleanups reuse their step's
+    target, so they add nothing."""
+    out: set[str] = set()
+    for sc in scenarios:
+        out |= scenario_targets(sc)
+        for sub in (sc.get("subflows") or {}).values():
+            if isinstance(sub, dict):
+                out |= scenario_targets(sub)
+    return out
+
+
 class GraphExecutor:
     """Shared graph/node execution core.
 

@@ -48,6 +48,29 @@ def test_execute_action_node_uses_mock_env(client):
     assert "response" in body
 
 
+def test_execute_action_node_dials_only_its_own_target(client, monkeypatch):
+    """Executing one step warms only that step's target, never every adapter
+    the environment declares (an unreachable neighbour would cost a connect
+    timeout on every click)."""
+    warmed: list = []
+
+    async def _warmup(self, targets=None):
+        warmed.append(targets)
+
+    monkeypatch.setattr(main.WorkerEngine, "warmup_adapters", _warmup)
+    resp = client.post("/nodes/execute", json={
+        "node": {"id": "a", "kind": "action", "target": "pos_ok",
+                 "action": "echo_test", "payload": {}},
+        "context": {},
+        "environment": {"mode": "real", "adapters": {
+            "pos_ok": {"mock": True, "latency_ms": 0},
+            "switch_dead": {"adapter": "tcp", "host": "127.0.0.1", "port": 1},
+        }},
+    })
+    assert resp.status_code == 200
+    assert warmed == [{"pos_ok"}]
+
+
 def test_list_environments(client):
     resp = client.get("/environments")
     assert resp.status_code == 200

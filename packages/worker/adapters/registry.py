@@ -1,6 +1,7 @@
 """AdapterRegistry — resolves target name to adapter instance."""
 
 import logging
+from collections.abc import Iterable
 
 from .base.base_adapter import BaseAdapter
 from .mock.adapter import MockAdapter
@@ -210,11 +211,22 @@ class AdapterRegistry:
             f"Set 'adapter' to one of: {sorted(ADAPTER_MAP)}"
         )
 
-    async def warmup(self) -> None:
+    async def warmup(self, targets: Iterable[str] | None = None) -> None:
+        """Connect the environment's adapters ahead of use.
+
+        ``targets`` limits warmup to those instance names (the ones a run's
+        steps actually dispatch to); ``None`` warms every adapter the
+        environment declares (load workers, the playground). Phase 1 checks
+        only what was warmed, so an unused, unreachable adapter in the
+        environment no longer fails a run that never touches it.
+        """
         # Best-effort: a target that can't connect must NOT abort the whole run —
         # it surfaces as a phase-1 (component health) failure instead. Otherwise
         # one unreachable host would crash the run before any result is emitted.
+        wanted = None if targets is None else set(targets)
         for target in self.adapter_configs:
+            if wanted is not None and target not in wanted:
+                continue
             try:
                 await self.get(target)
             except Exception as exc:  # noqa: BLE001

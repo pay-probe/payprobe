@@ -74,7 +74,10 @@ ADR-0002 both follow this pattern.
 
 **Where:** `packages/worker/engine/engine.py` (module docstring is the spec).
 
-- **Phase 1 — Components:** `health_check()` on every adapter in the environment.
+- **Phase 1 — Components:** `health_check()` on every adapter the run dispatches to: its scenarios'
+  action steps, their `call` sub-scenarios (`subflows`) and its fixtures (`batch_targets` in
+  `worker/engine/runner.py`). Environment adapters the run never uses are neither dialled nor checked
+  (since 2026-11-13). Load workers and the playground still warm every adapter in the environment.
 - **Phase 2 — Integration:** scenarios with `test_class` in `{"component", "integration"}` (`PHASE_2_CLASSES`).
 - **Phase 3 — End-to-End:** scenarios with `test_class` `"e2e"` (`PHASE_3_CLASSES`).
 

@@ -86,3 +86,74 @@ async def test_phase1_retry_does_not_save_genuinely_dead_target():
     retried = await reg.retry_unhealthy({"switch_dead"})
     assert retried == {"switch_dead": False}
     await reg.disconnect_all()
+
+
+# -- phase 1 checks only what the run dispatches to (2026-11-13) --------------
+
+#: a reachable-by-construction mock target beside the dead TCP one
+MIXED_ENV = {
+    **REAL_ENV,
+    "adapters": {
+        **REAL_ENV["adapters"],
+        "pos_ok": {"mock": True, "latency_ms": 0},
+    },
+}
+
+
+def _one_step(target: str, sid: str = "sc") -> dict:
+    return {
+        "id": sid,
+        "name": sid,
+        "test_class": "e2e",
+        "steps": [{"id": "s1", "target": target, "action": "send_0800", "payload": {}}],
+    }
+
+
+async def test_unused_unreachable_adapter_does_not_fail_the_run():
+    """The environment declares a dead adapter no step targets: phase 1 neither
+    dials nor checks it, and a run whose only case passed is passed."""
+    engine = WorkerEngine(MIXED_ENV, InMemorySink())
+    summary = await engine.run_scenario_batch([_one_step("pos_ok")], run_id="r-unused")
+    p1 = summary["phases"]["phase_1"]
+    assert p1 == {"status": "passed", "components": 1, "failed": []}
+    assert summary["scenarios"][0]["status"] == "passed"
+    assert summary["status"] == "passed"
+
+
+async def test_dead_adapter_reached_only_through_a_call_subflow_is_checked():
+    """A target used only inside a ``call`` sub-scenario still counts as used."""
+    parent = {
+        "id": "parent",
+        "name": "parent",
+        "test_class": "e2e",
+        "steps": [
+            {"id": "s1", "target": "pos_ok", "action": "send_0800", "payload": {}},
+            {"id": "c1", "kind": "call", "config": {"scenario_id": "child"}},
+        ],
+        "subflows": {"child": _one_step("switch_dead", "child")},
+    }
+    engine = WorkerEngine(MIXED_ENV, InMemorySink())
+    summary = await engine.run_scenario_batch([parent], run_id="r-subflow")
+    assert summary["phases"]["phase_1"]["failed"] == ["switch_dead"]
+    # blocking still reads only the scenario's own steps (pre-existing), so the
+    # parent runs and its call fails; the run is failed either way
+    assert summary["status"] == "failed"
+
+
+async def test_dead_adapter_used_only_by_a_fixture_is_checked():
+    engine = WorkerEngine(MIXED_ENV, InMemorySink())
+    summary = await engine.run_scenario_batch(
+        [_one_step("pos_ok")],
+        run_id="r-fixture",
+        fixtures={"after": [_one_step("switch_dead", "teardown")]},
+    )
+    assert summary["phases"]["phase_1"]["failed"] == ["switch_dead"]
+    assert summary["status"] == "failed"
+
+
+async def test_registry_warmup_with_targets_dials_only_those():
+    reg = AdapterRegistry(MIXED_ENV)
+    await reg.warmup({"pos_ok"})
+    health = await reg.health_check_all()
+    assert health == {"pos_ok": True}
+    await reg.disconnect_all()
