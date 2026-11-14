@@ -293,6 +293,118 @@ async def test_m6_then_m8_verifies_mac():
         await sim.stop()
 
 
+async def _send_bytes(port: int, command: str, data: bytes) -> dict:
+    """Send a framed command whose data may hold any byte (a binary MAC block)."""
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    body = f"{HEADER}{command}".encode("ascii") + data
+    writer.write(len(body).to_bytes(2, "big") + body)
+    await writer.drain()
+    prefix = await reader.readexactly(2)
+    text = (await reader.readexactly(int.from_bytes(prefix, "big"))).decode("ascii")
+    writer.close()
+    return {"response": text[4:6], "error": text[6:8], "data": text[8:]}
+
+
+# ISO 9797-1 algorithm 3 over "Now is the time for all " (24 bytes, so padding
+# method 1 adds nothing) under 0123456789ABCDEFFEDCBA9876543210: the retail MAC
+# published with that key and text.
+_VECTOR_KEY = "0123456789ABCDEFFEDCBA9876543210"
+_VECTOR_TEXT = b"Now is the time for all "
+_VECTOR_MAC = "A1C72E74EA3FA9B6"
+
+
+def _mac_head(fmt="0", size="1", algorithm="3", padding="1", key_type="008") -> str:
+    return f"0{fmt}{size}{algorithm}{padding}{key_type}"
+
+
+async def test_m6_in_payshield_layout_gives_the_published_retail_mac():
+    sim, port = await _start()
+    try:
+        zak = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        req = f"{_mac_head()}{zak}{len(_VECTOR_TEXT):04X}".encode("ascii") + _VECTOR_TEXT
+        gen = await _send_bytes(port, "M6", req)
+        assert gen["response"] == "M7" and gen["error"] == "00"
+        assert gen["data"] == _VECTOR_MAC
+
+        ok = await _send_bytes(port, "M8", req + _VECTOR_MAC.encode("ascii"))
+        assert ok["response"] == "M9" and ok["error"] == "00"
+        bad = await _send_bytes(port, "M8", req + b"A1C72E74EA3FA9B7")
+        assert bad["error"] == "01"
+    finally:
+        await sim.stop()
+
+
+async def test_m6_binary_message_keeps_every_byte():
+    sim, port = await _start()
+    try:
+        zak = (await _send(port, "A0", "1008U"))["data"][:33]
+        # high bytes, and the bytes the trailer and LMK-id parsing look for
+        message = bytes([0x02, 0x00, 0xF2, 0x3C, 0x80, 0x19, 0x25, 0xFF, 0x41])
+        req = f"{_mac_head(padding='2')}{zak}{len(message):04X}".encode("ascii") + message
+        gen = await _send_bytes(port, "M6", req)
+        assert gen["error"] == "00"
+        assert gen["data"] == ct.retail_mac(sim.ctx.lmk.unwrap(zak), message.hex())["mac"]
+
+        ok = await _send_bytes(port, "M8", req + gen["data"].encode("ascii"))
+        assert ok["error"] == "00"
+    finally:
+        await sim.stop()
+
+
+async def test_m6_hex_input_algorithm_1_and_short_mac():
+    from Crypto.Cipher import DES3
+
+    sim, port = await _start()
+    try:
+        zak = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        message = _VECTOR_TEXT.hex().upper()
+        head = _mac_head(fmt="1", size="0", algorithm="1", key_type="003")
+        gen = await _send(port, "M6", f"{head}{zak}{len(message):04X}{message}")
+        assert gen["error"] == "00"
+        cbc = DES3.new(bytes.fromhex(_VECTOR_KEY), DES3.MODE_CBC, iv=b"\x00" * 8)
+        assert gen["data"] == cbc.encrypt(_VECTOR_TEXT)[-8:].hex().upper()[:8]
+
+        ok = await _send(port, "M8", f"{head}{zak}{len(message):04X}{message}{gen['data']}")
+        assert ok["error"] == "00"
+    finally:
+        await sim.stop()
+
+
+async def test_m6_in_payshield_layout_refuses_what_doesnt_hold():
+    sim, port = await _start()
+    try:
+        zak = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        # no padding asked for, and the message isn't a whole number of blocks
+        unpadded = f"{_mac_head(padding='0')}{zak}0003".encode("ascii") + b"abc"
+        assert (await _send_bytes(port, "M6", unpadded))["error"] == "15"
+        # a length longer than the message sent
+        short = f"{_mac_head()}{zak}0010".encode("ascii") + b"abc"
+        assert (await _send_bytes(port, "M6", short))["error"] == "15"
+    finally:
+        await sim.stop()
+
+
+async def test_a8_exports_under_the_zmk_as_the_other_side_takes_it_in():
+    sim, port = await _start()
+    try:
+        # The test ZMK exported under itself: ECB of each half under the ZMK.
+        zmk = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        zak = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        out = await _send(port, "A8", f"008{zmk}{zak}X")
+        assert out["response"] == "A9" and out["error"] == "00"
+        assert out["data"] == "X1A4D672DCA6CB3351FD1B02B237AF9AE" + "08D7B4"
+
+        # A key made here goes out under the ZMK and comes back in through A6.
+        made = (await _send(port, "A0", "1008U"))["data"]
+        key, kcv = made[:33], made[33:39]
+        exported = (await _send(port, "A8", f"008{zmk}{key}X"))["data"]
+        assert exported[-6:] == kcv
+        back = await _send(port, "A6", f"008{zmk}{exported[:-6]}U")
+        assert back["error"] == "00" and back["data"][-6:] == kcv
+    finally:
+        await sim.stop()
+
+
 async def test_unknown_command_errors():
     sim, port = await _start()
     try:
