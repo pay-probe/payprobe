@@ -210,12 +210,33 @@ receive a ZPK/CVK from an acquirer or scheme during key exchange.
   `scheme` (`U`)
 - **Returns:** `key` (LMK token), `kcv`
 
+The key may instead arrive as an ANSI X9 TR-31 key block (version B): `R`
+followed by the block. A block is taken in only as a key of the use bound to
+it: its key usage must fit the key type (`K0` for a ZMK, `P0` for a ZPK or TPK,
+`M0`/`M1`/`M3` for a TAK or ZAK, `C0` for a CVK), its algorithm must be TDES
+and its mode of use must fit its usage. Refusals: `A4` (the block's MAC doesn't
+verify: altered, or under another ZMK), `A6` (usage), `A7` (algorithm), `A8`
+(mode of use), `15` (not a well-formed version B block).
+
 #### `K8` → `K9` — Export a key under a KEK  ·  action `export_key`
 The inverse of import: take a key held under the LMK and re-encrypt it under a
 shared KEK/ZMK so it can be sent to another party.
 
 - **Params:** `key_type` (`402`), `key` (LMK token), `kek` (token), `scheme` (`X`)
-- **Returns:** the key encrypted under the KEK + `kcv`
+- **Returns:** `key` (encrypted under the KEK), `kcv`
+
+#### `A8` → `A9` — Export a key under a ZMK  ·  action `export_key_zmk`
+The counterpart of `A6`: send a key held under the LMK to another party under
+the Zone Master Key you share. The ZMK comes before the key, as payShield
+orders it.
+
+- **Params:** `key_type` (`001`), `zmk` (token), `key` (LMK token), `scheme` (`X`)
+- **Returns:** `key` (encrypted under the ZMK), `kcv`
+
+With `scheme` `R` the key goes out as a TR-31 version B key block under the
+ZMK, bound to its key type's use (`M3`, generate and verify, for a TAK or ZAK;
+`P0` for a ZPK or TPK; `K0` for a ZMK; `C0` for a CVK): `R`, the block, then
+the KCV.
 
 ### Card verification (CVV / CVC)
 
@@ -278,17 +299,27 @@ the acquirer operation for DUKPT-enabled terminals.
 ### Message authentication (MAC)
 
 #### `M6` → `M7` — Generate a MAC  ·  action `generate_mac`
-Compute a retail MAC (ISO 9797-1 algorithm 3) over a data block — used to
-protect the integrity of messages between host and switch.
+Compute an ISO 9797-1 MAC (algorithm 1, or 3: the retail MAC) over a message —
+used to protect the integrity of messages between host and switch.
 
-- **Params:** `key` (MAC key token), `message` (hex data block)
-- **Returns:** `data` = the MAC (16 hex)
+The request is payShield's layout: mode flag `0` (the message in one block),
+input format (`0` binary, `1` hex, `2` text), MAC size (`0` = 8 hex, `1` = 16
+hex), algorithm (`1` or `3`), padding method (`0` none, `1` zeros, `2` `0x80`
+then zeros), key type (`003` TAK, `008` ZAK), the key, the message length (4H,
+characters of the message as sent) and the message. A binary message may hold
+any byte. A request that doesn't open with that head is read in the simulator's
+shorter form, the key then a hex message, and answered with the retail MAC
+under padding method 2.
+
+- **Params:** `key` (MAC key token), `message` (hex, or text), optional
+  `key_type` (`008`), `algorithm` (`3`), `padding` (`2`), `mac_size` (`1`)
+- **Returns:** `mac` (8 or 16 hex)
 
 #### `M8` → `M9` — Verify a MAC  ·  action `verify_mac`
-Recompute the MAC over the message and compare to the one supplied.
+Recompute the MAC over the message and compare to the one supplied after it.
 `error_code 00` = intact, `01` = tampered/mismatch.
 
-- **Params:** `key`, `message`, `mac`
+- **Params:** as `generate_mac`, plus `mac`
 
 ### EMV cryptograms
 
@@ -353,7 +384,7 @@ for each operation.
 
 | Code | Key | Used by |
 |---|---|---|
-| `000` | ZMK — Zone Master Key | A6 / K8 (key exchange) |
+| `000` | ZMK — Zone Master Key | A6 / A8 / K8 (key exchange) |
 | `001` | ZPK — Zone PIN Key | CA / CC / EC / G0 |
 | `002` | TPK / PVK / TMK | CA (source), EC (PVK) |
 | `008` | ZAK / TAK — MAC key | M6 / M8 |
