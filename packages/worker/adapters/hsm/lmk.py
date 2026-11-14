@@ -15,7 +15,9 @@ and all payment crypto (CVV, PVV, PIN blocks, MAC) are computed from the *clear*
 key, so they are cryptographically correct and verifiable regardless of the LMK.
 
 Tokens minted here will **not** interoperate with a physical payShield (different
-LMK); that is expected and fine for protocol/integration testing.
+LMK); that is expected and fine for protocol/integration testing. To interoperate
+with an HSM or tool loaded with the published Thales variant test LMK, set
+``lmk_scheme`` to ``"thales-variant"`` (see :class:`TestLmk`).
 """
 
 from __future__ import annotations
@@ -71,14 +73,96 @@ def _set_odd_parity(data: bytes) -> bytes:
     return bytes(out)
 
 
-class TestLmk:
-    """Wraps/unwraps clear keys under a fixed test LMK and mints fresh keys."""
+#: The published Thales double-length variant test LMK: LMK pairs 00-01 to
+#: 38-39, each as its left and right key.
+THALES_TEST_LMK = (
+    ("0101010101010101", "7902CD1FD36EF8BA"),
+    ("2020202020202020", "3131313131313131"),
+    ("4040404040404040", "5151515151515151"),
+    ("6161616161616161", "7070707070707070"),
+    ("8080808080808080", "9191919191919191"),
+    ("A1A1A1A1A1A1A1A1", "B0B0B0B0B0B0B0B0"),
+    ("C1C1010101010101", "D0D0010101010101"),
+    ("E0E0010101010101", "F1F1010101010101"),
+    ("1C587F1C13924FEF", "0101010101010101"),
+    ("0101010101010101", "0101010101010101"),
+    ("0202020202020202", "0404040404040404"),
+    ("0707070707070707", "1010101010101010"),
+    ("1313131313131313", "1515151515151515"),
+    ("1616161616161616", "1919191919191919"),
+    ("1A1A1A1A1A1A1A1A", "1C1C1C1C1C1C1C1C"),
+    ("2323232323232323", "2525252525252525"),
+    ("2626262626262626", "2929292929292929"),
+    ("2A2A2A2A2A2A2A2A", "2C2C2C2C2C2C2C2C"),
+    ("2F2F2F2F2F2F2F2F", "3131313131313131"),
+    ("0101010101010101", "0101010101010101"),
+)
 
-    def __init__(self, lmk_hex: str | None = None, variant_lmk: bool = False) -> None:
+#: Key type -> (LMK pair, as an index into THALES_TEST_LMK; variant number).
+#: The key type's middle and last digits name the LMK pair, its first digit the
+#: variant.
+THALES_KEY_TYPES = {
+    "000": (2, 0),  # ZMK                       LMK 04-05
+    "100": (2, 1),  # ZMK component
+    "200": (2, 2),  # KML
+    "001": (3, 0),  # ZPK                       LMK 06-07
+    "002": (7, 0),  # TPK / PVK / TMK           LMK 14-15
+    "102": (7, 1),
+    "202": (7, 2),
+    "302": (7, 3),  # IKEY / IPEK
+    "402": (7, 4),  # CVK
+    "003": (8, 0),  # TAK                       LMK 16-17
+    "006": (11, 0),  # WWK                      LMK 22-23
+    "008": (13, 0),  # ZAK                      LMK 26-27
+    "009": (14, 0),  # BDK type 1               LMK 28-29
+    "109": (14, 1),  # MK-AC
+    "209": (14, 2),  # MK-SMI
+    "309": (14, 3),  # MK-SMC
+    "409": (14, 4),  # MK-DAC
+    "509": (14, 5),  # MK-DN
+}
+
+#: Variant number -> the byte XORed into the first byte of the LMK pair's left key.
+_THALES_VARIANTS = {1: 0xA6, 2: 0x5A, 3: 0x6A, 4: 0xDE, 5: 0x2B, 6: 0x50, 7: 0x74, 8: 0x9C, 9: 0xFA}
+#: Key scheme -> the byte XORed into the first byte of the pair's right key for
+#: each 8-byte part of the key.
+_THALES_SCHEME_VARIANTS = {"U": (0xA6, 0x5A), "T": (0x6A, 0xDE, 0x2B)}
+
+#: ``lmk_scheme`` value selecting the Thales variant test LMK.
+THALES_VARIANT = "thales-variant"
+
+
+class KeyParityError(ValueError):
+    """A key under the LMK whose clear value doesn't have DES odd parity."""
+
+
+def _has_odd_parity(clear_hex: str) -> bool:
+    return all(b.bit_count() % 2 == 1 for b in bytes.fromhex(clear_hex))
+
+
+class TestLmk:
+    """Wraps/unwraps clear keys under a test LMK and mints fresh keys.
+
+    By default that is a single fixed double-length key (``lmk``), optionally
+    with a per-key-type variant (``variant_lmk``). With ``lmk_scheme`` set to
+    ``"thales-variant"`` it is the published Thales variant test LMK, applied
+    as a payShield applies a variant LMK: the key type picks the LMK pair and
+    its variant, and each part of a double- (``U``) or triple-length (``T``)
+    key is encrypted under the pair with that part's key-scheme variant. Keys
+    then interoperate with any HSM or tool loaded with the same test LMK. A
+    key taken from under it must have DES odd parity, as on a payShield.
+    """
+
+    def __init__(
+        self, lmk_hex: str | None = None, variant_lmk: bool = False, lmk_scheme: str | None = None
+    ) -> None:
         self.lmk_hex = (lmk_hex or DEFAULT_LMK).upper()
         #: when True, keys are wrapped under a per-key-type variant of the LMK,
         #: so the simulator enforces key separation (see ``KEYTYPE_VARIANT``).
         self.variant_lmk = bool(variant_lmk)
+        if lmk_scheme not in (None, "", THALES_VARIANT):
+            raise ValueError(f"unknown lmk_scheme {lmk_scheme!r}")
+        self.thales = lmk_scheme == THALES_VARIANT
 
     def _variant_lmk(self, variant: int) -> str:
         """The LMK with a variant XORed in (a no-op when variant_lmk is off)."""
@@ -91,39 +175,80 @@ class TestLmk:
         )
         return (out + lmk[16:]).hex().upper()
 
+    def _thales_part_keys(self, key_type: str, scheme: str) -> list[str]:
+        """The triple-DES key each 8-byte part of a key of ``key_type`` and
+        ``scheme`` is encrypted under, in the Thales variant test LMK."""
+        if key_type not in THALES_KEY_TYPES:
+            raise ValueError(f"key type {key_type!r} isn't in the test LMK's key type table")
+        if scheme not in _THALES_SCHEME_VARIANTS:
+            raise ValueError(f"key scheme {scheme!r} isn't a U or T key under a variant LMK")
+        pair, variant = THALES_KEY_TYPES[key_type]
+        left, right = (bytearray.fromhex(half) for half in THALES_TEST_LMK[pair])
+        left[0] ^= _THALES_VARIANTS.get(variant, 0)
+        keys = []
+        for scheme_variant in _THALES_SCHEME_VARIANTS[scheme]:
+            part_right = bytearray(right)
+            part_right[0] ^= scheme_variant
+            keys.append((bytes(left) + bytes(part_right) + bytes(left)).hex())
+        return keys
+
+    def _thales(self, hex_in: str, key_type: str, scheme: str, op: str) -> str:
+        keys = self._thales_part_keys(key_type, scheme)
+        if len(hex_in) != 16 * len(keys):
+            raise ValueError(f"a {scheme} key is {8 * len(keys)} bytes")
+        return "".join(
+            ct.des(key, hex_in[16 * i : 16 * (i + 1)], op=op, mode="ecb")["result"]
+            for i, key in enumerate(keys)
+        )
+
     # -- token round-trip ----------------------------------------------------
 
-    def wrap(self, clear_hex: str, scheme: str | None = None, variant: int = 0) -> str:
-        """Clear key (hex) -> key token (scheme tag + ciphertext hex)."""
+    def wrap(self, clear_hex: str, scheme: str | None = None, key_type: str = "") -> str:
+        """Clear key (hex) of ``key_type`` -> key token (scheme tag + ciphertext hex)."""
         clear_hex = clear_hex.upper()
         nbytes = len(clear_hex) // 2
         scheme = scheme or BYTES_SCHEME.get(nbytes, "U")
-        ct_hex = ct.des(self._variant_lmk(variant), clear_hex, op="encrypt", mode="ecb")["result"]
-        return f"{scheme}{ct_hex}"
+        if self.thales:
+            return f"{scheme}{self._thales(clear_hex, key_type, scheme, 'encrypt')}"
+        lmk = self._variant_lmk(variant_for_keytype(key_type))
+        return f"{scheme}{ct.des(lmk, clear_hex, op='encrypt', mode='ecb')['result']}"
 
-    def unwrap(self, token: str, variant: int = 0) -> str:
-        """Key token -> clear key (hex). Accepts a leading scheme tag or bare
-        hex (legacy single/double-length keys carry no tag)."""
+    def unwrap(self, token: str, key_type: str = "") -> str:
+        """Key token of ``key_type`` -> clear key (hex). Accepts a leading
+        scheme tag or bare hex (legacy single/double-length keys carry no tag;
+        the Thales variant test LMK takes only U and T tokens)."""
         token = (token or "").strip()
+        scheme = ""
         if token[:1] in SCHEME_BYTES:
-            token = token[1:]
-        return ct.des(self._variant_lmk(variant), token, op="decrypt", mode="ecb")["result"]
+            scheme, token = token[:1], token[1:]
+        if self.thales:
+            # A payShield checks every DES key it takes from under the LMK.
+            clear = self._thales(token, key_type, scheme, "decrypt")
+            if not _has_odd_parity(clear):
+                raise KeyParityError("the key under the LMK doesn't have odd parity")
+            return clear
+        lmk = self._variant_lmk(variant_for_keytype(key_type))
+        return ct.des(lmk, token, op="decrypt", mode="ecb")["result"]
 
     # -- key generation ------------------------------------------------------
 
-    def generate(self, scheme: str = "U", variant: int = 0) -> tuple[str, str, str]:
+    def generate(self, scheme: str = "U", key_type: str = "") -> tuple[str, str, str]:
         """Mint a random clear key for ``scheme``; return (clear, token, kcv)."""
         nbytes = SCHEME_BYTES.get(scheme, 16)
         raw = secrets.token_bytes(nbytes)
         if scheme not in AES_SCHEMES:  # DES-family keys carry odd parity
             raw = _set_odd_parity(raw)
         clear = raw.hex().upper()
-        return clear, self.wrap(clear, scheme, variant), kcv6(clear)
+        return clear, self.wrap(clear, scheme, key_type), kcv6(clear)
 
     # -- LMK self-check (NC / console "V") -----------------------------------
 
     def check_value(self) -> str:
-        """The 16-digit LMK check value reported by NC / the console V command."""
+        """The 16-digit LMK check value reported by NC / the console V command:
+        8 zero bytes encrypted under the LMK (for the Thales variant test LMK,
+        under LMK pair 00-01)."""
+        if self.thales:
+            return ct.kcv("".join(THALES_TEST_LMK[0]))["full"][:16]
         return ct.kcv(self.lmk_hex)["full"][:16].ljust(16, "0")
 
 

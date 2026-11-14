@@ -50,6 +50,7 @@ A simulator is a JSON config. Every field with its meaning:
 
   // --- optional fidelity / behaviour switches ---
   "variant_lmk": false,           // true = enforce key separation (see §7)
+  "lmk_scheme": null,             // "thales-variant" = the Thales test LMK (see §7)
   "pci_hsm": false,               // flag the NO (status) command reports
   "disabled_commands": [],        // e.g. ["CW"] → those commands return error 68
   "commands": {                   // scripted overrides for specific commands
@@ -378,6 +379,16 @@ use it as a ZPK (it decrypts to a different clear key → parity/verification
 error). Turn it on when you want to test that your host uses the right key type
 for each operation.
 
+With `lmk_scheme: "thales-variant"` the simulator holds keys under the published
+Thales double-length variant test LMK, as a payShield loaded with it does: the
+key type picks the LMK pair and its variant, each half of a `U` key (each third
+of a `T` key) is encrypted with its key-scheme variant, and a key taken from
+under the LMK must have odd parity (error `10`). Tokens then move between the
+simulator and any other HSM or tool loaded with that test LMK, so a host's
+stored key tokens and key check values carry across. `lmk` and `variant_lmk`
+are ignored, only `U` and `T` keys are held, and a key type outside the
+simulator's table is refused with `15`.
+
 ---
 
 ## 8. Common key types
@@ -387,9 +398,10 @@ for each operation.
 | `000` | ZMK — Zone Master Key | A6 / A8 / K8 (key exchange) |
 | `001` | ZPK — Zone PIN Key | CA / CC / EC / G0 |
 | `002` | TPK / PVK / TMK | CA (source), EC (PVK) |
-| `008` | ZAK / TAK — MAC key | M6 / M8 |
+| `003` | TAK — terminal MAC key | M6 / M8 |
+| `008` | ZAK — zone MAC key | M6 / M8 |
+| `009` | BDK — DUKPT base key (`302` also works without `lmk_scheme`) | G0 |
 | `109` | MK-AC — EMV issuer master key | KQ |
-| `302` | BDK / IPEK — DUKPT base key | G0 |
 | `402` | CVK — Card Verification Key | CW / CY |
 
 Key **schemes** (the token's leading tag): `U` = double-length TDES (32 hex),

@@ -109,6 +109,14 @@ Additional options:
   variant of the LMK, so the simulator enforces *key separation*: a key minted
   as a CVK won't check out when a command treats it as a ZPK. Off by default
   (all key types share one variant, which is simpler for protocol testing).
+- `lmk_scheme` (`"thales-variant"`) — use the published Thales double-length
+  variant test LMK instead of `lmk`, applied as a payShield applies a variant
+  LMK: the key type picks the LMK pair and its variant, and each half (or
+  third) of a `U` (or `T`) key has its key-scheme variant. Key tokens then
+  interoperate with any HSM or tool loaded with the same test LMK, keys taken
+  from under it must have odd parity (error `10` otherwise), and `NC` reports 8
+  zero bytes encrypted under LMK pair 00-01. Only `U` and `T` keys, and the key
+  types in the simulator's table, are held under it (error `15` otherwise).
 - `disabled_commands` (list) — command codes that should return error `68`, to
   exercise host-side handling of disabled commands.
 - `pci_hsm` (bool) — the PCI-HSM compliance flag the `NO` (HSM status) command

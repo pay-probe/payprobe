@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 from ...engine import crypto_tools as ct
 from . import key_block
-from .lmk import TestLmk, kcv6, read_key_field, variant_for_keytype
+from .lmk import KeyParityError, TestLmk, kcv6, read_key_field
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +110,8 @@ def dispatch(ctx: HsmContext, cmd: str, data: str) -> tuple[str, str]:
         return ERR_NO_COMMAND, ""
     try:
         return handler(ctx, data)
+    except KeyParityError:
+        return ERR_PARITY, ""
     except Exception as exc:  # noqa: BLE001 — a bad request is a client error, not a crash
         log.debug("payShield %s handler error: %s", cmd, exc)
         return ERR_INVALID_DATA, ""
@@ -162,15 +164,15 @@ def _a0(ctx: HsmContext, data: str) -> tuple[str, str]:
     data = _trim_trailer(data)
     keytype = data[1:4]
     scheme = data[4] if data[4:5] in ("U", "T", "X", "Y", "Z", "R", "W") else "U"
-    _, token, kcv = ctx.lmk.generate(scheme, variant_for_keytype(keytype))
+    _, token, kcv = ctx.lmk.generate(scheme, keytype)
     out = token
     # optional export: ';' + flag + ZMK token + export scheme
     tail = data[5:]
     if tail[:1] == ";" and tail[1:2] == "1":
         zmk_token, after = read_key_field(tail[2:])
         export_scheme = after[:1] if after[:1] in ("U", "T", "X") else "X"
-        clear = ctx.lmk.unwrap(token, variant_for_keytype(keytype))
-        zmk_clear = ctx.lmk.unwrap(zmk_token, variant_for_keytype("000"))
+        clear = ctx.lmk.unwrap(token, keytype)
+        zmk_clear = ctx.lmk.unwrap(zmk_token, "000")
         export_ct = ct.des(zmk_clear, clear, op="encrypt", mode="ecb")["result"]
         out += f"{export_scheme}{export_ct}"
     return ERR_OK, out + kcv
@@ -189,18 +191,18 @@ def _bu(ctx: HsmContext, data: str) -> tuple[str, str]:
     body = _trim_trailer(data)
     keytype = _bu_keytype3(body[:2])
     token, _ = read_key_field(body[3:])  # after 2-digit type code + length flag
-    clear = ctx.lmk.unwrap(token, variant_for_keytype(keytype))
+    clear = ctx.lmk.unwrap(token, keytype)
     return ERR_OK, kcv6(clear)
 
 
-_CVK_VARIANT = variant_for_keytype("402")
+_CVK = "402"
 
 
 @command("CW")
 def _cw(ctx: HsmContext, data: str) -> tuple[str, str]:
     """Generate a Card Verification Code/Value (Visa CVV / Mastercard CVC)."""
     token, rest = read_key_field(_trim_trailer(data))
-    cvk = ctx.lmk.unwrap(token, _CVK_VARIANT)
+    cvk = ctx.lmk.unwrap(token, _CVK)
     pan, expiry, sc = _read_cvv_data(rest)
     return ERR_OK, ct.cvv(pan, expiry, sc, cvk)["cvv"]
 
@@ -209,7 +211,7 @@ def _cw(ctx: HsmContext, data: str) -> tuple[str, str]:
 def _cy(ctx: HsmContext, data: str) -> tuple[str, str]:
     """Verify a CVV/CVC. Error 01 on mismatch."""
     token, rest = read_key_field(_trim_trailer(data))
-    cvk = ctx.lmk.unwrap(token, _CVK_VARIANT)
+    cvk = ctx.lmk.unwrap(token, _CVK)
     supplied, rest = rest[:3], rest[3:]
     pan, expiry, sc = _read_cvv_data(rest)
     expected = ct.cvv(pan, expiry, sc, cvk)["cvv"]
@@ -228,7 +230,7 @@ def _ca(ctx: HsmContext, data: str) -> tuple[str, str]:
     zpk_t, body = read_key_field(body)
     body = body[2:]  # max PIN length (2N)
     src_fmt, dst_fmt, pin_block, pan = _split_translate_tail(body)
-    tpk, zpk = ctx.lmk.unwrap(tpk_t), ctx.lmk.unwrap(zpk_t)
+    tpk, zpk = ctx.lmk.unwrap(tpk_t, "002"), ctx.lmk.unwrap(zpk_t, "001")
     pin = ct.pin_block_decode(pin_block, pan, tpk, _pin_fmt(src_fmt))["pin"]
     if not pin:
         return ERR_INVALID_DATA, ""
@@ -249,7 +251,7 @@ def _ec(ctx: HsmContext, data: str) -> tuple[str, str]:
     fmt, body = body[:2], body[2:]  # PIN block format code
     pan, body = body[:12], body[12:]
     pvki, supplied = body[:1], body[1:5]
-    zpk, pvk = ctx.lmk.unwrap(zpk_t), ctx.lmk.unwrap(pvk_t)
+    zpk, pvk = ctx.lmk.unwrap(zpk_t, "001"), ctx.lmk.unwrap(pvk_t, "002")
     pin = ct.pin_block_decode(pin_block, pan, zpk, _pin_fmt(fmt))["pin"]
     if not pin:
         return ERR_INVALID_DATA, ""
@@ -257,7 +259,7 @@ def _ec(ctx: HsmContext, data: str) -> tuple[str, str]:
     return (ERR_OK if supplied == expected else ERR_VERIFY_FAIL), ""
 
 
-def _ibm_pin_verify_layout(ctx: HsmContext, data: str, pin_key_variant: int):
+def _ibm_pin_verify_layout(ctx: HsmContext, data: str, pin_key_type: str):
     """Shared parser for the IBM-method verify commands (BA terminal / BE
     interchange). Both carry:
 
@@ -265,7 +267,7 @@ def _ibm_pin_verify_layout(ctx: HsmContext, data: str, pin_key_variant: int):
         <validation data 16H><offset ...>
 
     They differ only in which key encrypts the incoming PIN block (a TPK for BA,
-    a ZPK for BE) — hence the ``pin_key_variant``. Returns the verify verdict."""
+    a ZPK for BE) — hence the ``pin_key_type``. Returns the verify verdict."""
     body = _trim_trailer(data)
     pin_key_t, body = read_key_field(body)
     pvk_t, body = read_key_field(body)
@@ -275,8 +277,8 @@ def _ibm_pin_verify_layout(ctx: HsmContext, data: str, pin_key_variant: int):
     dec_table, body = body[:16], body[16:]
     val_data, body = body[:16], body[16:]
     offset = body  # remaining digits are the stored offset
-    pin_key = ctx.lmk.unwrap(pin_key_t, pin_key_variant)
-    pvk = ctx.lmk.unwrap(pvk_t)
+    pin_key = ctx.lmk.unwrap(pin_key_t, pin_key_type)
+    pvk = ctx.lmk.unwrap(pvk_t, "002")
     pin = ct.pin_block_decode(pin_block, pan, pin_key, _pin_fmt(fmt))["pin"]
     if not pin:
         return ERR_INVALID_DATA, ""
@@ -300,7 +302,7 @@ def _de(ctx: HsmContext, data: str) -> tuple[str, str]:
     pan, body = body[:12], body[12:]
     dec_table, body = body[:16], body[16:]
     val_data = body[:16]
-    tpk, pvk = ctx.lmk.unwrap(tpk_t), ctx.lmk.unwrap(pvk_t)
+    tpk, pvk = ctx.lmk.unwrap(tpk_t, "002"), ctx.lmk.unwrap(pvk_t, "002")
     pin = ct.pin_block_decode(pin_block, pan, tpk, _pin_fmt(fmt))["pin"]
     if not pin:
         return ERR_INVALID_DATA, ""
@@ -310,13 +312,13 @@ def _de(ctx: HsmContext, data: str) -> tuple[str, str]:
 @command("BA")
 def _ba(ctx: HsmContext, data: str) -> tuple[str, str]:
     """Verify a Terminal PIN using the IBM Method (PIN block under a TPK)."""
-    return _ibm_pin_verify_layout(ctx, data, variant_for_keytype("002"))
+    return _ibm_pin_verify_layout(ctx, data, "002")
 
 
 @command("BE")
 def _be(ctx: HsmContext, data: str) -> tuple[str, str]:
     """Verify an Interchange PIN using the IBM Method (PIN block under a ZPK)."""
-    return _ibm_pin_verify_layout(ctx, data, variant_for_keytype("001"))
+    return _ibm_pin_verify_layout(ctx, data, "001")
 
 
 @command("JA")
@@ -332,7 +334,7 @@ def _ja(ctx: HsmContext, data: str) -> tuple[str, str]:
     fmt, body = body[:2], body[2:]  # PIN block format code
     pan, body = body[:12], body[12:]
     pvki = body[:1]
-    zpk, pvk = ctx.lmk.unwrap(zpk_t), ctx.lmk.unwrap(pvk_t)
+    zpk, pvk = ctx.lmk.unwrap(zpk_t, "001"), ctx.lmk.unwrap(pvk_t, "002")
     pin = ct.pin_block_decode(pin_block, pan, zpk, _pin_fmt(fmt))["pin"]
     if not pin:
         return ERR_INVALID_DATA, ""
@@ -366,7 +368,7 @@ def _read_mac_request(ctx: HsmContext, data: str) -> _MacRequest | None:
     key, then the message."""
     if not _MAC_HEAD.match(data[:_MAC_HEAD_LEN]):
         return None
-    fmt, size, algorithm, padding = data[1], data[2], data[3], data[4]
+    fmt, size, algorithm, padding, key_type = data[1], data[2], data[3], data[4], data[5:8]
     token, rest = read_key_field(data[_MAC_HEAD_LEN:])
     length = int(rest[:4], 16)
     block, rest = rest[4 : 4 + length], rest[4 + length :]
@@ -374,7 +376,7 @@ def _read_mac_request(ctx: HsmContext, data: str) -> _MacRequest | None:
         raise ValueError("message shorter than its length")
     message = bytes.fromhex(block) if fmt == "1" else block.encode("latin-1")
     return _MacRequest(
-        key=ctx.lmk.unwrap(token),
+        key=ctx.lmk.unwrap(token, key_type),
         message=message,
         algorithm=int(algorithm),
         padding=int(padding),
@@ -395,7 +397,7 @@ def _m6(ctx: HsmContext, data: str) -> tuple[str, str]:
     if req is None:  # the shorter form: the retail MAC, padding method 2
         token, rest = read_key_field(_trim_trailer(data))
         msg_hex = rest if _is_hex(rest) else rest.encode("ascii").hex().upper()
-        return ERR_OK, ct.retail_mac(ctx.lmk.unwrap(token), msg_hex)["mac"]
+        return ERR_OK, ct.retail_mac(ctx.lmk.unwrap(token, "008"), msg_hex)["mac"]
     return ERR_OK, _mac_of(req)
 
 
@@ -408,7 +410,7 @@ def _m8(ctx: HsmContext, data: str) -> tuple[str, str]:
         token, rest = read_key_field(_trim_trailer(data))
         supplied, msg = rest[-16:], rest[:-16]
         msg_hex = msg if _is_hex(msg) else msg.encode("ascii").hex().upper()
-        expected = ct.retail_mac(ctx.lmk.unwrap(token), msg_hex)["mac"]
+        expected = ct.retail_mac(ctx.lmk.unwrap(token, "008"), msg_hex)["mac"]
     else:
         supplied = _trim_trailer(req.rest)[: req.mac_hex_len]
         expected = _mac_of(req)
@@ -433,7 +435,7 @@ def _cc(ctx: HsmContext, data: str) -> tuple[str, str]:
     dst_t, body = read_key_field(body)
     body = body[2:]  # max PIN length
     src_fmt, dst_fmt, pin_block, pan = _split_translate_tail(body)
-    src, dst = ctx.lmk.unwrap(src_t), ctx.lmk.unwrap(dst_t)
+    src, dst = ctx.lmk.unwrap(src_t, "001"), ctx.lmk.unwrap(dst_t, "001")
     pin = ct.pin_block_decode(pin_block, pan, src, _pin_fmt(src_fmt))["pin"]
     if not pin:
         return ERR_INVALID_DATA, ""
@@ -512,7 +514,7 @@ def _a6(ctx: HsmContext, data: str) -> tuple[str, str]:
     body = _trim_trailer(data)
     keytype, body = body[:3], body[3:]
     zmk_t, body = read_key_field(body)
-    zmk_clear = ctx.lmk.unwrap(zmk_t, variant_for_keytype("000"))
+    zmk_clear = ctx.lmk.unwrap(zmk_t, "000")
     in_block = _read_key_block(body)
     if in_block is not None:
         block, body = in_block
@@ -525,15 +527,15 @@ def _a6(ctx: HsmContext, data: str) -> tuple[str, str]:
             enc_key = enc_key[1:]
         clear = ct.des(zmk_clear, enc_key, op="decrypt", mode="ecb")["result"]
     scheme = body[:1] if body[:1] in ("U", "T", "X", "Y", "Z") else "U"
-    token = ctx.lmk.wrap(clear, scheme, variant_for_keytype(keytype))
+    token = ctx.lmk.wrap(clear, scheme, keytype)
     return ERR_OK, token + kcv6(clear)
 
 
 def _export(ctx: HsmContext, keytype: str, key_t: str, kek_t: str, scheme: str) -> tuple[str, str]:
     """A key held under the LMK, re-encrypted under a KEK/ZMK held under the
     LMK: the key under the KEK, behind its key-scheme tag, then its KCV."""
-    clear = ctx.lmk.unwrap(key_t, variant_for_keytype(keytype))
-    kek_clear = ctx.lmk.unwrap(kek_t, variant_for_keytype("000"))
+    clear = ctx.lmk.unwrap(key_t, keytype)
+    kek_clear = ctx.lmk.unwrap(kek_t, "000")
     enc = ct.des(kek_clear, clear, op="encrypt", mode="ecb")["result"]
     return ERR_OK, f"{scheme}{enc}" + kcv6(clear)
 
@@ -582,8 +584,8 @@ def _export_key_block(ctx: HsmContext, keytype: str, key_t: str, zmk_t: str) -> 
     use = _KEY_BLOCK_USE.get(keytype)
     if use is None:
         return ERR_KB_USAGE, ""
-    clear = ctx.lmk.unwrap(key_t, variant_for_keytype(keytype))
-    zmk_clear = ctx.lmk.unwrap(zmk_t, variant_for_keytype("000"))
+    clear = ctx.lmk.unwrap(key_t, keytype)
+    zmk_clear = ctx.lmk.unwrap(zmk_t, "000")
     header = key_block.Header(key_block.VERSION_B, use[0], "T", use[2])
     block = key_block.wrap(bytes.fromhex(zmk_clear), header, bytes.fromhex(clear))
     return ERR_OK, f"R{block}" + kcv6(clear)
@@ -602,8 +604,8 @@ def _g0(ctx: HsmContext, data: str) -> tuple[str, str]:
     zpk_t, body = read_key_field(body)
     ksn, body = body[:20], body[20:]
     src_fmt, dst_fmt, pin_block, pan = _split_translate_tail(body)
-    bdk = ctx.lmk.unwrap(bdk_t, variant_for_keytype("302"))
-    zpk = ctx.lmk.unwrap(zpk_t)
+    bdk = ctx.lmk.unwrap(bdk_t, "009")
+    zpk = ctx.lmk.unwrap(zpk_t, "001")
     pek = ct.dukpt_derive_key(bdk_hex=bdk, ksn_hex=ksn, variant="pin")["key"]
     pin = ct.pin_block_decode(pin_block, pan, pek, _pin_fmt(src_fmt))["pin"]
     if not pin:
@@ -612,7 +614,7 @@ def _g0(ctx: HsmContext, data: str) -> tuple[str, str]:
     return ERR_OK, f"{len(pin):02d}{out_block}"
 
 
-_MKAC_VARIANT = variant_for_keytype("109")
+_MKAC = "109"
 
 
 @command("KQ")
@@ -640,7 +642,7 @@ def _kq(ctx: HsmContext, data: str) -> tuple[str, str]:
     arqc_supplied, body = body[:16], body[16:]
     arc = body[:4]
 
-    mkac = ctx.lmk.unwrap(mkac_t, _MKAC_VARIANT)
+    mkac = ctx.lmk.unwrap(mkac_t, _MKAC)
     udk = ct.emv_icc_mk(mkac, pan, psn)["udk"]
     sk = ct.emv_session_key(udk, atc)["session_key"]
     check = ct.arqc(sk, txn, expected=arqc_supplied)

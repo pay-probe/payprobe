@@ -8,6 +8,9 @@ CA decodes back to the same PIN, EC verifies a PVV, and M6/M8 round-trip a MAC.
 
 import asyncio
 
+import pytest
+
+from worker.adapters.hsm import lmk
 from worker.adapters.hsm.payshield import PayShieldSimulator
 from worker.engine import crypto_tools as ct
 
@@ -471,6 +474,68 @@ async def test_a8_sends_a_key_block_the_other_side_takes_in():
         await sim.stop()
 
 
+_THALES = {"host": "127.0.0.1", "port": 0, "lmk_scheme": "thales-variant"}
+# The test ZMK, 0123456789ABCDEFFEDCBA9876543210 (check value 08D7B4), under
+# the Thales variant test LMK as a ZMK (key type 000).
+_ZMK_UNDER_THALES_TEST_LMK = "U42BBE7D9A0A55D0EBDE055DE2791ACCD"
+
+
+async def test_thales_test_lmk_opens_a_key_made_under_it_elsewhere():
+    sim, port = await _start(_THALES)
+    try:
+        chk = await _send(port, "BU", "001" + _ZMK_UNDER_THALES_TEST_LMK)
+        assert chk["error"] == "00" and chk["data"] == "08D7B4"
+        assert sim.ctx.lmk.unwrap(_ZMK_UNDER_THALES_TEST_LMK, "000") == _VECTOR_KEY
+        assert sim.ctx.lmk.wrap(_VECTOR_KEY, "U", "000") == _ZMK_UNDER_THALES_TEST_LMK
+
+        # the key types are kept apart: as a ZPK the same token opens to a
+        # value without odd parity, which is refused
+        with pytest.raises(lmk.KeyParityError):
+            sim.ctx.lmk.unwrap(_ZMK_UNDER_THALES_TEST_LMK, "001")
+        nc = await _send(port, "NC")
+        assert nc["data"][:16] == sim.ctx.lmk.check_value()
+    finally:
+        await sim.stop()
+
+
+async def test_thales_test_lmk_carries_a_key_exchange_end_to_end():
+    sim, port = await _start(_THALES)
+    try:
+        zmk = _ZMK_UNDER_THALES_TEST_LMK
+        took = await _send(port, "A6", f"008{zmk}X1A4D672DCA6CB3351FD1B02B237AF9AE" + "U")
+        assert took["error"] == "00" and took["data"][33:] == "08D7B4"
+        zak = took["data"][:33]
+        req = f"{_mac_head()}{zak}{len(_VECTOR_TEXT):04X}".encode("ascii") + _VECTOR_TEXT
+        assert (await _send_bytes(port, "M6", req))["data"] == _VECTOR_MAC
+
+        made = (await _send(port, "A0", "1008U"))["data"]
+        out = await _send(port, "A8", f"008{zmk}{made[:33]}R")
+        assert out["error"] == "00" and out["data"][-6:] == made[33:39]
+
+        cvk = (await _send(port, "A0", "1402T"))["data"][:49]
+        pan, expiry, sc = "4000000000000002", "2512", "000"
+        cvv = (await _send(port, "CW", f"{cvk}{pan};{expiry}{sc}"))["data"]
+        assert (await _send(port, "CY", f"{cvk}{cvv}{pan};{expiry}{sc}"))["error"] == "00"
+    finally:
+        await sim.stop()
+
+
+async def test_thales_test_lmk_refuses_what_it_cant_hold():
+    sim, port = await _start(_THALES)
+    try:
+        # a key type the table doesn't name, and a single-length key
+        assert (await _send(port, "A0", "1999U"))["error"] == "15"
+        assert (await _send(port, "A0", "1001Z"))["error"] == "15"
+        # a ZMK whose clear value doesn't have odd parity
+        zeros = "U" + "0" * 32
+        took = await _send(port, "A6", f"008{zeros}X1A4D672DCA6CB3351FD1B02B237AF9AE" + "U")
+        assert took["error"] == "10"
+    finally:
+        await sim.stop()
+    with pytest.raises(ValueError):
+        lmk.TestLmk(lmk_scheme="thales")
+
+
 async def test_unknown_command_errors():
     sim, port = await _start()
     try:
@@ -551,7 +616,7 @@ async def test_kq_arqc_verify_and_arpc():
     sim, port = await _start()
     try:
         mkac = (await _send(port, "A0", "1109U"))["data"][:33]
-        clear_mkac = sim.ctx.lmk.unwrap(mkac, 1)  # MK-AC variant
+        clear_mkac = sim.ctx.lmk.unwrap(mkac, "109")  # MK-AC
         pan, psn, atc, txn = "4000000000000002", "00", "0001", "0000001000"
         udk = ct.emv_icc_mk(clear_mkac, pan, psn)["udk"]
         sk = ct.emv_session_key(udk, atc)["session_key"]

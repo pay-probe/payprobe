@@ -23,6 +23,8 @@ Config (JSON-friendly)::
       "framing": { "length_prefix_bytes": 2, "length_byte_order": "big",
                    "encoding": "ascii" },
       "lmk": "0123456789ABCDEFFEDCBA9876543210",   # optional test LMK override
+      "lmk_scheme": "thales-variant",               # optional: the published Thales
+                                                    # variant test LMK instead
       "firmware": "0007-E000",                      # optional NC firmware string
       "commands": {                                 # optional scripted overrides
         "NC": { "error": "00", "data": "..." }      # force a command's reply
@@ -66,7 +68,11 @@ class PayShieldSimulator(TcpResponder):
             config.get("header_bytes", config.get("header_echo", {}).get("header_bytes", 4))
         )
         self.ctx = HsmContext(
-            lmk=TestLmk(config.get("lmk"), variant_lmk=bool(config.get("variant_lmk", False))),
+            lmk=TestLmk(
+                config.get("lmk"),
+                variant_lmk=bool(config.get("variant_lmk", False)),
+                lmk_scheme=config.get("lmk_scheme"),
+            ),
             firmware=config.get("firmware", commands.DEFAULT_FIRMWARE),
             overrides=dict(config.get("commands") or {}),
             disabled_commands={c.upper() for c in (config.get("disabled_commands") or [])},
