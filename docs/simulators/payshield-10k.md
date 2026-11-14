@@ -29,8 +29,8 @@ The following commands are implemented:
 | `CY` | `CZ` | Verify a CVV / CVC | real |
 | `CA` | `CB` | Translate a PIN block from TPK to ZPK (ISO-0) | real |
 | `EC` | `ED` | Verify an interchange PIN (Visa PVV method) | real |
-| `M6` | `M7` | Generate a retail MAC (ISO 9797-1 alg. 3) | real |
-| `M8` | `M9` | Verify a retail MAC | real |
+| `M6` | `M7` | Generate a MAC (ISO 9797-1 alg. 1 or 3) | real |
+| `M8` | `M9` | Verify a MAC | real |
 | `CC` | `CD` | Translate a PIN block from one ZPK to another | real |
 | `A6` | `A7` | Import a key encrypted under a ZMK | real KCV |
 | `K8` | `K9` | Export a key under a KEK/ZMK | real KCV |

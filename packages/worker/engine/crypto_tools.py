@@ -149,6 +149,46 @@ def retail_mac(key_hex: str, data_hex: str) -> dict:
     return {"mac": h.hex().upper(), "mac4": h.hex().upper()[:8]}
 
 
+def iso9797_pad(data: bytes, method: int) -> bytes:
+    """Pad ``data`` by ISO 9797-1 padding method 1 (zeros to a whole block, one
+    block of zeros for empty data) or 2 (0x80, then zeros). Method 0 adds
+    nothing, so the data must already be a whole number of blocks."""
+    if method == 1:
+        if data and len(data) % 8 == 0:
+            return data
+        return data + b"\x00" * (8 - len(data) % 8)
+    if method == 2:
+        return _pad_m2(data)
+    if method == 0:
+        if not data or len(data) % 8:
+            raise ValueError("unpadded MAC data must be a whole number of 8-byte blocks")
+        return data
+    raise ValueError(f"unknown ISO 9797-1 padding method {method}")
+
+
+def iso9797_mac(key_hex: str, padded: bytes, algorithm: int) -> bytes:
+    """ISO 9797-1 MAC over already-padded data. Algorithm 1 chains every block
+    under the whole key (single DES, or triple DES for a double- or
+    triple-length key). Algorithm 3, the retail MAC, chains under the key's
+    first half and finishes the last block under the whole double-length key."""
+    key = _hx(key_hex)
+    if algorithm == 1:
+        cipher = _ecb(key)
+        h = b"\x00" * 8
+        for i in range(0, len(padded), 8):
+            h = cipher.encrypt(bytes(a ^ b for a, b in zip(h, padded[i : i + 8])))
+        return h
+    if algorithm == 3:
+        if len(key) != 16:
+            raise ValueError("the retail MAC takes a double-length key")
+        k1, k2 = key[:8], key[8:]
+        h = b"\x00" * 8
+        for i in range(0, len(padded), 8):
+            h = _des_block(k1, bytes(a ^ b for a, b in zip(h, padded[i : i + 8])), True)
+        return _des_block(k1, _des_block(k2, h, False), True)
+    raise ValueError(f"unsupported ISO 9797-1 MAC algorithm {algorithm}")
+
+
 # -- Visa CVV / CVC ----------------------------------------------------------
 
 

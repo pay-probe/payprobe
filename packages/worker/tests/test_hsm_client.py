@@ -7,6 +7,7 @@ payshield_hsm_smoke example scenario exercises.
 
 from worker.adapters.hsm.adapter import HSMAdapter
 from worker.adapters.hsm.payshield import PayShieldSimulator
+from worker.engine import crypto_tools as ct
 
 
 async def _pair():
@@ -61,6 +62,32 @@ async def test_client_key_check_matches_generation():
         )
         assert check.success
         assert check.response_payload["kcv"] == gen.response_payload["kcv"]
+    finally:
+        await cli.disconnect()
+        await sim.stop()
+
+
+async def test_client_mac_generate_verify_in_payshield_layout():
+    sim, cli = await _pair()
+    try:
+        made_key = await cli.execute("generate_key", {"key_type": "008", "scheme": "U"})
+        key = made_key.response_payload["key"]
+        clear = sim.ctx.lmk.unwrap(key)
+        message = "0200F23C0000000000000123"
+        expected = ct.retail_mac(clear, message)["mac"]
+
+        made = await cli.execute("generate_mac", {"key": key, "message": message})
+        assert made.success and made.response_payload["mac"] == expected
+
+        good = await cli.execute("verify_mac", {"key": key, "message": message, "mac": expected})
+        assert good.success and good.response_payload["error_code"] == "00"
+        bad = await cli.execute("verify_mac", {"key": key, "message": message, "mac": "0" * 16})
+        assert not bad.success and bad.response_payload["error_code"] == "01"
+
+        # a message that isn't hex goes as text
+        text_mac = ct.retail_mac(clear, b"Hello".hex())["mac"]
+        text = await cli.execute("verify_mac", {"key": key, "message": "Hello", "mac": text_mac})
+        assert text.success
     finally:
         await cli.disconnect()
         await sim.stop()
