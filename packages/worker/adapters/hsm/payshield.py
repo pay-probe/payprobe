@@ -76,7 +76,10 @@ class PayShieldSimulator(TcpResponder):
     # -- payShield wire: decode / dispatch / encode --------------------------
 
     def _decode(self, body: bytes) -> dict:
-        text = body.decode(self.encoding, errors="replace")
+        # ASCII framing is read as Latin-1, its byte-for-byte superset, so a
+        # binary MAC message block (M6/M8 input format 0) keeps every byte.
+        encoding = "latin-1" if self.encoding.lower() in ("ascii", "us-ascii") else self.encoding
+        text = body.decode(encoding, errors="replace")
         hb = self.header_bytes
         return {
             "header": text[:hb],

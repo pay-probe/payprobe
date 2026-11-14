@@ -17,6 +17,7 @@ key *material* is random and key tokens only round-trip within this simulator
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -333,23 +334,79 @@ def _ja(ctx: HsmContext, data: str) -> tuple[str, str]:
     return ERR_OK, ct.pvv(pan, pin, pvki, pvk)["pvv"]
 
 
+#: The request head of M6/M8 as a payShield sends it: mode flag (0 = the
+#: message in one block), input format (0 binary, 1 hex, 2 text), MAC size
+#: (0 = 8 hex, 1 = 16 hex), ISO 9797-1 MAC algorithm (1 or 3), padding method
+#: (0 none, 1 or 2) and the MAC key's type (003 TAK, 008 ZAK).
+_MAC_HEAD = re.compile(r"0[012][01][13][012](003|008)")
+_MAC_HEAD_LEN = 8
+
+
+@dataclass
+class _MacRequest:
+    key: str  # clear MAC key, hex
+    message: bytes  # the message as sent, before padding
+    algorithm: int
+    padding: int
+    mac_hex_len: int
+    rest: str  # what follows the message block
+
+
+def _read_mac_request(ctx: HsmContext, data: str) -> _MacRequest | None:
+    """Read M6/M8's request in payShield's layout: the head (:data:`_MAC_HEAD`),
+    the MAC key under the LMK, the message length (4H, characters of the
+    message block as sent) and the message block. The block is read by its
+    length, so a binary message may hold any byte. Returns None when ``data``
+    doesn't open with that head, which is the simulator's shorter form: the
+    key, then the message."""
+    if not _MAC_HEAD.match(data[:_MAC_HEAD_LEN]):
+        return None
+    fmt, size, algorithm, padding = data[1], data[2], data[3], data[4]
+    token, rest = read_key_field(data[_MAC_HEAD_LEN:])
+    length = int(rest[:4], 16)
+    block, rest = rest[4 : 4 + length], rest[4 + length :]
+    if len(block) != length:
+        raise ValueError("message shorter than its length")
+    message = bytes.fromhex(block) if fmt == "1" else block.encode("latin-1")
+    return _MacRequest(
+        key=ctx.lmk.unwrap(token),
+        message=message,
+        algorithm=int(algorithm),
+        padding=int(padding),
+        mac_hex_len=16 if size == "1" else 8,
+        rest=rest,
+    )
+
+
+def _mac_of(req: _MacRequest) -> str:
+    padded = ct.iso9797_pad(req.message, req.padding)
+    return ct.iso9797_mac(req.key, padded, req.algorithm).hex().upper()[: req.mac_hex_len]
+
+
 @command("M6")
 def _m6(ctx: HsmContext, data: str) -> tuple[str, str]:
-    """Generate a MAC (ISO 9797-1 algorithm 3 / retail MAC) over a data block."""
-    token, rest = read_key_field(_trim_trailer(data))
-    key = ctx.lmk.unwrap(token)
-    msg_hex = rest if _is_hex(rest) else rest.encode("ascii").hex().upper()
-    return ERR_OK, ct.retail_mac(key, msg_hex)["mac"]
+    """Generate a MAC (ISO 9797-1 algorithm 1 or 3) over a message block."""
+    req = _read_mac_request(ctx, data)
+    if req is None:  # the shorter form: the retail MAC, padding method 2
+        token, rest = read_key_field(_trim_trailer(data))
+        msg_hex = rest if _is_hex(rest) else rest.encode("ascii").hex().upper()
+        return ERR_OK, ct.retail_mac(ctx.lmk.unwrap(token), msg_hex)["mac"]
+    return ERR_OK, _mac_of(req)
 
 
 @command("M8")
 def _m8(ctx: HsmContext, data: str) -> tuple[str, str]:
-    """Verify a MAC. The supplied MAC (16H) trails the data block."""
-    token, rest = read_key_field(_trim_trailer(data))
-    key = ctx.lmk.unwrap(token)
-    supplied, msg = rest[-16:], rest[:-16]
-    msg_hex = msg if _is_hex(msg) else msg.encode("ascii").hex().upper()
-    expected = ct.retail_mac(key, msg_hex)["mac"]
+    """Verify a MAC. The supplied MAC follows the message block (8 or 16 hex,
+    by the MAC size); in the shorter form it is the last 16 hex."""
+    req = _read_mac_request(ctx, data)
+    if req is None:
+        token, rest = read_key_field(_trim_trailer(data))
+        supplied, msg = rest[-16:], rest[:-16]
+        msg_hex = msg if _is_hex(msg) else msg.encode("ascii").hex().upper()
+        expected = ct.retail_mac(ctx.lmk.unwrap(token), msg_hex)["mac"]
+    else:
+        supplied = _trim_trailer(req.rest)[: req.mac_hex_len]
+        expected = _mac_of(req)
     return (ERR_OK if supplied.upper() == expected else ERR_VERIFY_FAIL), ""
 
 

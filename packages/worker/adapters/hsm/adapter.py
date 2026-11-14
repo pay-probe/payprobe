@@ -157,12 +157,32 @@ def _b_dukpt_translate_pin(p: dict) -> tuple[str, str]:
     )
 
 
+def _mac_request(p: dict) -> str:
+    """M6/M8's request up to and including the message block, in payShield's
+    layout: mode 0 (one block), input format (hex, or text for a message that
+    isn't hex), MAC size, ISO 9797-1 algorithm, padding method, key type, key,
+    then the message's length and the message. The defaults give the retail
+    MAC with padding method 2 over 16 hex."""
+    message = _kv(p, "message", "data")
+    is_hex = (
+        bool(message)
+        and len(message) % 2 == 0
+        and all(c in "0123456789ABCDEFabcdef" for c in message)
+    )
+    input_format = "1" if is_hex else "2"
+    return (
+        f"0{input_format}{_kv(p, 'mac_size', default='1')}{_kv(p, 'algorithm', default='3')}"
+        f"{_kv(p, 'padding', default='2')}{_kv(p, 'key_type', default='008')}"
+        f"{_kv(p, 'key')}{len(message):04X}{message}"
+    )
+
+
 def _b_generate_mac(p: dict) -> tuple[str, str]:
-    return "M6", f"{_kv(p, 'key')}{_kv(p, 'message', 'data')}"
+    return "M6", _mac_request(p)
 
 
 def _b_verify_mac(p: dict) -> tuple[str, str]:
-    return "M8", f"{_kv(p, 'key')}{_kv(p, 'message', 'data')}{_kv(p, 'mac')}"
+    return "M8", f"{_mac_request(p)}{_kv(p, 'mac')}"
 
 
 def _b_import_key(p: dict) -> tuple[str, str]:
@@ -452,6 +472,8 @@ def _parse_action_result(action: str, parsed: dict) -> dict:
         return {"key": data[:-6] if len(data) > 6 else data, "kcv": data[-6:]}
     if action == "key_check":
         return {"kcv": data[:6]}
+    if action == "generate_mac":
+        return {"mac": data}
     if action in (
         "translate_pin",
         "translate_pin_tpk_zpk",

@@ -278,17 +278,27 @@ the acquirer operation for DUKPT-enabled terminals.
 ### Message authentication (MAC)
 
 #### `M6` → `M7` — Generate a MAC  ·  action `generate_mac`
-Compute a retail MAC (ISO 9797-1 algorithm 3) over a data block — used to
-protect the integrity of messages between host and switch.
+Compute an ISO 9797-1 MAC (algorithm 1, or 3: the retail MAC) over a message —
+used to protect the integrity of messages between host and switch.
 
-- **Params:** `key` (MAC key token), `message` (hex data block)
-- **Returns:** `data` = the MAC (16 hex)
+The request is payShield's layout: mode flag `0` (the message in one block),
+input format (`0` binary, `1` hex, `2` text), MAC size (`0` = 8 hex, `1` = 16
+hex), algorithm (`1` or `3`), padding method (`0` none, `1` zeros, `2` `0x80`
+then zeros), key type (`003` TAK, `008` ZAK), the key, the message length (4H,
+characters of the message as sent) and the message. A binary message may hold
+any byte. A request that doesn't open with that head is read in the simulator's
+shorter form, the key then a hex message, and answered with the retail MAC
+under padding method 2.
+
+- **Params:** `key` (MAC key token), `message` (hex, or text), optional
+  `key_type` (`008`), `algorithm` (`3`), `padding` (`2`), `mac_size` (`1`)
+- **Returns:** `mac` (8 or 16 hex)
 
 #### `M8` → `M9` — Verify a MAC  ·  action `verify_mac`
-Recompute the MAC over the message and compare to the one supplied.
+Recompute the MAC over the message and compare to the one supplied after it.
 `error_code 00` = intact, `01` = tampered/mismatch.
 
-- **Params:** `key`, `message`, `mac`
+- **Params:** as `generate_mac`, plus `mac`
 
 ### EMV cryptograms
 
