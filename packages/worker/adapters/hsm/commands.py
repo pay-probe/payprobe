@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ...engine import crypto_tools as ct
+from . import key_block
 from .lmk import TestLmk, kcv6, read_key_field, variant_for_keytype
 
 log = logging.getLogger(__name__)
@@ -36,6 +37,10 @@ ERR_PARITY = "10"  # key parity error
 ERR_INVALID_DATA = "15"  # invalid input data / parse failure
 ERR_NO_COMMAND = "30"  # message format / unknown command
 ERR_DISABLED = "68"  # command disabled by a security setting
+ERR_KB_MAC = "A4"  # key block authentication failure
+ERR_KB_USAGE = "A6"  # key block's key usage doesn't fit the key type
+ERR_KB_ALGORITHM = "A7"  # key block's algorithm isn't the one the key type takes
+ERR_KB_MODE = "A8"  # key block's mode of use doesn't fit its key usage
 
 #: payShield PIN-block format code (2N) -> ISO 9564-1 format the codec uses.
 #: Codes follow the Thales convention (01 = ISO-0/ANSI X9.8, 05 = ISO-1,
@@ -436,10 +441,70 @@ def _cc(ctx: HsmContext, data: str) -> tuple[str, str]:
     return ERR_OK, f"{len(pin):02d}{out_block}{dst_fmt}"
 
 
+#: Key blocks under a ZMK (key scheme ``R``): for each key type, the TR-31
+#: key usage it is sent with, the usages a received block may carry to be taken
+#: in as that type, and the mode of use it is sent with.
+_KEY_BLOCK_USE: dict[str, tuple[str, tuple[str, ...], str]] = {
+    "000": ("K0", ("K0",), "B"),  # ZMK: key encryption or wrapping
+    "001": ("P0", ("P0",), "B"),  # ZPK: PIN encryption
+    "002": ("P0", ("P0",), "B"),  # TPK: PIN encryption
+    "003": ("M3", ("M0", "M1", "M3"), "C"),  # TAK: MAC
+    "008": ("M3", ("M0", "M1", "M3"), "C"),  # ZAK: MAC
+    "402": ("C0", ("C0",), "C"),  # CVK: card verification
+}
+
+#: The modes of use a received block may carry, by its key usage's first
+#: character: a MAC or card-verification key generates and verifies (C) or
+#: does one of the two; a PIN or key-encryption key encrypts and decrypts (B)
+#: or does one of the two.
+_KEY_BLOCK_MODES = {
+    "M": ("C", "G", "V"),
+    "C": ("C", "G", "V"),
+    "P": ("B", "D", "E"),
+    "K": ("B", "D", "E"),
+}
+
+_KEY_BLOCK_ERRORS = {"mac": ERR_KB_MAC, "format": ERR_INVALID_DATA, "version": ERR_INVALID_DATA}
+
+
+def _read_key_block(body: str) -> tuple[str, str] | None:
+    """A TR-31 key block under the ZMK: ``R``, then the block, whose length is
+    its own characters 2 to 5. Returns the block and what follows, or None
+    when ``body`` doesn't carry one."""
+    if body[:1] != "R" or body[1:2] not in ("A", "B", "C", "D") or not body[2:6].isdigit():
+        return None
+    length = int(body[2:6])
+    if len(body) < 1 + length:
+        raise ValueError("key block longer than the request")
+    return body[1 : 1 + length], body[1 + length :]
+
+
+def _open_key_block(zmk_clear: str, block: str, keytype: str) -> tuple[str, str]:
+    """Open a key block under the clear ZMK and check that it may be taken in
+    as a key of ``keytype``: its usage, algorithm and mode of use. Returns
+    ``(error, clear key hex)``."""
+    use = _KEY_BLOCK_USE.get(keytype)
+    if use is None:
+        return ERR_KB_USAGE, ""
+    try:
+        header, key = key_block.unwrap(bytes.fromhex(zmk_clear), block)
+    except key_block.KeyBlockError as exc:
+        return _KEY_BLOCK_ERRORS[exc.reason], ""
+    if header.usage not in use[1]:
+        return ERR_KB_USAGE, ""
+    if header.algorithm != "T":
+        return ERR_KB_ALGORITHM, ""
+    if header.mode_of_use not in _KEY_BLOCK_MODES[header.usage[0]]:
+        return ERR_KB_MODE, ""
+    return ERR_OK, key.hex().upper()
+
+
 @command("A6")
 def _a6(ctx: HsmContext, data: str) -> tuple[str, str]:
     """Import a Key encrypted under a ZMK. Decrypts the key from the ZMK and
-    re-wraps it under the LMK.
+    re-wraps it under the LMK. The key arrives encrypted under the ZMK, or as
+    a TR-31 key block (``R`` then the block), which is taken in only as a key
+    of the use bound to it.
 
     Layout: <key type 3H><ZMK><key-under-ZMK><LMK key scheme 1A>. Returns the
     imported key token + KCV.
@@ -447,12 +512,19 @@ def _a6(ctx: HsmContext, data: str) -> tuple[str, str]:
     body = _trim_trailer(data)
     keytype, body = body[:3], body[3:]
     zmk_t, body = read_key_field(body)
-    enc_key, body = read_key_field(body)
-    scheme = body[:1] if body[:1] in ("U", "T", "X", "Y", "Z") else "U"
     zmk_clear = ctx.lmk.unwrap(zmk_t, variant_for_keytype("000"))
-    if enc_key[:1] in ("U", "X", "T", "Y", "Z"):
-        enc_key = enc_key[1:]
-    clear = ct.des(zmk_clear, enc_key, op="decrypt", mode="ecb")["result"]
+    in_block = _read_key_block(body)
+    if in_block is not None:
+        block, body = in_block
+        error, clear = _open_key_block(zmk_clear, block, keytype)
+        if error != ERR_OK:
+            return error, ""
+    else:
+        enc_key, body = read_key_field(body)
+        if enc_key[:1] in ("U", "X", "T", "Y", "Z"):
+            enc_key = enc_key[1:]
+        clear = ct.des(zmk_clear, enc_key, op="decrypt", mode="ecb")["result"]
+    scheme = body[:1] if body[:1] in ("U", "T", "X", "Y", "Z") else "U"
     token = ctx.lmk.wrap(clear, scheme, variant_for_keytype(keytype))
     return ERR_OK, token + kcv6(clear)
 
@@ -491,13 +563,30 @@ def _a8(ctx: HsmContext, data: str) -> tuple[str, str]:
     the key.
 
     Layout: <key type 3H><ZMK (LMK)><key (LMK)><ZMK key scheme 1A>. Returns
-    the key encrypted under the ZMK + KCV.
+    the key encrypted under the ZMK + KCV. Key scheme ``R`` sends it as a
+    TR-31 key block instead, bound to its key type's use.
     """
     body = _trim_trailer(data)
     keytype, body = body[:3], body[3:]
     zmk_t, body = read_key_field(body)
     key_t, body = read_key_field(body)
+    if body[:1] == "R":
+        return _export_key_block(ctx, keytype, key_t, zmk_t)
     return _export(ctx, keytype, key_t, zmk_t, _zone_scheme(body))
+
+
+def _export_key_block(ctx: HsmContext, keytype: str, key_t: str, zmk_t: str) -> tuple[str, str]:
+    """A key held under the LMK, sealed in a TR-31 version B key block under
+    the ZMK with the use its key type travels with: ``R``, the block, then the
+    key's KCV."""
+    use = _KEY_BLOCK_USE.get(keytype)
+    if use is None:
+        return ERR_KB_USAGE, ""
+    clear = ctx.lmk.unwrap(key_t, variant_for_keytype(keytype))
+    zmk_clear = ctx.lmk.unwrap(zmk_t, variant_for_keytype("000"))
+    header = key_block.Header(key_block.VERSION_B, use[0], "T", use[2])
+    block = key_block.wrap(bytes.fromhex(zmk_clear), header, bytes.fromhex(clear))
+    return ERR_OK, f"R{block}" + kcv6(clear)
 
 
 @command("G0")

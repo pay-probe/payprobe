@@ -210,6 +210,14 @@ receive a ZPK/CVK from an acquirer or scheme during key exchange.
   `scheme` (`U`)
 - **Returns:** `key` (LMK token), `kcv`
 
+The key may instead arrive as an ANSI X9 TR-31 key block (version B): `R`
+followed by the block. A block is taken in only as a key of the use bound to
+it: its key usage must fit the key type (`K0` for a ZMK, `P0` for a ZPK or TPK,
+`M0`/`M1`/`M3` for a TAK or ZAK, `C0` for a CVK), its algorithm must be TDES
+and its mode of use must fit its usage. Refusals: `A4` (the block's MAC doesn't
+verify: altered, or under another ZMK), `A6` (usage), `A7` (algorithm), `A8`
+(mode of use), `15` (not a well-formed version B block).
+
 #### `K8` → `K9` — Export a key under a KEK  ·  action `export_key`
 The inverse of import: take a key held under the LMK and re-encrypt it under a
 shared KEK/ZMK so it can be sent to another party.
@@ -224,6 +232,11 @@ orders it.
 
 - **Params:** `key_type` (`001`), `zmk` (token), `key` (LMK token), `scheme` (`X`)
 - **Returns:** `key` (encrypted under the ZMK), `kcv`
+
+With `scheme` `R` the key goes out as a TR-31 version B key block under the
+ZMK, bound to its key type's use (`M3`, generate and verify, for a TAK or ZAK;
+`P0` for a ZPK or TPK; `K0` for a ZMK; `C0` for a CVK): `R`, the block, then
+the KCV.
 
 ### Card verification (CVV / CVC)
 

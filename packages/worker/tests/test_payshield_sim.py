@@ -405,6 +405,72 @@ async def test_a8_exports_under_the_zmk_as_the_other_side_takes_it_in():
         await sim.stop()
 
 
+# The vector key in TR-31 version B blocks under itself as the ZMK: as a MAC
+# key (M3, generate and verify), and as a PIN key (P0, encrypt and decrypt).
+_MAC_KEY_BLOCK = "B0096M3TC00N00006797A03C8DCB60D4569D8038F5643C9281FF824C8CF4259E735DBDCF0DE4C03778552358C945FC0F"
+_PIN_KEY_BLOCK = "B0096P0TB00N0000585846A5107156D134BC7E5E89D185645BE86811604C255ADB1AB1CE22B68E298D9366D059BA4E8E"
+
+
+async def test_a6_takes_in_a_key_block_bound_to_its_use():
+    sim, port = await _start()
+    try:
+        zmk = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        took = await _send(port, "A6", f"008{zmk}R{_MAC_KEY_BLOCK}U")
+        assert took["response"] == "A7" and took["error"] == "00"
+        zak, kcv = took["data"][:33], took["data"][33:]
+        assert kcv == "08D7B4"
+        # the imported key signs as the published vector says
+        req = f"{_mac_head()}{zak}{len(_VECTOR_TEXT):04X}".encode("ascii") + _VECTOR_TEXT
+        assert (await _send_bytes(port, "M6", req))["data"] == _VECTOR_MAC
+
+        pin = await _send(port, "A6", f"001{zmk}R{_PIN_KEY_BLOCK}U")
+        assert pin["error"] == "00" and pin["data"][33:] == "08D7B4"
+    finally:
+        await sim.stop()
+
+
+async def test_a6_refuses_a_key_block_that_doesnt_fit():
+    sim, port = await _start()
+    try:
+        zmk = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        other = sim.ctx.lmk.wrap("FEDCBA98765432100123456789ABCDEF", "U")
+        cases = {
+            "a PIN key block taken in as a ZAK": (f"008{zmk}R{_PIN_KEY_BLOCK}U", "A6"),
+            "a block under another ZMK": (f"008{other}R{_MAC_KEY_BLOCK}U", "A4"),
+            "a block whose MAC was changed": (f"008{zmk}R{_MAC_KEY_BLOCK[:-1]}E", "A4"),
+            "a key type that never travels in a block": (f"009{zmk}R{_MAC_KEY_BLOCK}U", "A6"),
+            "a block longer than the request": (f"008{zmk}RB9999{_MAC_KEY_BLOCK[5:]}", "15"),
+        }
+        for name, (req, error) in cases.items():
+            assert (await _send(port, "A6", req))["error"] == error, name
+    finally:
+        await sim.stop()
+
+
+async def test_a8_sends_a_key_block_the_other_side_takes_in():
+    from worker.adapters.hsm import key_block
+
+    sim, port = await _start()
+    try:
+        zmk = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        made = (await _send(port, "A0", "1008U"))["data"]
+        key, kcv = made[:33], made[33:39]
+        out = await _send(port, "A8", f"008{zmk}{key}R")
+        assert out["response"] == "A9" and out["error"] == "00"
+        block = out["data"][1:-6]
+        assert out["data"][0] == "R" and out["data"][-6:] == kcv
+        assert block.startswith("B0096M3TC00N0000")
+        # anyone holding the ZMK opens it with the standard
+        _, clear = key_block.unwrap(bytes.fromhex(_VECTOR_KEY), block)
+        assert clear.hex().upper() == sim.ctx.lmk.unwrap(key)
+
+        back = await _send(port, "A6", f"008{zmk}R{block}U")
+        assert back["error"] == "00" and back["data"][-6:] == kcv
+        assert (await _send(port, "A8", f"009{zmk}{key}R"))["error"] == "A6"
+    finally:
+        await sim.stop()
+
+
 async def test_unknown_command_errors():
     sim, port = await _start()
     try:
