@@ -32,9 +32,9 @@ Config (JSON-friendly)::
 Supported commands: NC (diagnostics), A0 (generate key), BU (key check value),
 CW/CY (generate/verify CVV/CVC), CA/CC/G0 (translate PIN blocks), DE (generate
 IBM 3624 PIN offset), BA/BE (verify terminal/interchange PIN, IBM method), JA
-(generate Visa PVV), EC (verify PIN via PVV), M6/M8 (generate/verify MAC), A6/K8
-(import/export key), KQ (verify ARQC / generate ARPC), NO (HSM status). Unknown
-commands return error ``30``.
+(generate Visa PVV), EC (verify PIN via PVV), M6/M8 (generate/verify MAC), A6
+(import key), A8/K8 (export key), KQ (verify ARQC / generate ARPC), NO (HSM
+status). Unknown commands return error ``30``.
 """
 
 from __future__ import annotations

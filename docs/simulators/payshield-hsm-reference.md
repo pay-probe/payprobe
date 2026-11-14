@@ -215,7 +215,15 @@ The inverse of import: take a key held under the LMK and re-encrypt it under a
 shared KEK/ZMK so it can be sent to another party.
 
 - **Params:** `key_type` (`402`), `key` (LMK token), `kek` (token), `scheme` (`X`)
-- **Returns:** the key encrypted under the KEK + `kcv`
+- **Returns:** `key` (encrypted under the KEK), `kcv`
+
+#### `A8` → `A9` — Export a key under a ZMK  ·  action `export_key_zmk`
+The counterpart of `A6`: send a key held under the LMK to another party under
+the Zone Master Key you share. The ZMK comes before the key, as payShield
+orders it.
+
+- **Params:** `key_type` (`001`), `zmk` (token), `key` (LMK token), `scheme` (`X`)
+- **Returns:** `key` (encrypted under the ZMK), `kcv`
 
 ### Card verification (CVV / CVC)
 
@@ -363,7 +371,7 @@ for each operation.
 
 | Code | Key | Used by |
 |---|---|---|
-| `000` | ZMK — Zone Master Key | A6 / K8 (key exchange) |
+| `000` | ZMK — Zone Master Key | A6 / A8 / K8 (key exchange) |
 | `001` | ZPK — Zone PIN Key | CA / CC / EC / G0 |
 | `002` | TPK / PVK / TMK | CA (source), EC (PVK) |
 | `008` | ZAK / TAK — MAC key | M6 / M8 |

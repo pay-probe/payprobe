@@ -457,6 +457,19 @@ def _a6(ctx: HsmContext, data: str) -> tuple[str, str]:
     return ERR_OK, token + kcv6(clear)
 
 
+def _export(ctx: HsmContext, keytype: str, key_t: str, kek_t: str, scheme: str) -> tuple[str, str]:
+    """A key held under the LMK, re-encrypted under a KEK/ZMK held under the
+    LMK: the key under the KEK, behind its key-scheme tag, then its KCV."""
+    clear = ctx.lmk.unwrap(key_t, variant_for_keytype(keytype))
+    kek_clear = ctx.lmk.unwrap(kek_t, variant_for_keytype("000"))
+    enc = ct.des(kek_clear, clear, op="encrypt", mode="ecb")["result"]
+    return ERR_OK, f"{scheme}{enc}" + kcv6(clear)
+
+
+def _zone_scheme(body: str) -> str:
+    return body[:1] if body[:1] in ("U", "T", "X", "Y", "Z") else "X"
+
+
 @command("K8")
 def _k8(ctx: HsmContext, data: str) -> tuple[str, str]:
     """Export a Key under a KEK/ZMK. Decrypts the key from the LMK and
@@ -469,11 +482,22 @@ def _k8(ctx: HsmContext, data: str) -> tuple[str, str]:
     keytype, body = body[:3], body[3:]
     key_t, body = read_key_field(body)
     kek_t, body = read_key_field(body)
-    scheme = body[:1] if body[:1] in ("U", "T", "X", "Y", "Z") else "X"
-    clear = ctx.lmk.unwrap(key_t, variant_for_keytype(keytype))
-    kek_clear = ctx.lmk.unwrap(kek_t, variant_for_keytype("000"))
-    enc = ct.des(kek_clear, clear, op="encrypt", mode="ecb")["result"]
-    return ERR_OK, f"{scheme}{enc}" + kcv6(clear)
+    return _export(ctx, keytype, key_t, kek_t, _zone_scheme(body))
+
+
+@command("A8")
+def _a8(ctx: HsmContext, data: str) -> tuple[str, str]:
+    """Export a Key under a ZMK, the counterpart of A6: the ZMK comes before
+    the key.
+
+    Layout: <key type 3H><ZMK (LMK)><key (LMK)><ZMK key scheme 1A>. Returns
+    the key encrypted under the ZMK + KCV.
+    """
+    body = _trim_trailer(data)
+    keytype, body = body[:3], body[3:]
+    zmk_t, body = read_key_field(body)
+    key_t, body = read_key_field(body)
+    return _export(ctx, keytype, key_t, zmk_t, _zone_scheme(body))
 
 
 @command("G0")

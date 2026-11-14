@@ -93,6 +93,35 @@ async def test_client_mac_generate_verify_in_payshield_layout():
         await sim.stop()
 
 
+async def test_client_exports_under_a_zmk_and_imports_back():
+    sim, cli = await _pair()
+    try:
+        zmk = await cli.execute("generate_key", {"key_type": "000", "scheme": "U"})
+        zpk = await cli.execute("generate_key", {"key_type": "001", "scheme": "U"})
+        out = await cli.execute(
+            "export_key_zmk",
+            {
+                "key_type": "001",
+                "zmk": zmk.response_payload["key"],
+                "key": zpk.response_payload["key"],
+            },
+        )
+        assert out.success and out.response_payload["kcv"] == zpk.response_payload["kcv"]
+
+        back = await cli.execute(
+            "import_key",
+            {
+                "key_type": "001",
+                "zmk": zmk.response_payload["key"],
+                "key": out.response_payload["key"],
+            },
+        )
+        assert back.success and back.response_payload["kcv"] == zpk.response_payload["kcv"]
+    finally:
+        await cli.disconnect()
+        await sim.stop()
+
+
 async def test_pipelined_concurrent_commands_demux_correctly():
     """Many commands in flight at once over ONE connection are matched back to
     the right caller by their incrementing correlation header."""

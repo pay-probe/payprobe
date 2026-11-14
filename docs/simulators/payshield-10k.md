@@ -34,6 +34,7 @@ The following commands are implemented:
 | `CC` | `CD` | Translate a PIN block from one ZPK to another | real |
 | `A6` | `A7` | Import a key encrypted under a ZMK | real KCV |
 | `K8` | `K9` | Export a key under a KEK/ZMK | real KCV |
+| `A8` | `A9` | Export a key under a ZMK | real KCV |
 | `G0` | `G1` | Translate a PIN block from BDK (3DES DUKPT) to ZPK | real |
 | `KQ` | `KR` | ARQC verification and/or ARPC generation | real |
 | `NO` | `NP` | HSM status (buffer/ethernet/firmware; PCI-HSM flag) | n/a |

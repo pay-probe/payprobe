@@ -199,6 +199,13 @@ def _b_export_key(p: dict) -> tuple[str, str]:
     )
 
 
+def _b_export_key_zmk(p: dict) -> tuple[str, str]:
+    return "A8", (
+        f"{_kv(p, 'key_type', default='001')}{_kv(p, 'zmk')}{_kv(p, 'key')}"
+        f"{_kv(p, 'scheme', default='X')}"
+    )
+
+
 def _b_verify_arqc(p: dict) -> tuple[str, str]:
     txn = _kv(p, "txn_data")
     txnlen = f"{len(txn) // 2:02X}"
@@ -233,6 +240,7 @@ _BUILDERS = {
     "verify_mac": _b_verify_mac,
     "import_key": _b_import_key,
     "export_key": _b_export_key,
+    "export_key_zmk": _b_export_key_zmk,
     "verify_arqc": _b_verify_arqc,
 }
 
@@ -467,7 +475,7 @@ def _parse_action_result(action: str, parsed: dict) -> dict:
         return {"cvv": data[:3]}
     if action in ("nc", "diagnostics"):
         return {"lmk_check": data[:16], "firmware": data[16:25]}
-    if action in ("generate_key", "import_key"):
+    if action in ("generate_key", "import_key", "export_key", "export_key_zmk"):
         # leading key token (scheme tag + hex) then a 6-hex KCV at the end
         return {"key": data[:-6] if len(data) > 6 else data, "kcv": data[-6:]}
     if action == "key_check":

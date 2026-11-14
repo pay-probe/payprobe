@@ -384,6 +384,27 @@ async def test_m6_in_payshield_layout_refuses_what_doesnt_hold():
         await sim.stop()
 
 
+async def test_a8_exports_under_the_zmk_as_the_other_side_takes_it_in():
+    sim, port = await _start()
+    try:
+        # The test ZMK exported under itself: ECB of each half under the ZMK.
+        zmk = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        zak = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        out = await _send(port, "A8", f"008{zmk}{zak}X")
+        assert out["response"] == "A9" and out["error"] == "00"
+        assert out["data"] == "X1A4D672DCA6CB3351FD1B02B237AF9AE" + "08D7B4"
+
+        # A key made here goes out under the ZMK and comes back in through A6.
+        made = (await _send(port, "A0", "1008U"))["data"]
+        key, kcv = made[:33], made[33:39]
+        exported = (await _send(port, "A8", f"008{zmk}{key}X"))["data"]
+        assert exported[-6:] == kcv
+        back = await _send(port, "A6", f"008{zmk}{exported[:-6]}U")
+        assert back["error"] == "00" and back["data"][-6:] == kcv
+    finally:
+        await sim.stop()
+
+
 async def test_unknown_command_errors():
     sim, port = await _start()
     try:

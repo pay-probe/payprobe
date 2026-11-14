@@ -598,7 +598,7 @@ def hsm_command(
     ``hsm_status``, ``generate_key``, ``key_check``, ``generate_cvv``,
     ``verify_cvv``, ``translate_pin``, ``translate_pin_zpk_zpk``, ``verify_pin``,
     ``dukpt_translate_pin``, ``generate_mac``, ``verify_mac``, ``import_key``,
-    ``export_key``, ``verify_arqc`` — with fields in ``params`` (e.g.
+    ``export_key``, ``export_key_zmk``, ``verify_arqc`` — with fields in ``params`` (e.g.
     ``{"cvk": "U..", "pan": "..", "expiry": "2512", "service_code": "000"}``).
     Use ``action="raw"`` with ``command`` (2-char) + ``data`` to send a literal
     command. The response carries ``response_code``, ``error_code``, ``ok`` and
