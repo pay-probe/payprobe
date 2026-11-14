@@ -29,11 +29,12 @@ The following commands are implemented:
 | `CY` | `CZ` | Verify a CVV / CVC | real |
 | `CA` | `CB` | Translate a PIN block from TPK to ZPK (ISO-0) | real |
 | `EC` | `ED` | Verify an interchange PIN (Visa PVV method) | real |
-| `M6` | `M7` | Generate a retail MAC (ISO 9797-1 alg. 3) | real |
-| `M8` | `M9` | Verify a retail MAC | real |
+| `M6` | `M7` | Generate a MAC (ISO 9797-1 alg. 1 or 3) | real |
+| `M8` | `M9` | Verify a MAC | real |
 | `CC` | `CD` | Translate a PIN block from one ZPK to another | real |
-| `A6` | `A7` | Import a key encrypted under a ZMK | real KCV |
+| `A6` | `A7` | Import a key encrypted under a ZMK, or as a TR-31 key block | real KCV |
 | `K8` | `K9` | Export a key under a KEK/ZMK | real KCV |
+| `A8` | `A9` | Export a key under a ZMK, or as a TR-31 key block | real KCV |
 | `G0` | `G1` | Translate a PIN block from BDK (3DES DUKPT) to ZPK | real |
 | `KQ` | `KR` | ARQC verification and/or ARPC generation | real |
 | `NO` | `NP` | HSM status (buffer/ethernet/firmware; PCI-HSM flag) | n/a |
@@ -108,6 +109,14 @@ Additional options:
   variant of the LMK, so the simulator enforces *key separation*: a key minted
   as a CVK won't check out when a command treats it as a ZPK. Off by default
   (all key types share one variant, which is simpler for protocol testing).
+- `lmk_scheme` (`"thales-variant"`) — use the published Thales double-length
+  variant test LMK instead of `lmk`, applied as a payShield applies a variant
+  LMK: the key type picks the LMK pair and its variant, and each half (or
+  third) of a `U` (or `T`) key has its key-scheme variant. Key tokens then
+  interoperate with any HSM or tool loaded with the same test LMK, keys taken
+  from under it must have odd parity (error `10` otherwise), and `NC` reports 8
+  zero bytes encrypted under LMK pair 00-01. Only `U` and `T` keys, and the key
+  types in the simulator's table, are held under it (error `15` otherwise).
 - `disabled_commands` (list) — command codes that should return error `68`, to
   exercise host-side handling of disabled commands.
 - `pci_hsm` (bool) — the PCI-HSM compliance flag the `NO` (HSM status) command

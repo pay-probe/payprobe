@@ -8,6 +8,9 @@ CA decodes back to the same PIN, EC verifies a PVV, and M6/M8 round-trip a MAC.
 
 import asyncio
 
+import pytest
+
+from worker.adapters.hsm import lmk
 from worker.adapters.hsm.payshield import PayShieldSimulator
 from worker.engine import crypto_tools as ct
 
@@ -293,6 +296,246 @@ async def test_m6_then_m8_verifies_mac():
         await sim.stop()
 
 
+async def _send_bytes(port: int, command: str, data: bytes) -> dict:
+    """Send a framed command whose data may hold any byte (a binary MAC block)."""
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    body = f"{HEADER}{command}".encode("ascii") + data
+    writer.write(len(body).to_bytes(2, "big") + body)
+    await writer.drain()
+    prefix = await reader.readexactly(2)
+    text = (await reader.readexactly(int.from_bytes(prefix, "big"))).decode("ascii")
+    writer.close()
+    return {"response": text[4:6], "error": text[6:8], "data": text[8:]}
+
+
+# ISO 9797-1 algorithm 3 over "Now is the time for all " (24 bytes, so padding
+# method 1 adds nothing) under 0123456789ABCDEFFEDCBA9876543210: the retail MAC
+# published with that key and text.
+_VECTOR_KEY = "0123456789ABCDEFFEDCBA9876543210"
+_VECTOR_TEXT = b"Now is the time for all "
+_VECTOR_MAC = "A1C72E74EA3FA9B6"
+
+
+def _mac_head(fmt="0", size="1", algorithm="3", padding="1", key_type="008") -> str:
+    return f"0{fmt}{size}{algorithm}{padding}{key_type}"
+
+
+async def test_m6_in_payshield_layout_gives_the_published_retail_mac():
+    sim, port = await _start()
+    try:
+        zak = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        req = f"{_mac_head()}{zak}{len(_VECTOR_TEXT):04X}".encode("ascii") + _VECTOR_TEXT
+        gen = await _send_bytes(port, "M6", req)
+        assert gen["response"] == "M7" and gen["error"] == "00"
+        assert gen["data"] == _VECTOR_MAC
+
+        ok = await _send_bytes(port, "M8", req + _VECTOR_MAC.encode("ascii"))
+        assert ok["response"] == "M9" and ok["error"] == "00"
+        bad = await _send_bytes(port, "M8", req + b"A1C72E74EA3FA9B7")
+        assert bad["error"] == "01"
+    finally:
+        await sim.stop()
+
+
+async def test_m6_binary_message_keeps_every_byte():
+    sim, port = await _start()
+    try:
+        zak = (await _send(port, "A0", "1008U"))["data"][:33]
+        # high bytes, and the bytes the trailer and LMK-id parsing look for
+        message = bytes([0x02, 0x00, 0xF2, 0x3C, 0x80, 0x19, 0x25, 0xFF, 0x41])
+        req = f"{_mac_head(padding='2')}{zak}{len(message):04X}".encode("ascii") + message
+        gen = await _send_bytes(port, "M6", req)
+        assert gen["error"] == "00"
+        assert gen["data"] == ct.retail_mac(sim.ctx.lmk.unwrap(zak), message.hex())["mac"]
+
+        ok = await _send_bytes(port, "M8", req + gen["data"].encode("ascii"))
+        assert ok["error"] == "00"
+    finally:
+        await sim.stop()
+
+
+async def test_m6_hex_input_algorithm_1_and_short_mac():
+    from Crypto.Cipher import DES3
+
+    sim, port = await _start()
+    try:
+        zak = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        message = _VECTOR_TEXT.hex().upper()
+        head = _mac_head(fmt="1", size="0", algorithm="1", key_type="003")
+        gen = await _send(port, "M6", f"{head}{zak}{len(message):04X}{message}")
+        assert gen["error"] == "00"
+        cbc = DES3.new(bytes.fromhex(_VECTOR_KEY), DES3.MODE_CBC, iv=b"\x00" * 8)
+        assert gen["data"] == cbc.encrypt(_VECTOR_TEXT)[-8:].hex().upper()[:8]
+
+        ok = await _send(port, "M8", f"{head}{zak}{len(message):04X}{message}{gen['data']}")
+        assert ok["error"] == "00"
+    finally:
+        await sim.stop()
+
+
+async def test_m6_in_payshield_layout_refuses_what_doesnt_hold():
+    sim, port = await _start()
+    try:
+        zak = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        # no padding asked for, and the message isn't a whole number of blocks
+        unpadded = f"{_mac_head(padding='0')}{zak}0003".encode("ascii") + b"abc"
+        assert (await _send_bytes(port, "M6", unpadded))["error"] == "15"
+        # a length longer than the message sent
+        short = f"{_mac_head()}{zak}0010".encode("ascii") + b"abc"
+        assert (await _send_bytes(port, "M6", short))["error"] == "15"
+    finally:
+        await sim.stop()
+
+
+async def test_a8_exports_under_the_zmk_as_the_other_side_takes_it_in():
+    sim, port = await _start()
+    try:
+        # The test ZMK exported under itself: ECB of each half under the ZMK.
+        zmk = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        zak = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        out = await _send(port, "A8", f"008{zmk}{zak}X")
+        assert out["response"] == "A9" and out["error"] == "00"
+        assert out["data"] == "X1A4D672DCA6CB3351FD1B02B237AF9AE" + "08D7B4"
+
+        # A key made here goes out under the ZMK and comes back in through A6.
+        made = (await _send(port, "A0", "1008U"))["data"]
+        key, kcv = made[:33], made[33:39]
+        exported = (await _send(port, "A8", f"008{zmk}{key}X"))["data"]
+        assert exported[-6:] == kcv
+        back = await _send(port, "A6", f"008{zmk}{exported[:-6]}U")
+        assert back["error"] == "00" and back["data"][-6:] == kcv
+    finally:
+        await sim.stop()
+
+
+# The vector key in TR-31 version B blocks under itself as the ZMK: as a MAC
+# key (M3, generate and verify), and as a PIN key (P0, encrypt and decrypt).
+_MAC_KEY_BLOCK = "B0096M3TC00N00006797A03C8DCB60D4569D8038F5643C9281FF824C8CF4259E735DBDCF0DE4C03778552358C945FC0F"
+_PIN_KEY_BLOCK = "B0096P0TB00N0000585846A5107156D134BC7E5E89D185645BE86811604C255ADB1AB1CE22B68E298D9366D059BA4E8E"
+
+
+async def test_a6_takes_in_a_key_block_bound_to_its_use():
+    sim, port = await _start()
+    try:
+        zmk = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        took = await _send(port, "A6", f"008{zmk}R{_MAC_KEY_BLOCK}U")
+        assert took["response"] == "A7" and took["error"] == "00"
+        zak, kcv = took["data"][:33], took["data"][33:]
+        assert kcv == "08D7B4"
+        # the imported key signs as the published vector says
+        req = f"{_mac_head()}{zak}{len(_VECTOR_TEXT):04X}".encode("ascii") + _VECTOR_TEXT
+        assert (await _send_bytes(port, "M6", req))["data"] == _VECTOR_MAC
+
+        pin = await _send(port, "A6", f"001{zmk}R{_PIN_KEY_BLOCK}U")
+        assert pin["error"] == "00" and pin["data"][33:] == "08D7B4"
+    finally:
+        await sim.stop()
+
+
+async def test_a6_refuses_a_key_block_that_doesnt_fit():
+    sim, port = await _start()
+    try:
+        zmk = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        other = sim.ctx.lmk.wrap("FEDCBA98765432100123456789ABCDEF", "U")
+        cases = {
+            "a PIN key block taken in as a ZAK": (f"008{zmk}R{_PIN_KEY_BLOCK}U", "A6"),
+            "a block under another ZMK": (f"008{other}R{_MAC_KEY_BLOCK}U", "A4"),
+            "a block whose MAC was changed": (f"008{zmk}R{_MAC_KEY_BLOCK[:-1]}E", "A4"),
+            "a key type that never travels in a block": (f"009{zmk}R{_MAC_KEY_BLOCK}U", "A6"),
+            "a block longer than the request": (f"008{zmk}RB9999{_MAC_KEY_BLOCK[5:]}", "15"),
+        }
+        for name, (req, error) in cases.items():
+            assert (await _send(port, "A6", req))["error"] == error, name
+    finally:
+        await sim.stop()
+
+
+async def test_a8_sends_a_key_block_the_other_side_takes_in():
+    from worker.adapters.hsm import key_block
+
+    sim, port = await _start()
+    try:
+        zmk = sim.ctx.lmk.wrap(_VECTOR_KEY, "U")
+        made = (await _send(port, "A0", "1008U"))["data"]
+        key, kcv = made[:33], made[33:39]
+        out = await _send(port, "A8", f"008{zmk}{key}R")
+        assert out["response"] == "A9" and out["error"] == "00"
+        block = out["data"][1:-6]
+        assert out["data"][0] == "R" and out["data"][-6:] == kcv
+        assert block.startswith("B0096M3TC00N0000")
+        # anyone holding the ZMK opens it with the standard
+        _, clear = key_block.unwrap(bytes.fromhex(_VECTOR_KEY), block)
+        assert clear.hex().upper() == sim.ctx.lmk.unwrap(key)
+
+        back = await _send(port, "A6", f"008{zmk}R{block}U")
+        assert back["error"] == "00" and back["data"][-6:] == kcv
+        assert (await _send(port, "A8", f"009{zmk}{key}R"))["error"] == "A6"
+    finally:
+        await sim.stop()
+
+
+_THALES = {"host": "127.0.0.1", "port": 0, "lmk_scheme": "thales-variant"}
+# The test ZMK, 0123456789ABCDEFFEDCBA9876543210 (check value 08D7B4), under
+# the Thales variant test LMK as a ZMK (key type 000).
+_ZMK_UNDER_THALES_TEST_LMK = "U42BBE7D9A0A55D0EBDE055DE2791ACCD"
+
+
+async def test_thales_test_lmk_opens_a_key_made_under_it_elsewhere():
+    sim, port = await _start(_THALES)
+    try:
+        chk = await _send(port, "BU", "001" + _ZMK_UNDER_THALES_TEST_LMK)
+        assert chk["error"] == "00" and chk["data"] == "08D7B4"
+        assert sim.ctx.lmk.unwrap(_ZMK_UNDER_THALES_TEST_LMK, "000") == _VECTOR_KEY
+        assert sim.ctx.lmk.wrap(_VECTOR_KEY, "U", "000") == _ZMK_UNDER_THALES_TEST_LMK
+
+        # the key types are kept apart: as a ZPK the same token opens to a
+        # value without odd parity, which is refused
+        with pytest.raises(lmk.KeyParityError):
+            sim.ctx.lmk.unwrap(_ZMK_UNDER_THALES_TEST_LMK, "001")
+        nc = await _send(port, "NC")
+        assert nc["data"][:16] == sim.ctx.lmk.check_value()
+    finally:
+        await sim.stop()
+
+
+async def test_thales_test_lmk_carries_a_key_exchange_end_to_end():
+    sim, port = await _start(_THALES)
+    try:
+        zmk = _ZMK_UNDER_THALES_TEST_LMK
+        took = await _send(port, "A6", f"008{zmk}X1A4D672DCA6CB3351FD1B02B237AF9AE" + "U")
+        assert took["error"] == "00" and took["data"][33:] == "08D7B4"
+        zak = took["data"][:33]
+        req = f"{_mac_head()}{zak}{len(_VECTOR_TEXT):04X}".encode("ascii") + _VECTOR_TEXT
+        assert (await _send_bytes(port, "M6", req))["data"] == _VECTOR_MAC
+
+        made = (await _send(port, "A0", "1008U"))["data"]
+        out = await _send(port, "A8", f"008{zmk}{made[:33]}R")
+        assert out["error"] == "00" and out["data"][-6:] == made[33:39]
+
+        cvk = (await _send(port, "A0", "1402T"))["data"][:49]
+        pan, expiry, sc = "4000000000000002", "2512", "000"
+        cvv = (await _send(port, "CW", f"{cvk}{pan};{expiry}{sc}"))["data"]
+        assert (await _send(port, "CY", f"{cvk}{cvv}{pan};{expiry}{sc}"))["error"] == "00"
+    finally:
+        await sim.stop()
+
+
+async def test_thales_test_lmk_refuses_what_it_cant_hold():
+    sim, port = await _start(_THALES)
+    try:
+        # a key type the table doesn't name, and a single-length key
+        assert (await _send(port, "A0", "1999U"))["error"] == "15"
+        assert (await _send(port, "A0", "1001Z"))["error"] == "15"
+        # a ZMK whose clear value doesn't have odd parity
+        zeros = "U" + "0" * 32
+        took = await _send(port, "A6", f"008{zeros}X1A4D672DCA6CB3351FD1B02B237AF9AE" + "U")
+        assert took["error"] == "10"
+    finally:
+        await sim.stop()
+    with pytest.raises(ValueError):
+        lmk.TestLmk(lmk_scheme="thales")
+
+
 async def test_unknown_command_errors():
     sim, port = await _start()
     try:
@@ -373,7 +616,7 @@ async def test_kq_arqc_verify_and_arpc():
     sim, port = await _start()
     try:
         mkac = (await _send(port, "A0", "1109U"))["data"][:33]
-        clear_mkac = sim.ctx.lmk.unwrap(mkac, 1)  # MK-AC variant
+        clear_mkac = sim.ctx.lmk.unwrap(mkac, "109")  # MK-AC
         pan, psn, atc, txn = "4000000000000002", "00", "0001", "0000001000"
         udk = ct.emv_icc_mk(clear_mkac, pan, psn)["udk"]
         sk = ct.emv_session_key(udk, atc)["session_key"]

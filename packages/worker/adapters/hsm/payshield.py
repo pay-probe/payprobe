@@ -23,6 +23,8 @@ Config (JSON-friendly)::
       "framing": { "length_prefix_bytes": 2, "length_byte_order": "big",
                    "encoding": "ascii" },
       "lmk": "0123456789ABCDEFFEDCBA9876543210",   # optional test LMK override
+      "lmk_scheme": "thales-variant",               # optional: the published Thales
+                                                    # variant test LMK instead
       "firmware": "0007-E000",                      # optional NC firmware string
       "commands": {                                 # optional scripted overrides
         "NC": { "error": "00", "data": "..." }      # force a command's reply
@@ -32,9 +34,9 @@ Config (JSON-friendly)::
 Supported commands: NC (diagnostics), A0 (generate key), BU (key check value),
 CW/CY (generate/verify CVV/CVC), CA/CC/G0 (translate PIN blocks), DE (generate
 IBM 3624 PIN offset), BA/BE (verify terminal/interchange PIN, IBM method), JA
-(generate Visa PVV), EC (verify PIN via PVV), M6/M8 (generate/verify MAC), A6/K8
-(import/export key), KQ (verify ARQC / generate ARPC), NO (HSM status). Unknown
-commands return error ``30``.
+(generate Visa PVV), EC (verify PIN via PVV), M6/M8 (generate/verify MAC), A6
+(import key), A8/K8 (export key), KQ (verify ARQC / generate ARPC), NO (HSM
+status). Unknown commands return error ``30``.
 """
 
 from __future__ import annotations
@@ -66,7 +68,11 @@ class PayShieldSimulator(TcpResponder):
             config.get("header_bytes", config.get("header_echo", {}).get("header_bytes", 4))
         )
         self.ctx = HsmContext(
-            lmk=TestLmk(config.get("lmk"), variant_lmk=bool(config.get("variant_lmk", False))),
+            lmk=TestLmk(
+                config.get("lmk"),
+                variant_lmk=bool(config.get("variant_lmk", False)),
+                lmk_scheme=config.get("lmk_scheme"),
+            ),
             firmware=config.get("firmware", commands.DEFAULT_FIRMWARE),
             overrides=dict(config.get("commands") or {}),
             disabled_commands={c.upper() for c in (config.get("disabled_commands") or [])},
@@ -76,7 +82,10 @@ class PayShieldSimulator(TcpResponder):
     # -- payShield wire: decode / dispatch / encode --------------------------
 
     def _decode(self, body: bytes) -> dict:
-        text = body.decode(self.encoding, errors="replace")
+        # ASCII framing is read as Latin-1, its byte-for-byte superset, so a
+        # binary MAC message block (M6/M8 input format 0) keeps every byte.
+        encoding = "latin-1" if self.encoding.lower() in ("ascii", "us-ascii") else self.encoding
+        text = body.decode(encoding, errors="replace")
         hb = self.header_bytes
         return {
             "header": text[:hb],
