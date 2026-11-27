@@ -25,12 +25,42 @@ pre-fills them with a "Demo workspace" notice. It names an existing account and
 creates nothing. Unset (the default), the endpoint is a 404 and the login page
 is unchanged.
 
+**Sign-in by a trusted front door.** When an authenticating proxy (for example
+APISIX's `openid-connect` plugin) already signs people in and checks their role
+before any request reaches PayProbe, set `AUTH_PROXY_HEADER` to the header it
+sets. `GET /proxy-login` then reads that header and issues the same token
+`/token` does, and the portal login page signs straight in without showing its
+form. Unset (the default), the endpoint is a 404.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AUTH_PROXY_HEADER` | unset (off) | Header the proxy sets, e.g. `X-Userinfo`. |
+| `AUTH_PROXY_HEADER_FORMAT` | `userinfo-base64-json` | `userinfo-base64-json`: base64 of the OIDC userinfo JSON (APISIX's `X-Userinfo`). `plain`: the header value is the username. |
+| `AUTH_PROXY_USERNAME_CLAIMS` | `preferred_username,email,sub` | Userinfo claims tried in order; the first non-empty one is the username. |
+| `AUTH_PROXY_ROLES` | `operator` | Roles a proxy-signed person gets. |
+| `AUTH_PROXY_PROJECTS` | empty | `project_ids` a proxy-signed person gets. |
+
+No stored user is needed. If a stored user of that name exists, its roles and
+`project_ids` are used instead, so an admin can still tune one person. A
+missing or undecodable header is a 401.
+
+> **The header is trusted only because the proxy is the only way in.** Turn this
+> on only when clients cannot reach the portal or auth-service around the proxy,
+> and the proxy overwrites or strips any copy of the header a client sends.
+> Otherwise anyone can sign in as anyone by setting the header themselves.
+
+In the portal, a session that came from the proxy also sends the browser to the
+proxy's logout path on sign-out (`proxyLogoutPath` in the portal environment,
+default `/logout`), so it does not land on a login page that signs straight
+back in.
+
 ## Endpoints
 
 | Method | Path              | Auth   | Purpose                              |
 |--------|-------------------|--------|--------------------------------------|
 | POST   | `/token`          | none   | password grant → `{access_token}`    |
 | GET    | `/demo-login`     | none   | demo credentials, 404 unless `AUTH_DEMO_LOGIN` |
+| GET    | `/proxy-login`    | proxy header | token for the proxy-signed person, 404 unless `AUTH_PROXY_HEADER` |
 | GET    | `/me`             | bearer | claims for the current token         |
 | GET    | `/verify`         | bearer | introspection (`{active, claims}`)   |
 | GET    | `/users`          | admin  | list users                           |

@@ -18,67 +18,73 @@ import { AuthService } from "./auth.service";
   imports: [FormsModule, ButtonComponent, IconComponent],
   template: `
     <div class="login-wrap">
-      <form class="login-card" (ngSubmit)="submit()">
-        <div class="brand">
-          <span class="brand__mark"><pp-icon name="shield" [size]="22" /></span>
-          <div>
-            <h1 class="brand__name">PayProbe</h1>
-            <p class="brand__sub">Sign in to your workspace</p>
+      @if (checkingProxy()) {
+        <p class="login-card checking" role="status">Signing in…</p>
+      } @else {
+        <form class="login-card" (ngSubmit)="submit()">
+          <div class="brand">
+            <span class="brand__mark"
+              ><pp-icon name="shield" [size]="22"
+            /></span>
+            <div>
+              <h1 class="brand__name">PayProbe</h1>
+              <p class="brand__sub">Sign in to your workspace</p>
+            </div>
           </div>
-        </div>
 
-        @if (demo()) {
-          <p class="demo" role="note">
-            <pp-icon name="info" [size]="16" />
-            <span>
-              <strong>Demo workspace.</strong> The sign-in below is filled in
-              for you. Everyone who opens this demo uses the same account and
-              sees the same data.
-            </span>
-          </p>
-        }
+          @if (demo()) {
+            <p class="demo" role="note">
+              <pp-icon name="info" [size]="16" />
+              <span>
+                <strong>Demo workspace.</strong> The sign-in below is filled in
+                for you. Everyone who opens this demo uses the same account and
+                sees the same data.
+              </span>
+            </p>
+          }
 
-        <label class="field">
-          <span class="field__label">Username</span>
-          <input
-            class="field__input"
-            name="username"
-            autocomplete="username"
-            [(ngModel)]="username"
-            [disabled]="loading()"
-            required
-            autofocus
-          />
-        </label>
+          <label class="field">
+            <span class="field__label">Username</span>
+            <input
+              class="field__input"
+              name="username"
+              autocomplete="username"
+              [(ngModel)]="username"
+              [disabled]="loading()"
+              required
+              autofocus
+            />
+          </label>
 
-        <label class="field">
-          <span class="field__label">Password</span>
-          <input
-            class="field__input"
-            name="password"
-            type="password"
-            autocomplete="current-password"
-            [(ngModel)]="password"
-            [disabled]="loading()"
-            required
-          />
-        </label>
+          <label class="field">
+            <span class="field__label">Password</span>
+            <input
+              class="field__input"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              [(ngModel)]="password"
+              [disabled]="loading()"
+              required
+            />
+          </label>
 
-        @if (error()) {
-          <p class="error" role="alert">
-            <pp-icon name="alert-circle" [size]="16" /> {{ error() }}
-          </p>
-        }
+          @if (error()) {
+            <p class="error" role="alert">
+              <pp-icon name="alert-circle" [size]="16" /> {{ error() }}
+            </p>
+          }
 
-        <pp-button
-          type="submit"
-          variant="primary"
-          size="lg"
-          [disabled]="loading() || !username || !password"
-        >
-          {{ loading() ? "Signing in…" : "Sign in" }}
-        </pp-button>
-      </form>
+          <pp-button
+            type="submit"
+            variant="primary"
+            size="lg"
+            [disabled]="loading() || !username || !password"
+          >
+            {{ loading() ? "Signing in…" : "Sign in" }}
+          </pp-button>
+        </form>
+      }
     </div>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -103,6 +109,12 @@ import { AuthService } from "./auth.service";
         border: 1px solid var(--border-subtle);
         border-radius: var(--radius-lg);
         box-shadow: var(--shadow-lg);
+      }
+      .checking {
+        margin: 0;
+        align-items: center;
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
       }
       .brand {
         display: flex;
@@ -204,8 +216,22 @@ export class LoginComponent implements OnInit {
   readonly error = signal<string | null>(null);
   /** On when auth-service publishes a demo account (`AUTH_DEMO_LOGIN`). */
   readonly demo = signal(false);
+  /** On while asking whether an authenticating proxy already signed the
+   *  person in (`AUTH_PROXY_HEADER`); the form waits for the answer. */
+  readonly checkingProxy = signal(true);
 
   ngOnInit(): void {
+    this.auth.proxyLogin().subscribe((signedIn) => {
+      if (signedIn) {
+        this.navigateBack();
+        return;
+      }
+      this.checkingProxy.set(false);
+      this.offerDemoLogin();
+    });
+  }
+
+  private offerDemoLogin(): void {
     this.auth.demoLogin().subscribe((creds) => {
       // Never overwrite what the user already started typing.
       if (!creds || this.username || this.password) return;
@@ -220,11 +246,7 @@ export class LoginComponent implements OnInit {
     this.loading.set(true);
     this.error.set(null);
     this.auth.login(this.username, this.password).subscribe({
-      next: () => {
-        const returnUrl =
-          this.route.snapshot.queryParamMap.get("returnUrl") || "/dashboard";
-        this.router.navigateByUrl(returnUrl);
-      },
+      next: () => this.navigateBack(),
       error: (err) => {
         this.loading.set(false);
         this.error.set(
@@ -234,5 +256,12 @@ export class LoginComponent implements OnInit {
         );
       },
     });
+  }
+
+  /** Where the sign-in was asked for (the guard's `returnUrl`), else home. */
+  private navigateBack(): void {
+    const returnUrl =
+      this.route.snapshot.queryParamMap.get("returnUrl") || "/dashboard";
+    this.router.navigateByUrl(returnUrl);
   }
 }

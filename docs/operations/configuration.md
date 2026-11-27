@@ -30,6 +30,12 @@ verifier (orchestrator, scenario-service) so tokens validate locally.
 | `AUTH_ADMIN_USER` | auth | **admin** | Bootstrap admin username (first start only). |
 | `AUTH_ADMIN_PASSWORD` | auth | dev: **admin**; prod: unset ⇒ no seed user | Bootstrap admin password. |
 | `AUTH_DB` | auth | **/data/auth.db** | SQLite path for the user store. |
+| `AUTH_DEMO_LOGIN` | auth | **unset** (off) | `username:password` the login page pre-fills for a public demo (`GET /demo-login`). |
+| `AUTH_PROXY_HEADER` | auth | **unset** (off) | Sign-in by a trusted front door: the header an authenticating proxy sets (e.g. APISIX openid-connect's `X-Userinfo`). `GET /proxy-login` turns it into a token and the portal signs straight in. Trusted only because the proxy is the only way in — see the [auth-service README](../../packages/auth-service/README.md). |
+| `AUTH_PROXY_HEADER_FORMAT` | auth | **userinfo-base64-json** | `userinfo-base64-json` (base64 of the OIDC userinfo JSON) or `plain` (the value is the username). |
+| `AUTH_PROXY_USERNAME_CLAIMS` | auth | **preferred_username,email,sub** | Userinfo claims tried in order for the username. |
+| `AUTH_PROXY_ROLES` | auth | **operator** | Roles a proxy-signed person gets (a stored user of that name keeps its own). |
+| `AUTH_PROXY_PROJECTS` | auth | **empty** | `project_ids` a proxy-signed person gets (a stored user of that name keeps its own). |
 
 The gate **fails closed**: outside dev, a request with no valid credential gets
 401, and if *no* auth is configured at all the service returns 503 rather than
