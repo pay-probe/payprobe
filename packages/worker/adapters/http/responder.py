@@ -25,7 +25,7 @@ Config (JSON-friendly)::
 
     {
       "protocol": "http",
-      "host": "0.0.0.0", "port": 8080,
+      "host": "0.0.0.0", "port": 8080,  # no host: PAYPROBE_LISTEN_HOST
       "rules": [
         {"when": {"method": "POST", "path": {"prefix": "/payments"},
                   "body": {"amount": {"gte": 1000}}},
@@ -53,6 +53,8 @@ import time
 from typing import Any
 
 from aiohttp import web
+
+from payprobe_common.network import listen_host
 
 from ..tcp.chaos import ChaosEngine
 from .webhooks import WebhookEmitter
@@ -155,8 +157,9 @@ class HttpResponder:
     # -- lifecycle -----------------------------------------------------------
 
     async def start(self) -> int:
-        """Begin listening. Returns the bound port (useful when port=0)."""
-        host = self.config.get("host", "127.0.0.1")
+        """Begin listening. Returns the bound port (useful when port=0). A
+        config that names no host binds ``PAYPROBE_LISTEN_HOST``."""
+        host = self.config.get("host") or listen_host()
         port = int(self.config.get("port", 0))
         self._closed = asyncio.Event()
         self._runner = web.ServerRunner(web.Server(self._handle))

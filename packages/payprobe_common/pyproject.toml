@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 #  - `dev-mode-dirs` makes `pip install -e .` add the parent `packages/` dir to
 #    sys.path via a .pth so `import payprobe_common` resolves to this directory.
 [tool.hatch.build.targets.wheel]
-only-include = ["crypto.py", "agent_toolkit.py", "llm_provider.py", "rest_backend.py", "iso8583", "__init__.py"]
+only-include = ["crypto.py", "agent_toolkit.py", "llm_provider.py", "rest_backend.py", "network.py", "iso8583", "__init__.py"]
 dev-mode-dirs = [".."]
 
 [tool.hatch.build.targets.wheel.sources]

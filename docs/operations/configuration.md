@@ -61,6 +61,18 @@ filesystem reads — run under nsjail/gVisor for fully untrusted multi-tenant co
 | `PAYPROBE_RUN_FIXTURES` | **1** | ADR-0012. On: `POST /runs` accepts `fixtures: {before: [scenario ids], after: [scenario ids]}`; `before` fixtures run once after phase 1 (a failure BLOCKs every scenario and fails the run), `after` fixtures run once after phase 3 in a `finally` (also on cancel) and never change the verdict; outcomes land under `summary.fixtures`, the sign-off report and provenance, never in gate percentages. `0` is the escape hatch: a request naming fixtures is refused with 400 (never silently run without them). |
 | `PAYPROBE_ISO8583_FORMAT_ENCODING` | **1** | ADR-0011. On: a simulator bound to a Message Format also takes the format's wire `encoding` profile (`ascii`, `binary`, or an axis dict: binary bitmap / BCD / EBCDIC / raw binary / BCD or binary length indicators), so a dialect declared binary really binds binary; a legacy `framing.encoding` text codec is dropped from the config, and a format whose encoding disagrees with the config's own is refused with a 400. `0` is the escape hatch: only the DE table and presence matrix bind (pre-ADR posture) and the disagreement is logged, not refused. |
 
+## Listeners
+
+| Variable | Service(s) | Default | Effect |
+|---|---|---|---|
+| `PAYPROBE_LISTEN_HOST` | orchestrator, worker | **127.0.0.1** | Bind address for every listener PayProbe starts (simulators, participant-flow listeners, `python -m worker.responder`) whose config names no host. `127.0.0.1` is reachable from the same machine only; set `0.0.0.0` so clients outside the container can connect. A host named in the config always wins. |
+| `PAYPROBE_ADVERTISED_HOST` | orchestrator | **127.0.0.1** | Host the portal pre-fills when it suggests where to dial a PayProbe listener (the playground's raw target), e.g. the name the deployment publishes the listener ports under. Surfaced under `network` in `/system`. |
+
+Listener ports are not drawn from a range: a listener binds its connection's
+or simulator's fixed `port` (network instances take `port`, `port + 1`, …), or
+an OS-chosen free port when that is `0`/unset. To publish listeners from a
+container, give them fixed ports and publish those.
+
 ## Observability
 
 See [Observability](./observability.md).

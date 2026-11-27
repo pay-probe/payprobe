@@ -13,7 +13,7 @@ The first matching rule wins; otherwise a configurable default applies.
 Config (JSON-friendly)::
 
     {
-      "host": "127.0.0.1", "port": 7000,
+      "host": "127.0.0.1", "port": 7000, # no host: PAYPROBE_LISTEN_HOST
       "protocol": "iso8583",            # or "header_echo"
       "framing": { ... },               # same keys as the adapter
       "fields": { "<de>": {...} },      # DE table (defaults to 1987)
@@ -52,6 +52,8 @@ import logging
 import random
 import time
 from typing import Any
+
+from payprobe_common.network import listen_host
 
 from . import framing, iso8583
 from .chaos import ChaosEngine
@@ -171,8 +173,9 @@ class TcpResponder:
     # -- lifecycle -----------------------------------------------------------
 
     async def start(self) -> int:
-        """Begin listening. Returns the bound port (useful when port=0)."""
-        host = self.config.get("host", "127.0.0.1")
+        """Begin listening. Returns the bound port (useful when port=0). A
+        config that names no host binds ``PAYPROBE_LISTEN_HOST``."""
+        host = self.config.get("host") or listen_host()
         port = int(self.config.get("port", 0))
         self._server = await asyncio.start_server(self._handle, host, port)
         return self._server.sockets[0].getsockname()[1]
