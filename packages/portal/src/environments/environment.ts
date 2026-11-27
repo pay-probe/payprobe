@@ -23,4 +23,8 @@ export const environment = {
   // Agent registry (ADR-0010) — agent principals + workflows. Optional
   // deployment; the Agents page shows a "not reachable" notice without it.
   agentHubApiBase: "http://localhost:8600",
+  // Behind an authenticating proxy (auth-service AUTH_PROXY_HEADER): where
+  // signing out of a proxy-signed session sends the browser, so the proxy
+  // ends its own session too (APISIX openid-connect's default logout_path).
+  proxyLogoutPath: "/logout",
 };

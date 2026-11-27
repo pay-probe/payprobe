@@ -141,6 +141,13 @@ export class RuntimeConfigService {
     return this.baseFor("agent-hub", environment.agentHubApiBase);
   }
 
+  /** Where signing out of a session an authenticating proxy started sends the
+   *  browser (the proxy's logout path), so it does not land back on a login
+   *  page that signs straight in again. */
+  get proxyLogoutPath(): string {
+    return environment.proxyLogoutPath || "/logout";
+  }
+
   /** Build an absolute base from a config's scheme/host/port. */
   baseUrl(cfg: EndpointConfig): string {
     return `${cfg.scheme}://${cfg.host}:${cfg.port}`;

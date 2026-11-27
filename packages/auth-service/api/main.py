@@ -21,15 +21,39 @@ Environment:
                         to anyone by ``GET /demo-login`` (public demos only;
                         unset = off, the endpoint is a 404). It names an
                         existing account; it creates nothing.
+
+Sign-in by a trusted front door (``GET /proxy-login``; off unless
+``AUTH_PROXY_HEADER`` is set):
+    AUTH_PROXY_HEADER          header an authenticating proxy (e.g. APISIX's
+                               openid-connect plugin) sets on every request it
+                               lets through; unset = off, the endpoint is a 404
+    AUTH_PROXY_HEADER_FORMAT   ``userinfo-base64-json`` (default; base64 of the
+                               OIDC userinfo JSON, APISIX's ``X-Userinfo``) or
+                               ``plain`` (the header value is the username)
+    AUTH_PROXY_USERNAME_CLAIMS userinfo claims tried in order for the username
+                               (default: preferred_username,email,sub)
+    AUTH_PROXY_ROLES           roles a proxy-signed person gets (default:
+                               operator); a stored user of the same name keeps
+                               its own roles and project_ids instead
+    AUTH_PROXY_PROJECTS        project_ids a proxy-signed person gets (default:
+                               none)
+
+    The header is trusted only because the proxy is the only way in. Turn this
+    on only when clients cannot reach the portal or this service around the
+    proxy, and the proxy strips any copy of the header a client sends;
+    otherwise anyone can sign in as anyone by setting the header themselves.
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import os
 from contextlib import asynccontextmanager
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, FastAPI, Form, HTTPException, status
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import OAuth2PasswordBearer
@@ -199,6 +223,73 @@ async def demo_login() -> JSONResponse:
     if creds is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "demo login is off")
     return JSONResponse(creds, headers={"Cache-Control": "no-store"})
+
+
+PROXY_HEADER_FORMATS = ("userinfo-base64-json", "plain")
+_DEFAULT_PROXY_CLAIMS = "preferred_username,email,sub"
+
+
+def _csv_env(name: str, default: str) -> list[str]:
+    return [v.strip() for v in os.environ.get(name, default).split(",") if v.strip()]
+
+
+def _proxy_username(raw: str, fmt: str, claims: list[str]) -> str | None:
+    """The username a proxy header names, or ``None`` when it names none."""
+    raw = raw.strip()
+    if fmt == "plain":
+        return raw or None
+    try:
+        # Standard or URL-safe alphabet, padding optional.
+        padded = raw.replace("-", "+").replace("_", "/") + "=" * (-len(raw) % 4)
+        userinfo = json.loads(base64.b64decode(padded, validate=True))
+    except (binascii.Error, ValueError):
+        return None
+    if not isinstance(userinfo, dict):
+        return None
+    for claim in claims:
+        value = userinfo.get(claim)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+@app.get("/proxy-login", response_model=TokenResponse)
+async def proxy_login(request: Request, response: Response) -> TokenResponse:
+    """Sign in the person an authenticating proxy already signed in.
+
+    Off (404) unless ``AUTH_PROXY_HEADER`` is set. The header is trusted only
+    because the proxy is the only way in: the operator must make sure clients
+    cannot reach the portal or this service around it. Issues the same token
+    ``/token`` does; no stored user is needed, but a stored user of that name
+    keeps its own roles and project_ids."""
+    header = os.environ.get("AUTH_PROXY_HEADER", "").strip()
+    if not header:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "proxy login is off")
+    fmt = os.environ.get("AUTH_PROXY_HEADER_FORMAT", "").strip().lower()
+    fmt = fmt or PROXY_HEADER_FORMATS[0]
+    if fmt not in PROXY_HEADER_FORMATS:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"AUTH_PROXY_HEADER_FORMAT must be one of {', '.join(PROXY_HEADER_FORMATS)}",
+        )
+    raw = request.headers.get(header)
+    username = (
+        _proxy_username(raw, fmt, _csv_env("AUTH_PROXY_USERNAME_CLAIMS",
+                                           _DEFAULT_PROXY_CLAIMS))
+        if raw else None
+    )
+    if username is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED,
+                            f"no usable {header} header from the proxy")
+    stored = app.state.store.get(username)
+    if stored is not None:
+        roles, project_ids = stored.roles, stored.project_ids
+    else:
+        roles = _csv_env("AUTH_PROXY_ROLES", "operator")
+        project_ids = _csv_env("AUTH_PROXY_PROJECTS", "")
+    access, ttl = issue_token(username, roles, project_ids)
+    response.headers["Cache-Control"] = "no-store"
+    return TokenResponse(access_token=access, expires_in=ttl)
 
 
 @app.post("/token", response_model=TokenResponse)

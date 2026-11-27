@@ -19,4 +19,8 @@ export const environment = {
   insightApiBase: "/api/insights",
   // Agent registry (ADR-0010), same-origin via nginx.
   agentHubApiBase: "/api/agents",
+  // Behind an authenticating proxy (auth-service AUTH_PROXY_HEADER): where
+  // signing out of a proxy-signed session sends the browser, so the proxy
+  // ends its own session too (APISIX openid-connect's default logout_path).
+  proxyLogoutPath: "/logout",
 };

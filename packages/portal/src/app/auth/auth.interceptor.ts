@@ -8,7 +8,9 @@ import { AuthService } from "./auth.service";
 /**
  * Attaches `Authorization: Bearer <token>` to every outgoing API request and,
  * on a 401, clears the session and bounces to the login page (preserving the
- * attempted URL so we can return there after signing in).
+ * attempted URL so we can return there after signing in). Behind an
+ * authenticating proxy the login page then signs straight back in, so an
+ * expired token never signs the person out of the proxy.
  *
  * The login call itself (`/token`) carries no token, so we skip requests that
  * already set Authorization.
@@ -26,7 +28,7 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
   return next(authed).pipe(
     catchError((err: HttpErrorResponse) => {
       if (err.status === 401 && auth.isAuthenticated()) {
-        auth.logout();
+        auth.clearSession();
         router.navigate(["/login"], {
           queryParams: { returnUrl: router.url },
         });
