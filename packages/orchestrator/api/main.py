@@ -3028,12 +3028,18 @@ class ChaosStormRequest(BaseModel):
     repeat: int = 1
 
 
-def _chaos_capable(sid: str):
-    r = SIMULATORS.get(sid)
+def _chaos_target(sid: str):
+    """The running listener a chaos dial or storm drives: a simulator or a
+    participant flow (both answer through a TcpResponder)."""
+    return SIMULATORS.get(sid) or PARTICIPANTS.get(sid)
+
+
+def _chaos_capable(sid: str, kind: str = "simulator"):
+    r = (PARTICIPANTS if kind == "participant" else SIMULATORS).get(sid)
     if r is None:
-        raise HTTPException(404, f"no simulator '{sid}'")
+        raise HTTPException(404, f"no {kind} '{sid}'")
     if not hasattr(r, "set_chaos"):
-        raise HTTPException(400, f"simulator '{sid}' does not support chaos injection")
+        raise HTTPException(400, f"{kind} '{sid}' does not support chaos injection")
     return r
 
 
@@ -3066,9 +3072,9 @@ async def _run_storm(sid: str, phases: list[ChaosPhase], repeat: int, baseline: 
     try:
         for cycle in range(max(1, repeat)):
             for i, phase in enumerate(phases):
-                r = SIMULATORS.get(sid)
+                r = _chaos_target(sid)
                 if r is None or entry is not CHAOS_STORMS.get(sid):
-                    return  # simulator stopped or storm replaced/cancelled
+                    return  # listener stopped or storm replaced/cancelled
                 r.set_chaos(phase.chaos)
                 entry["state"].update(
                     {
@@ -3087,7 +3093,7 @@ async def _run_storm(sid: str, phases: list[ChaosPhase], repeat: int, baseline: 
         # storm already took over this slot).
         if entry is CHAOS_STORMS.get(sid):
             CHAOS_STORMS.pop(sid, None)
-            r = SIMULATORS.get(sid)
+            r = _chaos_target(sid)
             if r is not None:
                 with contextlib.suppress(Exception):
                     r.set_chaos(baseline)
@@ -3100,44 +3106,31 @@ def _cancel_storm(sid: str, *, restore: bool = True) -> bool:
         return False
     entry["task"].cancel()
     if restore:
-        r = SIMULATORS.get(sid)
+        r = _chaos_target(sid)
         if r is not None:
             with contextlib.suppress(Exception):
                 r.set_chaos(entry["baseline"])
     return True
 
 
-@app.get("/simulators/{sid}/chaos")
-async def get_simulator_chaos(sid: str) -> dict:
-    """The live chaos dial: current global block, fault count, storm status."""
-    r = _chaos_capable(sid)
+def _chaos_view(sid: str, r) -> dict:
     return {
         "id": sid,
-        "label": getattr(r, "_label", sid),
+        "label": getattr(r, "_label", None) or getattr(r, "_flow_name", sid),
         "chaos": dict(getattr(r, "global_chaos", {}) or {}),
         "faults": getattr(r, "faults", 0),
         "storm": _storm_status(sid),
     }
 
 
-@app.put("/simulators/{sid}/chaos")
-async def set_simulator_chaos(sid: str, chaos: dict[str, Any]) -> dict:
-    """Apply a chaos block to a RUNNING simulator — effective on the next
-    reply, no restart. An empty body turns chaos off. Cancels any storm (a
-    manual dial move takes precedence over the scheduled sequence)."""
-    r = _chaos_capable(sid)
+def _apply_chaos(sid: str, r, chaos: dict[str, Any]) -> dict:
     _validate_chaos(chaos)
     _cancel_storm(sid, restore=False)
     applied = r.set_chaos(chaos)
     return {"id": sid, "chaos": applied, "storm": None}
 
 
-@app.post("/simulators/{sid}/chaos/storm", status_code=201)
-async def start_chaos_storm(sid: str, req: ChaosStormRequest) -> dict:
-    """Run a timed chaos sequence against a running simulator: e.g. a 30s
-    full outage, a 2-minute brownout ramp, or N flap cycles. The pre-storm
-    chaos block is restored when the storm ends or is cancelled."""
-    r = _chaos_capable(sid)
+def _start_storm(sid: str, r, req: ChaosStormRequest) -> dict:
     if not req.phases:
         raise HTTPException(400, "storm needs at least one phase")
     for p in req.phases:
@@ -3163,11 +3156,66 @@ async def start_chaos_storm(sid: str, req: ChaosStormRequest) -> dict:
     return {"id": sid, "storm": _storm_status(sid)}
 
 
+@app.get("/simulators/{sid}/chaos")
+async def get_simulator_chaos(sid: str) -> dict:
+    """The live chaos dial: current global block, fault count, storm status."""
+    return _chaos_view(sid, _chaos_capable(sid))
+
+
+@app.put("/simulators/{sid}/chaos")
+async def set_simulator_chaos(sid: str, chaos: dict[str, Any]) -> dict:
+    """Apply a chaos block to a RUNNING simulator — effective on the next
+    reply, no restart. An empty body turns chaos off. Cancels any storm (a
+    manual dial move takes precedence over the scheduled sequence)."""
+    return _apply_chaos(sid, _chaos_capable(sid), chaos)
+
+
+@app.post("/simulators/{sid}/chaos/storm", status_code=201)
+async def start_chaos_storm(sid: str, req: ChaosStormRequest) -> dict:
+    """Run a timed chaos sequence against a running simulator: e.g. a 30s
+    full outage, a 2-minute brownout ramp, or N flap cycles. The pre-storm
+    chaos block is restored when the storm ends or is cancelled."""
+    return _start_storm(sid, _chaos_capable(sid), req)
+
+
 @app.delete("/simulators/{sid}/chaos/storm", status_code=204, response_class=Response)
 async def cancel_chaos_storm(sid: str) -> Response:
     """Cancel a running storm and restore the pre-storm chaos block."""
     if not _cancel_storm(sid, restore=True):
         raise HTTPException(404, f"no storm running on simulator '{sid}'")
+    return Response(status_code=204)
+
+
+# A participant flow answers through the same responder as a simulator, so it
+# takes the same live dial and timed storms: a network run's switch can be made
+# to misbehave without stopping it or touching its saved flow.
+
+
+@app.get("/participants/{pid}/chaos")
+async def get_participant_chaos(pid: str) -> dict:
+    """The live chaos dial of a running participant flow."""
+    return _chaos_view(pid, _chaos_capable(pid, "participant"))
+
+
+@app.put("/participants/{pid}/chaos")
+async def set_participant_chaos(pid: str, chaos: dict[str, Any]) -> dict:
+    """Apply a chaos block to a running participant flow — effective on the
+    next reply, no restart. An empty body turns chaos off; cancels any storm."""
+    return _apply_chaos(pid, _chaos_capable(pid, "participant"), chaos)
+
+
+@app.post("/participants/{pid}/chaos/storm", status_code=201)
+async def start_participant_chaos_storm(pid: str, req: ChaosStormRequest) -> dict:
+    """Run a timed chaos sequence against a running participant flow; its
+    pre-storm chaos block is restored when the storm ends or is cancelled."""
+    return _start_storm(pid, _chaos_capable(pid, "participant"), req)
+
+
+@app.delete("/participants/{pid}/chaos/storm", status_code=204, response_class=Response)
+async def cancel_participant_chaos_storm(pid: str) -> Response:
+    """Cancel a participant flow's running storm and restore its chaos block."""
+    if not _cancel_storm(pid, restore=True):
+        raise HTTPException(404, f"no storm running on participant '{pid}'")
     return Response(status_code=204)
 
 
@@ -4006,6 +4054,7 @@ async def stop_participant(pid: str) -> Response:
     r = PARTICIPANTS.pop(pid, None)
     if r is None:
         raise HTTPException(404, f"no participant '{pid}'")
+    _cancel_storm(pid, restore=False)  # a stopping flow doesn't need its dial back
     await r.stop()
     _persist_runtime()
     return Response(status_code=204)

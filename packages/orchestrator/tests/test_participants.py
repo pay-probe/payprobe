@@ -212,3 +212,48 @@ async def test_start_unknown_flow_is_404(monkeypatch):
     with pytest.raises(HTTPException) as ei:
         await m.start_participant(m.StartParticipant(flow_id="nope"))
     assert ei.value.status_code == 404
+
+
+async def test_a_participant_flow_takes_the_live_chaos_dial_and_storms(monkeypatch):
+    """A running participant flow (a network run's switch, say) is made to
+    misbehave like a simulator: the dial, a timed storm that restores the
+    pre-storm block, cancelling, and an unknown id is a 404."""
+    import asyncio
+
+    import pytest
+    from fastapi import HTTPException
+
+    m.PARTICIPANTS.clear()
+    monkeypatch.setattr(m, "_http_get_json", _fake_get)
+    pid = (await m.start_participant(m.StartParticipant(flow_id="issuer")))["id"]
+    try:
+        assert (await m.get_participant_chaos(pid))["chaos"] == {}
+        await m.set_participant_chaos(pid, {"latency_ms": 10})
+
+        started = await m.start_participant_chaos_storm(
+            pid,
+            m.ChaosStormRequest(phases=[
+                m.ChaosPhase(duration_s=0.15, chaos={"partial_pct": 100}, label="hang up"),
+            ]),
+        )
+        assert started["storm"]["active"]
+        await asyncio.sleep(0.05)
+        assert m.PARTICIPANTS[pid].global_chaos == {"partial_pct": 100}
+        await asyncio.sleep(0.2)
+        assert pid not in m.CHAOS_STORMS
+        assert m.PARTICIPANTS[pid].global_chaos == {"latency_ms": 10}
+
+        await m.start_participant_chaos_storm(
+            pid, m.ChaosStormRequest(phases=[m.ChaosPhase(duration_s=5, chaos={"drop_pct": 100})]),
+        )
+        resp = await m.cancel_participant_chaos_storm(pid)
+        assert resp.status_code == 204
+        assert m.PARTICIPANTS[pid].global_chaos == {"latency_ms": 10}
+
+        with pytest.raises(HTTPException) as exc:
+            await m.start_participant_chaos_storm(
+                "nope", m.ChaosStormRequest(phases=[m.ChaosPhase(duration_s=1, chaos={})]),
+            )
+        assert exc.value.status_code == 404
+    finally:
+        await m.stop_participant(pid)
