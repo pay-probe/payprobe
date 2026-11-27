@@ -16,6 +16,10 @@ import {
   Project,
   TargetSpec,
 } from "../constructor/scenario.models";
+import {
+  DEFAULT_ADVERTISED_HOST,
+  SystemService,
+} from "../settings/system.service";
 import { UiService } from "../shared/ui.service";
 import { BadgeComponent } from "../shared/ui/badge.component";
 import { ButtonComponent } from "../shared/ui/button.component";
@@ -212,7 +216,10 @@ const ISO_SAMPLE = JSON.stringify(
               @if (selected()!.kind === "raw") {
                 <div class="frow">
                   <label
-                    >Host <input [(ngModel)]="rawHost" placeholder="127.0.0.1"
+                    >Host
+                    <input
+                      [(ngModel)]="rawHost"
+                      [placeholder]="advertisedHost()"
                   /></label>
                   <label
                     >Port
@@ -1009,6 +1016,7 @@ export class PlaygroundComponent implements OnInit {
   private readonly scenarioApi = inject(ScenarioApiService);
   private readonly ui = inject(UiService);
   private readonly router = inject(Router);
+  private readonly system = inject(SystemService);
 
   readonly targets = signal<PlaygroundTargets | null>(null);
   readonly formats = signal<MessageFormat[]>([]);
@@ -1034,7 +1042,9 @@ export class PlaygroundComponent implements OnInit {
   readonly result = signal<PlaygroundResult | null>(null);
 
   // raw endpoint form (plain fields — ngModel two-way on signals is overkill here)
-  rawHost = "127.0.0.1";
+  /** Where PayProbe's own listeners are dialed (orchestrator /system). */
+  readonly advertisedHost = signal(DEFAULT_ADVERTISED_HOST);
+  rawHost = DEFAULT_ADVERTISED_HOST;
   rawPort: number | null = null;
   rawProtocol = "iso8583";
 
@@ -1293,6 +1303,11 @@ export class PlaygroundComponent implements OnInit {
 
   ngOnInit(): void {
     this.reload();
+    this.system.advertisedHost().subscribe((host) => {
+      // Never overwrite a host the operator already typed.
+      if (this.rawHost === this.advertisedHost()) this.rawHost = host;
+      this.advertisedHost.set(host);
+    });
     this.scenarioApi.formats("iso8583").subscribe({
       next: (f) => this.formats.set(f),
       error: () => this.formats.set([]),

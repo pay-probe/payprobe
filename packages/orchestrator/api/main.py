@@ -91,6 +91,7 @@ from payprobe_common.crypto import SecretBox as _SecretBox
 from payprobe_common.iso8583 import definition_encoding as _iso_definition_encoding
 from payprobe_common.iso8583 import resolve_encoding as _iso_resolve_encoding
 from payprobe_common.iso8583 import wire_encoding_from_config as _iso_wire_encoding_from_config
+from payprobe_common.network import advertised_host, listen_host
 
 from .run_store import RunStore
 from .schedule_store import ScheduleStore
@@ -3642,7 +3643,7 @@ class CaptureToggle(BaseModel):
 
 
 def _participant_info(pid: str, flow_id: str, r: FlowResponder) -> dict:
-    host = (getattr(r, "config", {}) or {}).get("host", "127.0.0.1")
+    host = (getattr(r, "config", {}) or {}).get("host") or listen_host()
     port = r.port
     topo = getattr(r, "_topology_run", None)
     return {
@@ -3677,8 +3678,9 @@ def _flow_in_running_topology(flow_id: str) -> str | None:
 async def _participant_listen_config(flow: dict, port: int | None) -> dict:
     """Build a FlowResponder config from the flow's inbound connection (protocol
     + framing + listen port). Best-effort: an unknown/absent connection falls
-    back to an ISO 8583 responder on an ephemeral port."""
-    config: dict[str, Any] = {"protocol": "iso8583", "host": "127.0.0.1", "port": port or 0}
+    back to an ISO 8583 responder on an ephemeral port. A connection that names
+    no host binds ``PAYPROBE_LISTEN_HOST``."""
+    config: dict[str, Any] = {"protocol": "iso8583", "host": listen_host(), "port": port or 0}
     conn_name = (flow.get("trigger") or {}).get("connection")
     if conn_name:
         try:
@@ -3690,7 +3692,7 @@ async def _participant_listen_config(flow: dict, port: int | None) -> dict:
                     "description", "host", "port"}
             config = {k: v for k, v in doc.items() if k not in skip}
             config["protocol"] = doc.get("protocol", "iso8583")
-            config["host"] = doc.get("host") or "127.0.0.1"
+            config["host"] = doc.get("host") or listen_host()
             # One port for both directions: an inbound connection binds its
             # ``port``. ``listen_port`` is legacy (folded into port on read).
             config["port"] = port or doc.get("port") or doc.get("listen_port") or 0
@@ -4036,7 +4038,7 @@ def _piece_endpoint(r: Any) -> str | None:
     """Display endpoint for a live responder: ``host:port`` for a bound listener,
     or ``nats:<subjects>[@queue_group]`` for a port-less NATS responder."""
     if getattr(r, "port", None):
-        host = (getattr(r, "config", {}) or {}).get("host", "127.0.0.1")
+        host = (getattr(r, "config", {}) or {}).get("host") or listen_host()
         return f"{host}:{r.port}"
     lst = getattr(r, "listening", None)
     if callable(lst) and lst():
@@ -4122,18 +4124,18 @@ async def _flow_listen_target(flow: dict) -> tuple[str, int | None]:
     """Resolve a flow's inbound (trigger) connection to (host, base listen port).
 
     ``base port`` is ``None`` when the connection has no fixed ``listen_port``
-    (so instances bind ephemeral ports). Best-effort: an unknown connection
-    yields ``("127.0.0.1", None)``."""
+    (so instances bind ephemeral ports). A connection that names no host, or an
+    unknown connection (best-effort), binds ``PAYPROBE_LISTEN_HOST``."""
     conn_name = (flow.get("trigger") or {}).get("connection")
     if not conn_name:
-        return "127.0.0.1", None
+        return listen_host(), None
     try:
         doc = await _http_get_json(f"{SCENARIO_API_URL}/connections/{conn_name}")
     except Exception:  # noqa: BLE001 — best-effort
-        return "127.0.0.1", None
+        return listen_host(), None
     if not isinstance(doc, dict):
-        return "127.0.0.1", None
-    host = doc.get("host") or "127.0.0.1"
+        return listen_host(), None
+    host = doc.get("host") or listen_host()
     base = doc.get("listen_port") or doc.get("port")  # one port; listen_port legacy
     return host, (int(base) if base else None)
 
@@ -7189,6 +7191,12 @@ async def system() -> dict:
             "run_store_durable": getattr(run_store, "durable", False),
             "run_control": type(run_control).__name__,
             "tracing_configured": bool(os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")),
+        },
+        #: where listeners with no host in their config bind, and the host the
+        #: portal pre-fills when it suggests dialing one of them.
+        "network": {
+            "listen_host": listen_host(),
+            "advertised_host": advertised_host(),
         },
         "observability": {
             "metrics": "/metrics",

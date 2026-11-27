@@ -14,6 +14,7 @@ import logging
 import pathlib
 import sys
 
+from payprobe_common.network import listen_host
 from worker.adapters.tcp.responder import TcpResponder
 
 log = logging.getLogger("payprobe.responder")
@@ -44,7 +45,7 @@ async def _serve(config: dict) -> None:
     log.info(
         "Responder (%s) listening on %s:%s",
         config.get("protocol", "iso8583"),
-        config.get("host", "127.0.0.1"),
+        config.get("host") or listen_host(),
         port,
     )
     try:
